@@ -2,7 +2,6 @@ import { StrictMode, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Bot,
-  Check,
   Clipboard,
   Database,
   FileText,
@@ -29,6 +28,7 @@ type AiTool = {
   id: string;
   name: string;
   description: string | null;
+  logo_url: string | null;
   access_url: string | null;
   usage_instructions: string | null;
   status: Status;
@@ -187,7 +187,7 @@ function createBlankRecord(moduleKey: ModuleKey) {
   const base = { status: "ativo" as Status };
 
   if (moduleKey === "ai_tools") {
-    return { name: "", description: "", access_url: "", usage_instructions: "", ...base };
+    return { name: "", description: "", logo_url: "", access_url: "", usage_instructions: "", ...base };
   }
 
   if (moduleKey === "prompt_categories" || moduleKey === "project_types") {
@@ -472,9 +472,12 @@ function App() {
               {filteredRecords.length ? (
                 filteredRecords.map((record) => (
                   <article className="record-row" key={record.id as string}>
-                    <div>
-                      <strong>{getRecordTitle(record)}</strong>
-                      <span>{getRecordSubtitle(record, tables)}</span>
+                    <div className="record-main">
+                      {activeModule === "ai_tools" ? <ToolLogo record={record} /> : null}
+                      <div>
+                        <strong>{getRecordTitle(record)}</strong>
+                        <span>{getRecordSubtitle(record, tables)}</span>
+                      </div>
                     </div>
                     <div className="row-actions">
                       <span className={`status-pill ${String(record.status ?? "ativo")}`}>{String(record.status ?? "ativo")}</span>
@@ -591,6 +594,17 @@ function DynamicForm({
     return (
       <div className="form-grid">
         <Field label="Nome" value={value.name} onChange={(next) => onChange("name", next)} />
+        <SelectField
+          label="Logo sugerida"
+          value={value.logo_url}
+          onChange={(next) => onChange("logo_url", next)}
+          options={[
+            { value: "/ai-tools/chatgpt.png", label: "ChatGPT" },
+            { value: "/ai-tools/claude.png", label: "Claude" },
+            { value: "/ai-tools/notebooklm.png", label: "NotebookLM" },
+          ]}
+        />
+        <Field label="Logo personalizada" value={value.logo_url} onChange={(next) => onChange("logo_url", next)} />
         <Field label="URL de acesso" value={value.access_url} onChange={(next) => onChange("access_url", next)} />
         <TextArea label="Descricao" value={value.description} onChange={(next) => onChange("description", next)} />
         <TextArea label="Instrucoes de uso" value={value.usage_instructions} onChange={(next) => onChange("usage_instructions", next)} />
@@ -703,6 +717,24 @@ function DynamicForm({
       />
       <StatusField value={value.status} onChange={(next) => onChange("status", next)} />
     </div>
+  );
+}
+
+function ToolLogo({ record }: { record: Record<string, unknown> }) {
+  const logoUrl = typeof record.logo_url === "string" ? record.logo_url : "";
+
+  if (!logoUrl) {
+    return (
+      <span className="tool-logo fallback">
+        <Bot size={18} />
+      </span>
+    );
+  }
+
+  return (
+    <span className="tool-logo">
+      <img src={logoUrl} alt="" />
+    </span>
   );
 }
 

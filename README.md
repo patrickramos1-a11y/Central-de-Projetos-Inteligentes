@@ -52,3 +52,13 @@ npm run build
 - Etapas de jornada
 - Vinculos entre etapas e prompts
 - Procedimentos internos
+
+## Logos de ferramentas
+
+As logos iniciais ficam em `public/ai-tools`:
+
+- `/ai-tools/chatgpt.png`
+- `/ai-tools/claude.png`
+- `/ai-tools/notebooklm.png`
+
+O campo `logo_url` da tabela `ai_tools` deve receber um desses caminhos, ou uma URL externa.

@@ -247,6 +247,36 @@ button {
   line-height: 1.3;
 }
 
+.record-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.tool-logo {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid #dfe7e3;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.tool-logo img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+.tool-logo.fallback {
+  color: #0f766e;
+  background: #e7f3ef;
+}
+
 .record-row span {
   display: block;
   margin-top: 5px;
@@ -462,6 +492,10 @@ button {
   .record-row {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .record-main {
+    align-items: flex-start;
   }
 
   .metric-grid,

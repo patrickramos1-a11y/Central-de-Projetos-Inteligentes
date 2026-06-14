@@ -4,11 +4,14 @@ create table if not exists public.ai_tools (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   description text,
+  logo_url text,
   access_url text,
   usage_instructions text,
   status text not null default 'ativo' check (status in ('ativo', 'inativo', 'arquivado')),
   created_at timestamptz not null default now()
 );
+
+alter table public.ai_tools add column if not exists logo_url text;
 
 create table if not exists public.prompt_categories (
   id uuid primary key default gen_random_uuid(),
@@ -146,3 +149,15 @@ create policy "mvp public select procedures" on public.procedures for select to 
 create policy "mvp public insert procedures" on public.procedures for insert to anon with check (true);
 create policy "mvp public update procedures" on public.procedures for update to anon using (true) with check (true);
 create policy "mvp public delete procedures" on public.procedures for delete to anon using (true);
+
+insert into public.ai_tools (name, description, logo_url, access_url, usage_instructions, status)
+select 'ChatGPT', 'Processamento inicial, extracao de dados, consolidacao de informacoes, contexto geral e sumarios.', '/ai-tools/chatgpt.png', 'https://chatgpt.com', 'Use nas etapas de leitura, estruturacao, consolidacao e desenvolvimento inicial.', 'ativo'
+where not exists (select 1 from public.ai_tools where lower(name) = 'chatgpt');
+
+insert into public.ai_tools (name, description, logo_url, access_url, usage_instructions, status)
+select 'Claude', 'Revisao, melhoria, padronizacao e formatacao de textos ja desenvolvidos.', '/ai-tools/claude.png', 'https://claude.ai', 'Use em etapas de revisao, refinamento textual e padronizacao de documentos.', 'ativo'
+where not exists (select 1 from public.ai_tools where lower(name) = 'claude');
+
+insert into public.ai_tools (name, description, logo_url, access_url, usage_instructions, status)
+select 'NotebookLM', 'Geracao de resumos, roteiros de apresentacao, ideias de imagens e materiais visuais baseados nas fontes.', '/ai-tools/notebooklm.png', 'https://notebooklm.google.com', 'Use depois que o documento e as fontes estiverem consolidados.', 'ativo'
+where not exists (select 1 from public.ai_tools where lower(name) = 'notebooklm');
