@@ -62,3 +62,5 @@ As logos iniciais ficam em `public/ai-tools`:
 - `/ai-tools/notebooklm.png`
 
 O campo `logo_url` da tabela `ai_tools` deve receber um desses caminhos, ou uma URL externa.
+
+Se o banco ja tiver sido criado antes da inclusao das logos, execute apenas `supabase/add-ai-tool-logos.sql`.
