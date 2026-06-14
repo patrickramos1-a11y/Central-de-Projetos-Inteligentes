@@ -110,6 +110,39 @@ grant select, insert, update, delete on
   public.procedures
 to anon, authenticated;
 
+drop policy if exists "mvp public select ai_tools" on public.ai_tools;
+drop policy if exists "mvp public insert ai_tools" on public.ai_tools;
+drop policy if exists "mvp public update ai_tools" on public.ai_tools;
+drop policy if exists "mvp public delete ai_tools" on public.ai_tools;
+drop policy if exists "mvp public select prompt_categories" on public.prompt_categories;
+drop policy if exists "mvp public insert prompt_categories" on public.prompt_categories;
+drop policy if exists "mvp public update prompt_categories" on public.prompt_categories;
+drop policy if exists "mvp public delete prompt_categories" on public.prompt_categories;
+drop policy if exists "mvp public select project_types" on public.project_types;
+drop policy if exists "mvp public insert project_types" on public.project_types;
+drop policy if exists "mvp public update project_types" on public.project_types;
+drop policy if exists "mvp public delete project_types" on public.project_types;
+drop policy if exists "mvp public select prompts" on public.prompts;
+drop policy if exists "mvp public insert prompts" on public.prompts;
+drop policy if exists "mvp public update prompts" on public.prompts;
+drop policy if exists "mvp public delete prompts" on public.prompts;
+drop policy if exists "mvp public select journey_templates" on public.journey_templates;
+drop policy if exists "mvp public insert journey_templates" on public.journey_templates;
+drop policy if exists "mvp public update journey_templates" on public.journey_templates;
+drop policy if exists "mvp public delete journey_templates" on public.journey_templates;
+drop policy if exists "mvp public select journey_steps" on public.journey_steps;
+drop policy if exists "mvp public insert journey_steps" on public.journey_steps;
+drop policy if exists "mvp public update journey_steps" on public.journey_steps;
+drop policy if exists "mvp public delete journey_steps" on public.journey_steps;
+drop policy if exists "mvp public select step_prompts" on public.step_prompts;
+drop policy if exists "mvp public insert step_prompts" on public.step_prompts;
+drop policy if exists "mvp public update step_prompts" on public.step_prompts;
+drop policy if exists "mvp public delete step_prompts" on public.step_prompts;
+drop policy if exists "mvp public select procedures" on public.procedures;
+drop policy if exists "mvp public insert procedures" on public.procedures;
+drop policy if exists "mvp public update procedures" on public.procedures;
+drop policy if exists "mvp public delete procedures" on public.procedures;
+
 create policy "mvp public select ai_tools" on public.ai_tools for select to anon using (true);
 create policy "mvp public insert ai_tools" on public.ai_tools for insert to anon with check (true);
 create policy "mvp public update ai_tools" on public.ai_tools for update to anon using (true) with check (true);
