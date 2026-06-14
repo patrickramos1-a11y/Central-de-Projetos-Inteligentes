@@ -2,7 +2,10 @@ import { StrictMode, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Bot,
+  Check,
+  CheckCircle2,
   Clipboard,
+  Copy,
   Database,
   FileText,
   GitBranch,
@@ -10,19 +13,24 @@ import {
   Link2,
   ListChecks,
   Loader2,
+  PanelLeft,
   Pencil,
   Plus,
   RefreshCw,
   Route,
   Save,
   Search,
+  Settings,
   Sparkles,
   Trash2,
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 import "./styles.css";
 
-type Status = "ativo" | "inativo" | "rascunho" | "arquivado";
+type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
+type ProjectStatus = "planejado" | "em_andamento" | "concluido" | "bloqueado" | "arquivado";
+type StepStatus = "pendente" | "em_andamento" | "concluido" | "bloqueado";
+type ViewMode = "projects" | "journey" | "settings";
 
 type AiTool = {
   id: string;
@@ -31,21 +39,21 @@ type AiTool = {
   logo_url: string | null;
   access_url: string | null;
   usage_instructions: string | null;
-  status: Status;
+  status: ConfigStatus;
 };
 
 type PromptCategory = {
   id: string;
   name: string;
   description: string | null;
-  status: Status;
+  status: ConfigStatus;
 };
 
 type ProjectType = {
   id: string;
   name: string;
   description: string | null;
-  status: Status;
+  status: ConfigStatus;
 };
 
 type Prompt = {
@@ -58,7 +66,7 @@ type Prompt = {
   project_type_id: string | null;
   variables: string | null;
   version: string;
-  status: Status;
+  status: ConfigStatus;
 };
 
 type JourneyTemplate = {
@@ -66,7 +74,7 @@ type JourneyTemplate = {
   name: string;
   description: string | null;
   project_type_id: string | null;
-  status: Status;
+  status: ConfigStatus;
 };
 
 type JourneyStep = {
@@ -80,13 +88,16 @@ type JourneyStep = {
   expected_output: string | null;
   checklist: string | null;
   execution_instructions: string | null;
-  status: Status;
+  status: ConfigStatus;
 };
 
 type StepPrompt = {
   id: string;
   journey_step_id: string;
-  prompt_id: string;
+  prompt_id: string | null;
+  title: string | null;
+  content: string | null;
+  ai_tool_id: string | null;
   prompt_order: number;
   usage_notes: string | null;
 };
@@ -99,7 +110,63 @@ type Procedure = {
   category: string | null;
   project_type_id: string | null;
   journey_step_id: string | null;
-  status: Status;
+  status: ConfigStatus;
+};
+
+type Project = {
+  id: string;
+  name: string;
+  company: string | null;
+  responsible: string | null;
+  project_type_id: string | null;
+  journey_template_id: string | null;
+  status: ProjectStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type ProjectStep = {
+  id: string;
+  project_id: string;
+  source_journey_step_id: string | null;
+  name: string;
+  description: string | null;
+  step_order: number;
+  objective: string | null;
+  ai_tool_id: string | null;
+  expected_output: string | null;
+  execution_instructions: string | null;
+  status: StepStatus;
+  notes: string | null;
+};
+
+type ProjectChecklistItem = {
+  id: string;
+  project_step_id: string;
+  label: string;
+  is_done: boolean;
+  item_order: number;
+};
+
+type ProjectStepPrompt = {
+  id: string;
+  project_step_id: string;
+  prompt_id: string | null;
+  title: string;
+  content: string;
+  ai_tool_id: string | null;
+  prompt_order: number;
+  usage_notes: string | null;
+};
+
+type ProjectStepLink = {
+  id: string;
+  project_step_id: string;
+  title: string;
+  url: string;
+  notes: string | null;
+  link_order: number;
 };
 
 type Tables = {
@@ -111,9 +178,14 @@ type Tables = {
   journey_steps: JourneyStep[];
   step_prompts: StepPrompt[];
   procedures: Procedure[];
+  projects: Project[];
+  project_steps: ProjectStep[];
+  project_step_checklist_items: ProjectChecklistItem[];
+  project_step_prompts: ProjectStepPrompt[];
+  project_step_links: ProjectStepLink[];
 };
 
-type ModuleKey =
+type ConfigModuleKey =
   | "ai_tools"
   | "prompt_categories"
   | "prompts"
@@ -136,173 +208,119 @@ const emptyTables: Tables = {
   journey_steps: [],
   step_prompts: [],
   procedures: [],
+  projects: [],
+  project_steps: [],
+  project_step_checklist_items: [],
+  project_step_prompts: [],
+  project_step_links: [],
 };
 
-const modules: Array<{ key: ModuleKey; label: string; icon: typeof Bot; description: string }> = [
+const configModules: Array<{ key: ConfigModuleKey; label: string; icon: typeof Bot; description: string }> = [
   {
     key: "ai_tools",
     label: "Ferramentas de IA",
     icon: Bot,
-    description: "Cadastre ChatGPT, Claude, NotebookLM e outras ferramentas usadas pela equipe.",
+    description: "ChatGPT, Claude, NotebookLM e outras ferramentas usadas pela equipe.",
   },
   {
     key: "prompt_categories",
     label: "Categorias",
     icon: Layers3,
-    description: "Organize os prompts por finalidade, etapa ou area de uso.",
+    description: "Organizacao da biblioteca de prompts por finalidade.",
   },
   {
     key: "prompts",
-    label: "Prompts",
+    label: "Biblioteca de Prompts",
     icon: Clipboard,
-    description: "Crie comandos reutilizaveis com variaveis e ferramenta recomendada.",
+    description: "Prompts reutilizaveis que podem entrar nas etapas dos projetos.",
   },
   {
     key: "project_types",
     label: "Tipos de Projeto",
     icon: FileText,
-    description: "Defina produtos ou tipos de projeto que poderao ter jornadas proprias.",
+    description: "Produtos e tipos de entregaveis da Ramos Engenharia.",
   },
   {
     key: "journey_templates",
-    label: "Jornadas",
+    label: "Templates",
     icon: Route,
-    description: "Monte modelos reutilizaveis de execucao por tipo de projeto.",
+    description: "Estruturas reutilizaveis salvas a partir da pratica.",
   },
   {
     key: "journey_steps",
-    label: "Etapas",
+    label: "Etapas de Template",
     icon: ListChecks,
-    description: "Cadastre etapas, objetivos, checklists, resultados esperados e prompts vinculados.",
+    description: "Etapas padrao usadas ao criar novos projetos.",
   },
   {
     key: "procedures",
     label: "Procedimentos",
     icon: GitBranch,
-    description: "Registre regras internas e instrucoes operacionais da equipe.",
+    description: "Regras internas e instrucoes operacionais.",
   },
 ];
 
-function createBlankRecord(moduleKey: ModuleKey) {
-  const base = { status: "ativo" as Status };
-
-  if (moduleKey === "ai_tools") {
-    return { name: "", description: "", logo_url: "", access_url: "", usage_instructions: "", ...base };
-  }
-
-  if (moduleKey === "prompt_categories" || moduleKey === "project_types") {
-    return { name: "", description: "", ...base };
-  }
-
-  if (moduleKey === "prompts") {
-    return {
-      title: "",
-      short_description: "",
-      content: "",
-      category_id: "",
-      ai_tool_id: "",
-      project_type_id: "",
-      variables: "{{nome_projeto}}, {{tipo_projeto}}",
-      version: "1.0",
-      status: "rascunho" as Status,
-    };
-  }
-
-  if (moduleKey === "journey_templates") {
-    return { name: "", description: "", project_type_id: "", ...base };
-  }
-
-  if (moduleKey === "journey_steps") {
-    return {
-      journey_template_id: "",
-      name: "",
-      description: "",
-      step_order: 1,
-      objective: "",
-      ai_tool_id: "",
-      expected_output: "",
-      checklist: "",
-      execution_instructions: "",
-      ...base,
-    };
-  }
-
-  return {
-    title: "",
-    description: "",
-    content: "",
-    category: "",
-    project_type_id: "",
-    journey_step_id: "",
-    ...base,
-  };
-}
-
 function App() {
-  const [activeModule, setActiveModule] = useState<ModuleKey>("ai_tools");
+  const [view, setView] = useState<ViewMode>("projects");
+  const [activeConfig, setActiveConfig] = useState<ConfigModuleKey>("prompts");
   const [tables, setTables] = useState<Tables>(emptyTables);
-  const [formState, setFormState] = useState<Record<string, unknown>>(createBlankRecord("ai_tools"));
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [notice, setNotice] = useState("Pronto para configurar a Central de Projetos IA.");
-  const [linkForm, setLinkForm] = useState({ journey_step_id: "", prompt_id: "", prompt_order: 1, usage_notes: "" });
+  const [notice, setNotice] = useState("Pronto para conduzir projetos com IA.");
 
-  const activeModuleMeta = modules.find((module) => module.key === activeModule)!;
-
-  const stats = useMemo(
-    () => [
-      { label: "Ferramentas", value: tables.ai_tools.length },
-      { label: "Prompts", value: tables.prompts.length },
-      { label: "Jornadas", value: tables.journey_templates.length },
-      { label: "Etapas", value: tables.journey_steps.length },
-    ],
-    [tables],
+  const selectedProject = tables.projects.find((project) => project.id === selectedProjectId) ?? null;
+  const projectSteps = useMemo(
+    () => tables.project_steps.filter((step) => step.project_id === selectedProjectId).sort(byOrder),
+    [tables.project_steps, selectedProjectId],
   );
+  const selectedStep = projectSteps.find((step) => step.id === selectedStepId) ?? projectSteps[0] ?? null;
 
-  const filteredRecords = useMemo(() => {
-    const records = tables[activeModule] as Array<Record<string, unknown>>;
-    const needle = query.trim().toLowerCase();
+  const stats = useMemo(() => {
+    const activeProjects = tables.projects.filter((project) => project.status !== "arquivado");
+    const doneProjects = tables.projects.filter((project) => project.status === "concluido");
+    const doneSteps = tables.project_steps.filter((step) => step.status === "concluido");
 
-    if (!needle) {
-      return records;
-    }
-
-    return records.filter((record) => JSON.stringify(record).toLowerCase().includes(needle));
-  }, [activeModule, query, tables]);
+    return [
+      { label: "Projetos ativos", value: activeProjects.length },
+      { label: "Prompts", value: tables.prompts.length },
+      { label: "Templates", value: tables.journey_templates.length },
+      { label: "Etapas concluidas", value: doneSteps.length || doneProjects.length },
+    ];
+  }, [tables]);
 
   useEffect(() => {
-    void loadData();
+    void loadAll();
   }, []);
 
   useEffect(() => {
-    setFormState(createBlankRecord(activeModule));
-    setEditingId(null);
-    setQuery("");
-  }, [activeModule]);
+    if (!selectedProjectId && tables.projects.length > 0) {
+      setSelectedProjectId(tables.projects[0].id);
+    }
+  }, [selectedProjectId, tables.projects]);
 
-  async function loadData() {
+  useEffect(() => {
+    if (projectSteps.length > 0 && !projectSteps.some((step) => step.id === selectedStepId)) {
+      setSelectedStepId(projectSteps[0].id);
+    }
+  }, [projectSteps, selectedStepId]);
+
+  async function loadAll() {
     if (!supabase) {
-      setNotice("Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY para conectar o Supabase.");
+      setNotice("Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY para conectar ao banco.");
       return;
     }
 
     setIsLoading(true);
-    const tableNames: Array<keyof Tables> = [
-      "ai_tools",
-      "prompt_categories",
-      "project_types",
-      "prompts",
-      "journey_templates",
-      "journey_steps",
-      "step_prompts",
-      "procedures",
-    ];
-
+    const tableNames = Object.keys(emptyTables) as Array<keyof Tables>;
     const results = await Promise.all(
       tableNames.map(async (tableName) => {
-        const { data, error } = await supabase.from(tableName).select("*").order("created_at", { ascending: false });
-        return { tableName, data, error };
+        const { data, error } = await supabase.from(tableName).select("*").order(getOrderColumn(tableName), {
+          ascending: true,
+        });
+
+        return { tableName, data: data ?? [], error };
       }),
     );
 
@@ -310,96 +328,428 @@ function App() {
     const errors = results.filter((result) => result.error);
 
     results.forEach((result) => {
-      nextTables[result.tableName] = (result.data ?? []) as never;
+      nextTables[result.tableName] = result.data as never;
     });
 
     setTables(nextTables);
     setIsLoading(false);
-    setNotice(
-      errors.length
-        ? "Nao foi possivel carregar todas as tabelas. Confira se o SQL do Supabase foi aplicado."
-        : "Dados sincronizados com o Supabase.",
-    );
+    setNotice(errors.length ? `Algumas tabelas ainda precisam ser criadas no Supabase (${errors.length}).` : "Dados sincronizados.");
   }
 
-  function updateField(field: string, value: string | number) {
-    setFormState((current) => ({ ...current, [field]: value }));
-  }
-
-  function startCreate() {
-    setEditingId(null);
-    setFormState(createBlankRecord(activeModule));
-  }
-
-  function startEdit(record: Record<string, unknown>) {
-    setEditingId(record.id as string);
-    setFormState(
-      Object.fromEntries(
-        Object.entries(record)
-          .filter(([key]) => !["id", "created_at", "updated_at"].includes(key))
-          .map(([key, value]) => [key, value ?? ""]),
-      ),
-    );
-  }
-
-  async function saveRecord() {
-    if (!supabase) {
-      setNotice("Conecte o Supabase antes de salvar.");
+  async function createProject(form: NewProjectFormState) {
+    if (!supabase || !form.name.trim()) {
       return;
     }
 
-    const payload = normalizePayload(formState);
-    const request = editingId
-      ? supabase.from(activeModule).update(payload).eq("id", editingId)
-      : supabase.from(activeModule).insert(payload);
-    const { error } = await request;
+    setIsLoading(true);
+    const { data: project, error } = await supabase
+      .from("projects")
+      .insert(
+        normalizePayload({
+          name: form.name,
+          company: form.company,
+          responsible: form.responsible,
+          project_type_id: form.project_type_id,
+          journey_template_id: form.journey_template_id,
+          status: "em_andamento",
+          notes: form.notes,
+        }),
+      )
+      .select("*")
+      .single();
+
+    if (error || !project) {
+      setNotice(`Nao foi possivel criar o projeto: ${error?.message ?? "erro desconhecido"}`);
+      setIsLoading(false);
+      return;
+    }
+
+    if (form.journey_template_id) {
+      await instantiateTemplate(project as Project, form.journey_template_id);
+    } else {
+      await createProjectStep(project.id, {
+        name: "Primeira etapa",
+        objective: "Defina o objetivo desta etapa e adicione os primeiros prompts.",
+        status: "em_andamento",
+      });
+    }
+
+    await loadAll();
+    setSelectedProjectId(project.id);
+    setView("journey");
+    setNotice("Projeto criado. Agora a jornada pode ser executada e ajustada.");
+    setIsLoading(false);
+  }
+
+  async function instantiateTemplate(project: Project, templateId: string) {
+    if (!supabase) {
+      return;
+    }
+
+    const templateSteps = tables.journey_steps.filter((step) => step.journey_template_id === templateId).sort(byOrder);
+
+    if (templateSteps.length === 0) {
+      await createProjectStep(project.id, {
+        name: "Primeira etapa",
+        objective: "Template sem etapas. Comece configurando a execucao real.",
+        status: "em_andamento",
+      });
+      return;
+    }
+
+    for (const templateStep of templateSteps) {
+      const { data: step } = await supabase
+        .from("project_steps")
+        .insert(
+          normalizePayload({
+            project_id: project.id,
+            source_journey_step_id: templateStep.id,
+            name: templateStep.name,
+            description: templateStep.description,
+            step_order: templateStep.step_order,
+            objective: templateStep.objective,
+            ai_tool_id: templateStep.ai_tool_id,
+            expected_output: templateStep.expected_output,
+            execution_instructions: templateStep.execution_instructions,
+            status: templateStep.step_order === 1 ? "em_andamento" : "pendente",
+          }),
+        )
+        .select("*")
+        .single();
+
+      if (!step) {
+        continue;
+      }
+
+      const checklistRows = splitChecklist(templateStep.checklist).map((label, index) => ({
+        project_step_id: step.id,
+        label,
+        item_order: index + 1,
+      }));
+
+      if (checklistRows.length > 0) {
+        await supabase.from("project_step_checklist_items").insert(checklistRows);
+      }
+
+      const linkedPrompts = tables.step_prompts.filter((link) => link.journey_step_id === templateStep.id).sort(byOrder);
+      const promptRows = linkedPrompts
+        .map((link, index) => {
+          const libraryPrompt = link.prompt_id ? tables.prompts.find((prompt) => prompt.id === link.prompt_id) : null;
+
+          return {
+            project_step_id: step.id,
+            prompt_id: link.prompt_id,
+            title: link.title ?? libraryPrompt?.title ?? "Prompt da etapa",
+            content: link.content ?? libraryPrompt?.content ?? "",
+            ai_tool_id: link.ai_tool_id ?? libraryPrompt?.ai_tool_id ?? templateStep.ai_tool_id,
+            prompt_order: link.prompt_order || index + 1,
+            usage_notes: link.usage_notes,
+          };
+        })
+        .filter((row) => row.content);
+
+      if (promptRows.length > 0) {
+        await supabase.from("project_step_prompts").insert(promptRows);
+      }
+    }
+  }
+
+  async function createProjectStep(projectId: string, payload: Partial<ProjectStep>) {
+    if (!supabase) {
+      return null;
+    }
+
+    const nextOrder =
+      payload.step_order ??
+      Math.max(0, ...tables.project_steps.filter((step) => step.project_id === projectId).map((step) => step.step_order)) + 1;
+
+    const { data, error } = await supabase
+      .from("project_steps")
+      .insert(
+        normalizePayload({
+          project_id: projectId,
+          name: payload.name || "Nova etapa",
+          description: payload.description ?? "",
+          step_order: nextOrder,
+          objective: payload.objective ?? "",
+          ai_tool_id: payload.ai_tool_id ?? "",
+          expected_output: payload.expected_output ?? "",
+          execution_instructions: payload.execution_instructions ?? "",
+          status: payload.status ?? "pendente",
+          notes: payload.notes ?? "",
+        }),
+      )
+      .select("*")
+      .single();
 
     if (error) {
-      setNotice(`Erro ao salvar: ${error.message}`);
-      return;
+      setNotice(`Erro ao criar etapa: ${error.message}`);
+      return null;
     }
 
-    setNotice(editingId ? "Registro atualizado." : "Registro criado.");
-    startCreate();
-    await loadData();
+    return data as ProjectStep;
   }
 
-  async function deleteRecord(id: string) {
-    if (!supabase) {
-      setNotice("Conecte o Supabase antes de excluir.");
-      return;
-    }
-
-    const { error } = await supabase.from(activeModule).delete().eq("id", id);
-    setNotice(error ? `Erro ao excluir: ${error.message}` : "Registro excluido.");
-    await loadData();
-  }
-
-  async function saveStepPrompt() {
-    if (!supabase) {
-      setNotice("Conecte o Supabase antes de vincular prompts.");
-      return;
-    }
-
-    if (!linkForm.journey_step_id || !linkForm.prompt_id) {
-      setNotice("Selecione uma etapa e um prompt para criar o vinculo.");
-      return;
-    }
-
-    const { error } = await supabase.from("step_prompts").insert(normalizePayload(linkForm));
-    setNotice(error ? `Erro ao vincular prompt: ${error.message}` : "Prompt vinculado a etapa.");
-    setLinkForm({ journey_step_id: "", prompt_id: "", prompt_order: 1, usage_notes: "" });
-    await loadData();
-  }
-
-  async function deleteStepPrompt(id: string) {
+  async function updateStep(stepId: string, payload: Partial<ProjectStep>) {
     if (!supabase) {
       return;
     }
 
-    const { error } = await supabase.from("step_prompts").delete().eq("id", id);
-    setNotice(error ? `Erro ao remover vinculo: ${error.message}` : "Vinculo removido.");
-    await loadData();
+    const { error } = await supabase.from("project_steps").update(normalizePayload({ ...payload, updated_at: new Date().toISOString() })).eq("id", stepId);
+
+    if (error) {
+      setNotice(`Erro ao atualizar etapa: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({
+      ...current,
+      project_steps: current.project_steps.map((step) => (step.id === stepId ? { ...step, ...payload } : step)),
+    }));
+  }
+
+  async function updateProject(projectId: string, payload: Partial<Project>) {
+    if (!supabase) {
+      return;
+    }
+
+    const { error } = await supabase.from("projects").update(normalizePayload({ ...payload, updated_at: new Date().toISOString() })).eq("id", projectId);
+
+    if (error) {
+      setNotice(`Erro ao atualizar projeto: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({
+      ...current,
+      projects: current.projects.map((project) => (project.id === projectId ? { ...project, ...payload } : project)),
+    }));
+  }
+
+  async function addChecklistItem(stepId: string, label: string) {
+    if (!supabase || !label.trim()) {
+      return;
+    }
+
+    const currentItems = tables.project_step_checklist_items.filter((item) => item.project_step_id === stepId);
+    const { data, error } = await supabase
+      .from("project_step_checklist_items")
+      .insert({ project_step_id: stepId, label: label.trim(), item_order: currentItems.length + 1 })
+      .select("*")
+      .single();
+
+    if (error) {
+      setNotice(`Erro ao adicionar checklist: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({ ...current, project_step_checklist_items: [...current.project_step_checklist_items, data as ProjectChecklistItem] }));
+  }
+
+  async function toggleChecklistItem(item: ProjectChecklistItem) {
+    if (!supabase) {
+      return;
+    }
+
+    const nextDone = !item.is_done;
+    await supabase.from("project_step_checklist_items").update({ is_done: nextDone }).eq("id", item.id);
+    setTables((current) => ({
+      ...current,
+      project_step_checklist_items: current.project_step_checklist_items.map((row) => (row.id === item.id ? { ...row, is_done: nextDone } : row)),
+    }));
+  }
+
+  async function deleteRecord(tableName: keyof Tables, id: string) {
+    if (!supabase) {
+      return;
+    }
+
+    const { error } = await supabase.from(tableName).delete().eq("id", id);
+
+    if (error) {
+      setNotice(`Erro ao excluir: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({ ...current, [tableName]: current[tableName].filter((record: { id: string }) => record.id !== id) }));
+  }
+
+  async function addExistingPrompt(stepId: string, promptId: string) {
+    if (!supabase || !promptId) {
+      return;
+    }
+
+    const prompt = tables.prompts.find((item) => item.id === promptId);
+
+    if (!prompt) {
+      return;
+    }
+
+    const currentPrompts = tables.project_step_prompts.filter((item) => item.project_step_id === stepId);
+    const { data, error } = await supabase
+      .from("project_step_prompts")
+      .insert({
+        project_step_id: stepId,
+        prompt_id: prompt.id,
+        title: prompt.title,
+        content: prompt.content,
+        ai_tool_id: prompt.ai_tool_id,
+        prompt_order: currentPrompts.length + 1,
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      setNotice(`Erro ao vincular prompt: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({ ...current, project_step_prompts: [...current.project_step_prompts, data as ProjectStepPrompt] }));
+  }
+
+  async function addLocalPrompt(stepId: string, title: string, content: string, aiToolId: string) {
+    if (!supabase || !title.trim() || !content.trim()) {
+      return;
+    }
+
+    const currentPrompts = tables.project_step_prompts.filter((item) => item.project_step_id === stepId);
+    const { data, error } = await supabase
+      .from("project_step_prompts")
+      .insert(
+        normalizePayload({
+          project_step_id: stepId,
+          title: title.trim(),
+          content: content.trim(),
+          ai_tool_id: aiToolId,
+          prompt_order: currentPrompts.length + 1,
+        }),
+      )
+      .select("*")
+      .single();
+
+    if (error) {
+      setNotice(`Erro ao adicionar prompt: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({ ...current, project_step_prompts: [...current.project_step_prompts, data as ProjectStepPrompt] }));
+  }
+
+  async function addStepLink(stepId: string, title: string, url: string) {
+    if (!supabase || !title.trim() || !url.trim()) {
+      return;
+    }
+
+    const currentLinks = tables.project_step_links.filter((item) => item.project_step_id === stepId);
+    const { data, error } = await supabase
+      .from("project_step_links")
+      .insert({ project_step_id: stepId, title: title.trim(), url: url.trim(), link_order: currentLinks.length + 1 })
+      .select("*")
+      .single();
+
+    if (error) {
+      setNotice(`Erro ao adicionar link: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({ ...current, project_step_links: [...current.project_step_links, data as ProjectStepLink] }));
+  }
+
+  async function addNextStep(projectId: string, name: string) {
+    const step = await createProjectStep(projectId, { name: name || "Nova etapa" });
+
+    if (step) {
+      await loadAll();
+      setSelectedStepId(step.id);
+      setNotice("Etapa adicionada a jornada do projeto.");
+    }
+  }
+
+  async function saveProjectAsTemplate(project: Project) {
+    if (!supabase) {
+      return;
+    }
+
+    const templateName = `${project.name} - template`;
+    const { data: template, error } = await supabase
+      .from("journey_templates")
+      .insert(
+        normalizePayload({
+          name: templateName,
+          description: `Criado a partir do projeto ${project.name}.`,
+          project_type_id: project.project_type_id,
+          status: "ativo",
+        }),
+      )
+      .select("*")
+      .single();
+
+    if (error || !template) {
+      setNotice(`Erro ao salvar template: ${error?.message ?? "erro desconhecido"}`);
+      return;
+    }
+
+    const steps = tables.project_steps.filter((step) => step.project_id === project.id).sort(byOrder);
+
+    for (const step of steps) {
+      const checklistText = tables.project_step_checklist_items
+        .filter((item) => item.project_step_id === step.id)
+        .sort(byOrder)
+        .map((item) => item.label)
+        .join("\n");
+
+      const { data: templateStep } = await supabase
+        .from("journey_steps")
+        .insert(
+          normalizePayload({
+            journey_template_id: template.id,
+            name: step.name,
+            description: step.description,
+            step_order: step.step_order,
+            objective: step.objective,
+            ai_tool_id: step.ai_tool_id,
+            expected_output: step.expected_output,
+            checklist: checklistText,
+            execution_instructions: step.execution_instructions,
+            status: "ativo",
+          }),
+        )
+        .select("*")
+        .single();
+
+      if (!templateStep) {
+        continue;
+      }
+
+      const prompts = tables.project_step_prompts.filter((prompt) => prompt.project_step_id === step.id).sort(byOrder);
+      const rows = prompts.map((prompt, index) => ({
+        journey_step_id: templateStep.id,
+        prompt_id: prompt.prompt_id,
+        title: prompt.prompt_id ? null : prompt.title,
+        content: prompt.prompt_id ? null : prompt.content,
+        ai_tool_id: prompt.ai_tool_id,
+        prompt_order: prompt.prompt_order || index + 1,
+        usage_notes: prompt.usage_notes,
+      }));
+
+      if (rows.length > 0) {
+        await supabase.from("step_prompts").insert(rows);
+      }
+    }
+
+    await loadAll();
+    setNotice(`Template "${templateName}" salvo a partir da execucao real.`);
+  }
+
+  async function duplicateProject(project: Project) {
+    await createProject({
+      name: `${project.name} - copia`,
+      company: project.company ?? "",
+      responsible: project.responsible ?? "",
+      project_type_id: project.project_type_id ?? "",
+      journey_template_id: project.journey_template_id ?? "",
+      notes: project.notes ?? "",
+    });
   }
 
   return (
@@ -407,208 +757,760 @@ function App() {
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark">
-            <Sparkles size={18} />
+            <Sparkles size={20} />
           </span>
           <span>Central de Projetos IA</span>
         </div>
 
-        <nav className="nav-list" aria-label="Modulos de cadastro">
-          {modules.map((module) => {
-            const Icon = module.icon;
-            return (
-              <button
-                className={`nav-item ${activeModule === module.key ? "active" : ""}`}
-                key={module.key}
-                onClick={() => setActiveModule(module.key)}
-              >
-                <Icon size={18} />
-                <span>{module.label}</span>
-              </button>
-            );
-          })}
+        <nav className="nav-list">
+          <button className={`nav-item ${view === "projects" || view === "journey" ? "active" : ""}`} onClick={() => setView("projects")}>
+            <PanelLeft size={18} />
+            Projetos
+          </button>
+          <button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")}>
+            <Settings size={18} />
+            Configuracoes
+          </button>
         </nav>
+
+        {view === "settings" && (
+          <div className="subnav">
+            {configModules.map((module) => {
+              const Icon = module.icon;
+
+              return (
+                <button key={module.key} className={`subnav-item ${activeConfig === module.key ? "active" : ""}`} onClick={() => setActiveConfig(module.key)}>
+                  <Icon size={16} />
+                  {module.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </aside>
 
       <main className="workspace">
-        <header className="topbar">
-          <div>
-            <h1>Cadastros configuraveis</h1>
-            <p>Monte ferramentas, prompts, jornadas e etapas antes de executar projetos reais.</p>
-          </div>
-          <button className="ghost-button" onClick={loadData} disabled={isLoading}>
-            {isLoading ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
-            <span>Sincronizar</span>
-          </button>
-        </header>
-
-        <section className="metric-grid" aria-label="Resumo da configuracao">
-          {stats.map((stat) => (
-            <article className="metric-card" key={stat.label}>
-              <span>{stat.label}</span>
-              <strong>{stat.value}</strong>
-            </article>
-          ))}
-        </section>
-
-        <section className={`setup-alert ${hasSupabaseConfig ? "connected" : ""}`}>
-          <Database size={18} />
+        <div className={`setup-alert ${hasSupabaseConfig ? "connected" : ""}`}>
+          {isLoading ? <Loader2 className="spin" size={18} /> : <Database size={18} />}
           <span>{notice}</span>
-        </section>
+          <button className="ghost-button" onClick={() => void loadAll()}>
+            <RefreshCw size={16} />
+            Sincronizar
+          </button>
+        </div>
 
-        <section className="module-layout">
-          <div className="list-panel">
-            <div className="panel-heading">
-              <div>
-                <h2>{activeModuleMeta.label}</h2>
-                <p>{activeModuleMeta.description}</p>
-              </div>
-              <label className="search-field">
-                <Search size={16} />
-                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar" />
-              </label>
-            </div>
+        {view === "projects" && <ProjectsView tables={tables} stats={stats} query={query} setQuery={setQuery} onCreate={createProject} onOpen={(id) => { setSelectedProjectId(id); setView("journey"); }} />}
 
-            <div className="record-list">
-              {filteredRecords.length ? (
-                filteredRecords.map((record) => (
-                  <article className="record-row" key={record.id as string}>
-                    <div className="record-main">
-                      {activeModule === "ai_tools" ? <ToolLogo record={record} /> : null}
-                      <div>
-                        <strong>{getRecordTitle(record)}</strong>
-                        <span>{getRecordSubtitle(record, tables)}</span>
-                      </div>
-                    </div>
-                    <div className="row-actions">
-                      <span className={`status-pill ${String(record.status ?? "ativo")}`}>{String(record.status ?? "ativo")}</span>
-                      <button title="Editar" onClick={() => startEdit(record)}>
-                        <Pencil size={16} />
-                      </button>
-                      <button title="Excluir" onClick={() => deleteRecord(record.id as string)}>
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </article>
-                ))
-              ) : (
-                <div className="empty-state">
-                  <Sparkles size={22} />
-                  <strong>Nenhum registro encontrado</strong>
-                  <span>Crie o primeiro item para comecar a montar a operacao.</span>
-                </div>
-              )}
-            </div>
-          </div>
+        {view === "journey" && selectedProject && selectedStep && (
+          <JourneyView
+            project={selectedProject}
+            steps={projectSteps}
+            selectedStep={selectedStep}
+            selectedStepId={selectedStep.id}
+            tables={tables}
+            onSelectStep={setSelectedStepId}
+            onBack={() => setView("projects")}
+            onUpdateProject={updateProject}
+            onUpdateStep={updateStep}
+            onAddChecklist={addChecklistItem}
+            onToggleChecklist={toggleChecklistItem}
+            onDeleteChecklist={(id) => deleteRecord("project_step_checklist_items", id)}
+            onAddExistingPrompt={addExistingPrompt}
+            onAddLocalPrompt={addLocalPrompt}
+            onDeletePrompt={(id) => deleteRecord("project_step_prompts", id)}
+            onAddLink={addStepLink}
+            onDeleteLink={(id) => deleteRecord("project_step_links", id)}
+            onAddNextStep={addNextStep}
+            onSaveTemplate={saveProjectAsTemplate}
+            onDuplicate={duplicateProject}
+          />
+        )}
 
-          <aside className="form-panel">
-            <div className="form-heading">
-              <h2>{editingId ? "Editar registro" : "Novo registro"}</h2>
-              <button className="icon-button" onClick={startCreate} title="Novo">
-                <Plus size={17} />
-              </button>
-            </div>
+        {view === "journey" && (!selectedProject || !selectedStep) && (
+          <EmptyProjectJourney onBack={() => setView("projects")} />
+        )}
 
-            <DynamicForm
-              moduleKey={activeModule}
-              value={formState}
-              tables={tables}
-              onChange={updateField}
-            />
-
-            <button className="primary-button" onClick={saveRecord}>
-              <Save size={17} />
-              <span>{editingId ? "Salvar alteracoes" : "Criar registro"}</span>
-            </button>
-          </aside>
-        </section>
-
-        <section className="link-panel">
-          <div className="panel-heading">
-            <div>
-              <h2>Vinculos entre etapas e prompts</h2>
-              <p>Uma etapa pode usar varios prompts, e um prompt pode aparecer em varias etapas.</p>
-            </div>
-          </div>
-
-          <div className="link-form">
-            <SelectField
-              label="Etapa"
-              value={linkForm.journey_step_id}
-              onChange={(value) => setLinkForm((current) => ({ ...current, journey_step_id: value }))}
-              options={tables.journey_steps.map((step) => ({ value: step.id, label: `${step.step_order}. ${step.name}` }))}
-            />
-            <SelectField
-              label="Prompt"
-              value={linkForm.prompt_id}
-              onChange={(value) => setLinkForm((current) => ({ ...current, prompt_id: value }))}
-              options={tables.prompts.map((prompt) => ({ value: prompt.id, label: prompt.title }))}
-            />
-            <Field
-              label="Ordem"
-              type="number"
-              value={linkForm.prompt_order}
-              onChange={(value) => setLinkForm((current) => ({ ...current, prompt_order: Number(value) }))}
-            />
-            <Field
-              label="Notas de uso"
-              value={linkForm.usage_notes}
-              onChange={(value) => setLinkForm((current) => ({ ...current, usage_notes: value }))}
-            />
-            <button className="primary-button" onClick={saveStepPrompt}>
-              <Link2 size={17} />
-              <span>Vincular</span>
-            </button>
-          </div>
-
-          <div className="link-list">
-            {tables.step_prompts.map((link) => (
-              <article className="record-row compact" key={link.id}>
-                <div>
-                  <strong>{findName(tables.journey_steps, link.journey_step_id)}</strong>
-                  <span>{findTitle(tables.prompts, link.prompt_id)} · ordem {link.prompt_order}</span>
-                </div>
-                <button title="Remover vinculo" onClick={() => deleteStepPrompt(link.id)}>
-                  <Trash2 size={16} />
-                </button>
-              </article>
-            ))}
-          </div>
-        </section>
+        {view === "settings" && (
+          <SettingsView
+            tables={tables}
+            activeConfig={activeConfig}
+            setActiveConfig={setActiveConfig}
+            query={query}
+            setQuery={setQuery}
+            onRefresh={loadAll}
+            onNotice={setNotice}
+            onTables={setTables}
+          />
+        )}
       </main>
     </div>
   );
 }
 
-function DynamicForm({
+type NewProjectFormState = {
+  name: string;
+  company: string;
+  responsible: string;
+  project_type_id: string;
+  journey_template_id: string;
+  notes: string;
+};
+
+function ProjectsView({
+  tables,
+  stats,
+  query,
+  setQuery,
+  onCreate,
+  onOpen,
+}: {
+  tables: Tables;
+  stats: Array<{ label: string; value: number }>;
+  query: string;
+  setQuery: (query: string) => void;
+  onCreate: (form: NewProjectFormState) => void;
+  onOpen: (id: string) => void;
+}) {
+  const [showForm, setShowForm] = useState(false);
+  const filteredProjects = tables.projects
+    .filter((project) => normalizeSearch(project.name, project.company, project.responsible).includes(query.toLowerCase()))
+    .sort((a, b) => new Date(b.updated_at ?? b.created_at).getTime() - new Date(a.updated_at ?? a.created_at).getTime());
+
+  return (
+    <>
+      <section className="topbar">
+        <div>
+          <h1>Projetos</h1>
+          <p>Crie uma execucao real, conduza as etapas e salve o que funcionar como template.</p>
+        </div>
+        <button className="primary-button" onClick={() => setShowForm((current) => !current)}>
+          <Plus size={17} />
+          Novo projeto
+        </button>
+      </section>
+
+      <section className="metric-grid">
+        {stats.map((stat) => (
+          <article className="metric-card" key={stat.label}>
+            <span>{stat.label}</span>
+            <strong>{stat.value}</strong>
+          </article>
+        ))}
+      </section>
+
+      {showForm && <NewProjectPanel tables={tables} onCreate={onCreate} />}
+
+      <section className="list-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Projetos reais</h2>
+            <p>Abra um projeto para executar a jornada, copiar prompts e marcar entregas.</p>
+          </div>
+          <label className="search-field">
+            <Search size={16} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar projeto" />
+          </label>
+        </div>
+
+        <div className="project-grid">
+          {filteredProjects.map((project) => {
+            const steps = tables.project_steps.filter((step) => step.project_id === project.id);
+            const done = steps.filter((step) => step.status === "concluido").length;
+            const progress = steps.length ? Math.round((done / steps.length) * 100) : 0;
+
+            return (
+              <button className="project-card" key={project.id} onClick={() => onOpen(project.id)}>
+                <div className="project-card-head">
+                  <strong>{project.name}</strong>
+                  <StatusPill status={project.status} />
+                </div>
+                <span>{project.company || "Sem empresa definida"}</span>
+                <div className="progress-bar">
+                  <span style={{ width: `${progress}%` }} />
+                </div>
+                <small>
+                  {progress}% concluido - {steps.length} etapas
+                </small>
+              </button>
+            );
+          })}
+        </div>
+
+        {filteredProjects.length === 0 && (
+          <div className="empty-state">
+            <FileText size={34} />
+            <strong>Nenhum projeto encontrado</strong>
+            <span>Crie o primeiro projeto para iniciar uma jornada executavel.</span>
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
+function NewProjectPanel({ tables, onCreate }: { tables: Tables; onCreate: (form: NewProjectFormState) => void }) {
+  const [form, setForm] = useState<NewProjectFormState>({
+    name: "",
+    company: "",
+    responsible: "",
+    project_type_id: "",
+    journey_template_id: "",
+    notes: "",
+  });
+
+  return (
+    <section className="form-panel inline-panel">
+      <div className="form-heading">
+        <div>
+          <h2>Criar projeto</h2>
+          <p>Escolha um template salvo ou comece vazio e construa a jornada na pratica.</p>
+        </div>
+        <button className="primary-button" onClick={() => onCreate(form)}>
+          <Save size={16} />
+          Criar jornada
+        </button>
+      </div>
+      <div className="form-grid">
+        <Field label="Nome do projeto" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
+        <Field label="Empresa / cliente" value={form.company} onChange={(value) => setForm({ ...form, company: value })} />
+        <Field label="Responsavel" value={form.responsible} onChange={(value) => setForm({ ...form, responsible: value })} />
+        <SelectField label="Tipo de projeto" value={form.project_type_id} onChange={(value) => setForm({ ...form, project_type_id: value })} options={tables.project_types.map(toOption)} />
+        <SelectField
+          label="Template"
+          value={form.journey_template_id}
+          onChange={(value) => setForm({ ...form, journey_template_id: value })}
+          options={tables.journey_templates.map(toOption)}
+          emptyLabel="Comecar vazio"
+        />
+        <TextArea label="Observacoes iniciais" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
+      </div>
+    </section>
+  );
+}
+
+function JourneyView({
+  project,
+  steps,
+  selectedStep,
+  tables,
+  onSelectStep,
+  onBack,
+  onUpdateProject,
+  onUpdateStep,
+  onAddChecklist,
+  onToggleChecklist,
+  onDeleteChecklist,
+  onAddExistingPrompt,
+  onAddLocalPrompt,
+  onDeletePrompt,
+  onAddLink,
+  onDeleteLink,
+  onAddNextStep,
+  onSaveTemplate,
+  onDuplicate,
+}: {
+  project: Project;
+  steps: ProjectStep[];
+  selectedStep: ProjectStep;
+  selectedStepId: string;
+  tables: Tables;
+  onSelectStep: (id: string) => void;
+  onBack: () => void;
+  onUpdateProject: (projectId: string, payload: Partial<Project>) => void;
+  onUpdateStep: (stepId: string, payload: Partial<ProjectStep>) => void;
+  onAddChecklist: (stepId: string, label: string) => void;
+  onToggleChecklist: (item: ProjectChecklistItem) => void;
+  onDeleteChecklist: (id: string) => void;
+  onAddExistingPrompt: (stepId: string, promptId: string) => void;
+  onAddLocalPrompt: (stepId: string, title: string, content: string, aiToolId: string) => void;
+  onDeletePrompt: (id: string) => void;
+  onAddLink: (stepId: string, title: string, url: string) => void;
+  onDeleteLink: (id: string) => void;
+  onAddNextStep: (projectId: string, name: string) => void;
+  onSaveTemplate: (project: Project) => void;
+  onDuplicate: (project: Project) => void;
+}) {
+  const doneSteps = steps.filter((step) => step.status === "concluido").length;
+  const progress = steps.length ? Math.round((doneSteps / steps.length) * 100) : 0;
+  const checklist = tables.project_step_checklist_items.filter((item) => item.project_step_id === selectedStep.id).sort(byOrder);
+  const prompts = tables.project_step_prompts.filter((prompt) => prompt.project_step_id === selectedStep.id).sort(byOrder);
+  const links = tables.project_step_links.filter((link) => link.project_step_id === selectedStep.id).sort(byOrder);
+
+  return (
+    <>
+      <section className="journey-header">
+        <button className="ghost-button" onClick={onBack}>
+          <PanelLeft size={16} />
+          Projetos
+        </button>
+        <div className="journey-title">
+          <h1>{project.name}</h1>
+          <p>{project.company || "Projeto sem empresa definida"}</p>
+        </div>
+        <div className="journey-progress">
+          <strong>{progress}%</strong>
+          <div className="progress-bar">
+            <span style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+      </section>
+
+      <section className="journey-layout">
+        <aside className="step-rail">
+          <div className="rail-heading">
+            <strong>Etapas</strong>
+            <span>{doneSteps} concluidas</span>
+          </div>
+          {steps.map((step) => (
+            <button key={step.id} className={`step-item ${selectedStep.id === step.id ? "active" : ""}`} onClick={() => onSelectStep(step.id)}>
+              <span className={`step-dot ${step.status}`}>
+                {step.status === "concluido" ? <Check size={13} /> : step.step_order}
+              </span>
+              <span>
+                <strong>{step.name}</strong>
+                <small>{formatStepStatus(step.status)}</small>
+              </span>
+            </button>
+          ))}
+        </aside>
+
+        <section className="work-surface">
+          <div className="work-heading">
+            <div>
+              <span className="eyebrow">Etapa selecionada</span>
+              <InlineText defaultValue={selectedStep.name} className="inline-title" onSave={(value) => onUpdateStep(selectedStep.id, { name: value })} />
+            </div>
+            <div className="status-actions">
+              {(["pendente", "em_andamento", "concluido", "bloqueado"] as StepStatus[]).map((status) => (
+                <button key={status} className={`chip ${selectedStep.status === status ? "active" : ""}`} onClick={() => onUpdateStep(selectedStep.id, { status })}>
+                  {formatStepStatus(status)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="editor-grid">
+            <TextArea label="Objetivo da etapa" value={selectedStep.objective} onChange={() => undefined} onBlur={(value) => onUpdateStep(selectedStep.id, { objective: value })} />
+            <TextArea label="Instrucoes de execucao" value={selectedStep.execution_instructions} onChange={() => undefined} onBlur={(value) => onUpdateStep(selectedStep.id, { execution_instructions: value })} />
+            <TextArea label="Resultado esperado" value={selectedStep.expected_output} onChange={() => undefined} onBlur={(value) => onUpdateStep(selectedStep.id, { expected_output: value })} />
+            <TextArea label="Observacoes da execucao" value={selectedStep.notes} onChange={() => undefined} onBlur={(value) => onUpdateStep(selectedStep.id, { notes: value })} />
+          </div>
+
+          <ChecklistPanel items={checklist} onAdd={(label) => onAddChecklist(selectedStep.id, label)} onToggle={onToggleChecklist} onDelete={onDeleteChecklist} />
+          <PromptsPanel tables={tables} prompts={prompts} stepId={selectedStep.id} onAddExisting={onAddExistingPrompt} onAddLocal={onAddLocalPrompt} onDelete={onDeletePrompt} />
+          <LinksPanel links={links} onAdd={(title, url) => onAddLink(selectedStep.id, title, url)} onDelete={onDeleteLink} />
+        </section>
+
+        <aside className="action-panel">
+          <QuickAddStep onAdd={(name) => onAddNextStep(project.id, name)} />
+          <button className="action-button" onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}>
+            <CheckCircle2 size={18} />
+            Concluir etapa
+          </button>
+          <button className="action-button" onClick={() => onSaveTemplate(project)}>
+            <Save size={18} />
+            Salvar como template
+          </button>
+          <button className="action-button" onClick={() => onDuplicate(project)}>
+            <Copy size={18} />
+            Duplicar projeto
+          </button>
+          <SelectField
+            label="Status do projeto"
+            value={project.status}
+            onChange={(value) => onUpdateProject(project.id, { status: value as ProjectStatus })}
+            options={[
+              { value: "planejado", label: "Planejado" },
+              { value: "em_andamento", label: "Em andamento" },
+              { value: "concluido", label: "Concluido" },
+              { value: "bloqueado", label: "Bloqueado" },
+              { value: "arquivado", label: "Arquivado" },
+            ]}
+          />
+        </aside>
+      </section>
+    </>
+  );
+}
+
+function ChecklistPanel({
+  items,
+  onAdd,
+  onToggle,
+  onDelete,
+}: {
+  items: ProjectChecklistItem[];
+  onAdd: (label: string) => void;
+  onToggle: (item: ProjectChecklistItem) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [label, setLabel] = useState("");
+
+  return (
+    <section className="work-block">
+      <div className="block-heading">
+        <h2>Checklist</h2>
+        <form
+          className="inline-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onAdd(label);
+            setLabel("");
+          }}
+        >
+          <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Adicionar item" />
+          <button className="icon-button" type="submit">
+            <Plus size={16} />
+          </button>
+        </form>
+      </div>
+
+      <div className="checklist">
+        {items.map((item) => (
+          <div className="check-row" key={item.id}>
+            <button className={`checkbox ${item.is_done ? "checked" : ""}`} onClick={() => onToggle(item)}>
+              {item.is_done && <Check size={14} />}
+            </button>
+            <span>{item.label}</span>
+            <button className="icon-button subtle" onClick={() => onDelete(item.id)}>
+              <Trash2 size={15} />
+            </button>
+          </div>
+        ))}
+        {items.length === 0 && <span className="muted">Nenhum checklist nesta etapa.</span>}
+      </div>
+    </section>
+  );
+}
+
+function PromptsPanel({
+  tables,
+  prompts,
+  stepId,
+  onAddExisting,
+  onAddLocal,
+  onDelete,
+}: {
+  tables: Tables;
+  prompts: ProjectStepPrompt[];
+  stepId: string;
+  onAddExisting: (stepId: string, promptId: string) => void;
+  onAddLocal: (stepId: string, title: string, content: string, aiToolId: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [promptId, setPromptId] = useState("");
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [aiToolId, setAiToolId] = useState("");
+
+  return (
+    <section className="work-block">
+      <div className="block-heading">
+        <h2>Prompts da etapa</h2>
+        <div className="inline-form">
+          <select value={promptId} onChange={(event) => setPromptId(event.target.value)}>
+            <option value="">Buscar na biblioteca</option>
+            {tables.prompts.map((prompt) => (
+              <option key={prompt.id} value={prompt.id}>
+                {prompt.title}
+              </option>
+            ))}
+          </select>
+          <button className="icon-button" onClick={() => { onAddExisting(stepId, promptId); setPromptId(""); }}>
+            <Plus size={16} />
+          </button>
+        </div>
+      </div>
+
+      <div className="prompt-list">
+        {prompts.map((prompt) => (
+          <article className="prompt-card" key={prompt.id}>
+            <div>
+              <strong>{prompt.title}</strong>
+              <span>{findName(tables.ai_tools, prompt.ai_tool_id) || "Ferramenta livre"}</span>
+            </div>
+            <pre>{prompt.content}</pre>
+            <div className="row-actions">
+              <button onClick={() => void copyText(prompt.content)}>
+                <Copy size={16} />
+              </button>
+              <button onClick={() => onDelete(prompt.id)}>
+                <Trash2 size={16} />
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <div className="local-prompt-form">
+        <Field label="Prompt rapido da etapa" value={title} onChange={setTitle} />
+        <SelectField label="Ferramenta" value={aiToolId} onChange={setAiToolId} options={tables.ai_tools.map(toOption)} />
+        <TextArea label="Conteudo" value={content} onChange={setContent} rows={5} />
+        <button
+          className="secondary-button"
+          onClick={() => {
+            onAddLocal(stepId, title, content, aiToolId);
+            setTitle("");
+            setContent("");
+            setAiToolId("");
+          }}
+        >
+          <Plus size={16} />
+          Adicionar prompt local
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function LinksPanel({ links, onAdd, onDelete }: { links: ProjectStepLink[]; onAdd: (title: string, url: string) => void; onDelete: (id: string) => void }) {
+  const [title, setTitle] = useState("");
+  const [url, setUrl] = useState("");
+
+  return (
+    <section className="work-block">
+      <div className="block-heading">
+        <h2>Materiais e links</h2>
+        <form
+          className="inline-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onAdd(title, url);
+            setTitle("");
+            setUrl("");
+          }}
+        >
+          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Nome" />
+          <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://" />
+          <button className="icon-button" type="submit">
+            <Plus size={16} />
+          </button>
+        </form>
+      </div>
+      <div className="link-list">
+        {links.map((link) => (
+          <div className="record-row compact" key={link.id}>
+            <div>
+              <strong>{link.title}</strong>
+              <span>{link.url}</span>
+            </div>
+            <button onClick={() => onDelete(link.id)}>
+              <Trash2 size={15} />
+            </button>
+          </div>
+        ))}
+        {links.length === 0 && <span className="muted">Nenhum material vinculado.</span>}
+      </div>
+    </section>
+  );
+}
+
+function QuickAddStep({ onAdd }: { onAdd: (name: string) => void }) {
+  const [name, setName] = useState("");
+
+  return (
+    <form
+      className="quick-add"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onAdd(name);
+        setName("");
+      }}
+    >
+      <Field label="Adicionar proxima etapa" value={name} onChange={setName} />
+      <button className="primary-button" type="submit">
+        <Plus size={16} />
+        Adicionar etapa
+      </button>
+    </form>
+  );
+}
+
+function SettingsView({
+  tables,
+  activeConfig,
+  query,
+  setQuery,
+  onRefresh,
+  onNotice,
+  onTables,
+}: {
+  tables: Tables;
+  activeConfig: ConfigModuleKey;
+  setActiveConfig: (key: ConfigModuleKey) => void;
+  query: string;
+  setQuery: (query: string) => void;
+  onRefresh: () => void;
+  onNotice: (notice: string) => void;
+  onTables: (updater: (current: Tables) => Tables) => void;
+}) {
+  const module = configModules.find((item) => item.key === activeConfig)!;
+
+  return (
+    <>
+      <section className="topbar">
+        <div>
+          <h1>Configuracoes</h1>
+          <p>Cadastros de apoio para alimentar a execucao dos projetos.</p>
+        </div>
+      </section>
+      <ConfigCrud module={module} tables={tables} query={query} setQuery={setQuery} onRefresh={onRefresh} onNotice={onNotice} onTables={onTables} />
+    </>
+  );
+}
+
+function ConfigCrud({
+  module,
+  tables,
+  query,
+  setQuery,
+  onRefresh,
+  onNotice,
+  onTables,
+}: {
+  module: { key: ConfigModuleKey; label: string; icon: typeof Bot; description: string };
+  tables: Tables;
+  query: string;
+  setQuery: (query: string) => void;
+  onRefresh: () => void;
+  onNotice: (notice: string) => void;
+  onTables: (updater: (current: Tables) => Tables) => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formState, setFormState] = useState<Record<string, unknown>>(createBlankConfig(module.key));
+  const records = (tables[module.key] as Array<Record<string, unknown>>).filter((record) => normalizeSearch(record.name, record.title, record.description).includes(query.toLowerCase()));
+  const Icon = module.icon;
+
+  useEffect(() => {
+    setEditingId(null);
+    setFormState(createBlankConfig(module.key));
+  }, [module.key]);
+
+  async function saveConfig() {
+    if (!supabase) {
+      return;
+    }
+
+    const payload = normalizePayload(formState);
+    const request = editingId ? supabase.from(module.key).update(payload).eq("id", editingId) : supabase.from(module.key).insert(payload);
+    const { error } = await request;
+
+    if (error) {
+      onNotice(`Erro ao salvar ${module.label}: ${error.message}`);
+      return;
+    }
+
+    onNotice(editingId ? "Registro atualizado." : "Registro criado.");
+    setEditingId(null);
+    setFormState(createBlankConfig(module.key));
+    onRefresh();
+  }
+
+  async function removeConfig(id: string) {
+    if (!supabase) {
+      return;
+    }
+
+    const { error } = await supabase.from(module.key).delete().eq("id", id);
+
+    if (error) {
+      onNotice(`Erro ao excluir: ${error.message}`);
+      return;
+    }
+
+    onTables((current) => ({ ...current, [module.key]: (current[module.key] as Array<{ id: string }>).filter((record) => record.id !== id) }));
+  }
+
+  function editConfig(record: Record<string, unknown>) {
+    setEditingId(String(record.id));
+    setFormState(record);
+  }
+
+  return (
+    <section className="module-layout">
+      <div className="list-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>
+              <Icon size={18} /> {module.label}
+            </h2>
+            <p>{module.description}</p>
+          </div>
+          <label className="search-field">
+            <Search size={16} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar" />
+          </label>
+        </div>
+
+        <div className="record-list">
+          {records.map((record) => (
+            <div className="record-row" key={String(record.id)}>
+              <div className="record-main">
+                {module.key === "ai_tools" && <ToolLogo record={record} />}
+                <div>
+                  <strong>{getRecordTitle(record)}</strong>
+                  <span>{getRecordSubtitle(record, tables)}</span>
+                </div>
+              </div>
+              <div className="row-actions">
+                <StatusPill status={String(record.status ?? "ativo")} />
+                <button onClick={() => editConfig(record)}>
+                  <Pencil size={16} />
+                </button>
+                <button onClick={() => void removeConfig(String(record.id))}>
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {records.length === 0 && (
+          <div className="empty-state">
+            <Icon size={34} />
+            <strong>Nenhum registro</strong>
+            <span>Use o formulario lateral para cadastrar.</span>
+          </div>
+        )}
+      </div>
+
+      <aside className="form-panel">
+        <div className="form-heading">
+          <div>
+            <h2>{editingId ? "Editar" : "Novo cadastro"}</h2>
+            <p>{module.label}</p>
+          </div>
+          <button className="primary-button" onClick={() => void saveConfig()}>
+            <Save size={16} />
+            Salvar
+          </button>
+        </div>
+        <ConfigForm moduleKey={module.key} value={formState} tables={tables} onChange={(key, value) => setFormState((current) => ({ ...current, [key]: value }))} />
+      </aside>
+    </section>
+  );
+}
+
+function ConfigForm({
   moduleKey,
   value,
   tables,
   onChange,
 }: {
-  moduleKey: ModuleKey;
+  moduleKey: ConfigModuleKey;
   value: Record<string, unknown>;
   tables: Tables;
-  onChange: (field: string, value: string | number) => void;
+  onChange: (key: string, value: unknown) => void;
 }) {
   if (moduleKey === "ai_tools") {
     return (
       <div className="form-grid">
         <Field label="Nome" value={value.name} onChange={(next) => onChange("name", next)} />
-        <SelectField
-          label="Logo sugerida"
-          value={value.logo_url}
-          onChange={(next) => onChange("logo_url", next)}
-          options={[
-            { value: "/ai-tools/chatgpt.png", label: "ChatGPT" },
-            { value: "/ai-tools/claude.png", label: "Claude" },
-            { value: "/ai-tools/notebooklm.png", label: "NotebookLM" },
-          ]}
-        />
-        <Field label="Logo personalizada" value={value.logo_url} onChange={(next) => onChange("logo_url", next)} />
-        <Field label="URL de acesso" value={value.access_url} onChange={(next) => onChange("access_url", next)} />
         <TextArea label="Descricao" value={value.description} onChange={(next) => onChange("description", next)} />
-        <TextArea label="Instrucoes de uso" value={value.usage_instructions} onChange={(next) => onChange("usage_instructions", next)} />
-        <StatusField value={value.status} onChange={(next) => onChange("status", next)} />
+        <Field label="Logo URL" value={value.logo_url} onChange={(next) => onChange("logo_url", next)} />
+        <Field label="URL de acesso" value={value.access_url} onChange={(next) => onChange("access_url", next)} />
+        <TextArea label="Como usar" value={value.usage_instructions} onChange={(next) => onChange("usage_instructions", next)} />
+        <ConfigStatusField value={value.status} onChange={(next) => onChange("status", next)} />
       </div>
     );
   }
@@ -618,7 +1520,7 @@ function DynamicForm({
       <div className="form-grid">
         <Field label="Nome" value={value.name} onChange={(next) => onChange("name", next)} />
         <TextArea label="Descricao" value={value.description} onChange={(next) => onChange("description", next)} />
-        <StatusField value={value.status} onChange={(next) => onChange("status", next)} />
+        <ConfigStatusField value={value.status} onChange={(next) => onChange("status", next)} />
       </div>
     );
   }
@@ -631,25 +1533,10 @@ function DynamicForm({
         <TextArea label="Conteudo do prompt" value={value.content} onChange={(next) => onChange("content", next)} rows={7} />
         <Field label="Variaveis" value={value.variables} onChange={(next) => onChange("variables", next)} />
         <Field label="Versao" value={value.version} onChange={(next) => onChange("version", next)} />
-        <SelectField
-          label="Categoria"
-          value={value.category_id}
-          onChange={(next) => onChange("category_id", next)}
-          options={tables.prompt_categories.map((item) => ({ value: item.id, label: item.name }))}
-        />
-        <SelectField
-          label="Ferramenta"
-          value={value.ai_tool_id}
-          onChange={(next) => onChange("ai_tool_id", next)}
-          options={tables.ai_tools.map((item) => ({ value: item.id, label: item.name }))}
-        />
-        <SelectField
-          label="Tipo de projeto"
-          value={value.project_type_id}
-          onChange={(next) => onChange("project_type_id", next)}
-          options={tables.project_types.map((item) => ({ value: item.id, label: item.name }))}
-        />
-        <StatusField value={value.status} onChange={(next) => onChange("status", next)} includeDraft />
+        <SelectField label="Categoria" value={value.category_id} onChange={(next) => onChange("category_id", next)} options={tables.prompt_categories.map(toOption)} />
+        <SelectField label="Ferramenta" value={value.ai_tool_id} onChange={(next) => onChange("ai_tool_id", next)} options={tables.ai_tools.map(toOption)} />
+        <SelectField label="Tipo de projeto" value={value.project_type_id} onChange={(next) => onChange("project_type_id", next)} options={tables.project_types.map(toOption)} />
+        <ConfigStatusField value={value.status} onChange={(next) => onChange("status", next)} includeDraft />
       </div>
     );
   }
@@ -657,15 +1544,10 @@ function DynamicForm({
   if (moduleKey === "journey_templates") {
     return (
       <div className="form-grid">
-        <Field label="Nome da jornada" value={value.name} onChange={(next) => onChange("name", next)} />
+        <Field label="Nome do template" value={value.name} onChange={(next) => onChange("name", next)} />
         <TextArea label="Descricao" value={value.description} onChange={(next) => onChange("description", next)} />
-        <SelectField
-          label="Tipo de projeto"
-          value={value.project_type_id}
-          onChange={(next) => onChange("project_type_id", next)}
-          options={tables.project_types.map((item) => ({ value: item.id, label: item.name }))}
-        />
-        <StatusField value={value.status} onChange={(next) => onChange("status", next)} />
+        <SelectField label="Tipo de projeto" value={value.project_type_id} onChange={(next) => onChange("project_type_id", next)} options={tables.project_types.map(toOption)} />
+        <ConfigStatusField value={value.status} onChange={(next) => onChange("status", next)} />
       </div>
     );
   }
@@ -673,26 +1555,15 @@ function DynamicForm({
   if (moduleKey === "journey_steps") {
     return (
       <div className="form-grid">
-        <SelectField
-          label="Jornada"
-          value={value.journey_template_id}
-          onChange={(next) => onChange("journey_template_id", next)}
-          options={tables.journey_templates.map((item) => ({ value: item.id, label: item.name }))}
-        />
+        <SelectField label="Template" value={value.journey_template_id} onChange={(next) => onChange("journey_template_id", next)} options={tables.journey_templates.map(toOption)} />
         <Field label="Ordem" type="number" value={value.step_order} onChange={(next) => onChange("step_order", Number(next))} />
         <Field label="Nome da etapa" value={value.name} onChange={(next) => onChange("name", next)} />
-        <TextArea label="Descricao" value={value.description} onChange={(next) => onChange("description", next)} />
         <TextArea label="Objetivo" value={value.objective} onChange={(next) => onChange("objective", next)} />
-        <SelectField
-          label="Ferramenta recomendada"
-          value={value.ai_tool_id}
-          onChange={(next) => onChange("ai_tool_id", next)}
-          options={tables.ai_tools.map((item) => ({ value: item.id, label: item.name }))}
-        />
+        <SelectField label="Ferramenta recomendada" value={value.ai_tool_id} onChange={(next) => onChange("ai_tool_id", next)} options={tables.ai_tools.map(toOption)} />
         <TextArea label="Checklist" value={value.checklist} onChange={(next) => onChange("checklist", next)} />
-        <TextArea label="Instrucoes de execucao" value={value.execution_instructions} onChange={(next) => onChange("execution_instructions", next)} />
+        <TextArea label="Instrucoes" value={value.execution_instructions} onChange={(next) => onChange("execution_instructions", next)} />
         <TextArea label="Resultado esperado" value={value.expected_output} onChange={(next) => onChange("expected_output", next)} />
-        <StatusField value={value.status} onChange={(next) => onChange("status", next)} />
+        <ConfigStatusField value={value.status} onChange={(next) => onChange("status", next)} />
       </div>
     );
   }
@@ -703,39 +1574,32 @@ function DynamicForm({
       <Field label="Categoria" value={value.category} onChange={(next) => onChange("category", next)} />
       <TextArea label="Descricao" value={value.description} onChange={(next) => onChange("description", next)} />
       <TextArea label="Conteudo" value={value.content} onChange={(next) => onChange("content", next)} rows={7} />
-      <SelectField
-        label="Tipo de projeto"
-        value={value.project_type_id}
-        onChange={(next) => onChange("project_type_id", next)}
-        options={tables.project_types.map((item) => ({ value: item.id, label: item.name }))}
-      />
-      <SelectField
-        label="Etapa relacionada"
-        value={value.journey_step_id}
-        onChange={(next) => onChange("journey_step_id", next)}
-        options={tables.journey_steps.map((item) => ({ value: item.id, label: item.name }))}
-      />
-      <StatusField value={value.status} onChange={(next) => onChange("status", next)} />
+      <SelectField label="Tipo de projeto" value={value.project_type_id} onChange={(next) => onChange("project_type_id", next)} options={tables.project_types.map(toOption)} />
+      <SelectField label="Etapa relacionada" value={value.journey_step_id} onChange={(next) => onChange("journey_step_id", next)} options={tables.journey_steps.map(toOption)} />
+      <ConfigStatusField value={value.status} onChange={(next) => onChange("status", next)} />
     </div>
   );
 }
 
-function ToolLogo({ record }: { record: Record<string, unknown> }) {
-  const logoUrl = typeof record.logo_url === "string" ? record.logo_url : "";
-
-  if (!logoUrl) {
-    return (
-      <span className="tool-logo fallback">
-        <Bot size={18} />
-      </span>
-    );
-  }
-
+function EmptyProjectJourney({ onBack }: { onBack: () => void }) {
   return (
-    <span className="tool-logo">
-      <img src={logoUrl} alt="" />
-    </span>
+    <div className="empty-state tall">
+      <Route size={42} />
+      <strong>Nenhum projeto aberto</strong>
+      <span>Crie ou selecione um projeto para executar a jornada.</span>
+      <button className="primary-button" onClick={onBack}>
+        Voltar para projetos
+      </button>
+    </div>
   );
+}
+
+function InlineText({ defaultValue, className, onSave }: { defaultValue: string; className?: string; onSave: (value: string) => void }) {
+  const [value, setValue] = useState(defaultValue);
+
+  useEffect(() => setValue(defaultValue), [defaultValue]);
+
+  return <input className={className} value={value} onChange={(event) => setValue(event.target.value)} onBlur={() => onSave(value)} />;
 }
 
 function Field({
@@ -762,16 +1626,30 @@ function TextArea({
   value,
   rows = 4,
   onChange,
+  onBlur,
 }: {
   label: string;
   value: unknown;
   rows?: number;
   onChange: (value: string) => void;
+  onBlur?: (value: string) => void;
 }) {
+  const [localValue, setLocalValue] = useState(String(value ?? ""));
+
+  useEffect(() => setLocalValue(String(value ?? "")), [value]);
+
   return (
     <label className="field">
       <span>{label}</span>
-      <textarea rows={rows} value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />
+      <textarea
+        rows={rows}
+        value={localValue}
+        onChange={(event) => {
+          setLocalValue(event.target.value);
+          onChange(event.target.value);
+        }}
+        onBlur={() => onBlur?.(localValue)}
+      />
     </label>
   );
 }
@@ -780,18 +1658,20 @@ function SelectField({
   label,
   value,
   options,
+  emptyLabel = "Nao vinculado",
   onChange,
 }: {
   label: string;
   value: unknown;
   options: Array<{ value: string; label: string }>;
+  emptyLabel?: string;
   onChange: (value: string) => void;
 }) {
   return (
     <label className="field">
       <span>{label}</span>
       <select value={String(value ?? "")} onChange={(event) => onChange(event.target.value)}>
-        <option value="">Nao vinculado</option>
+        <option value="">{emptyLabel}</option>
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
@@ -802,15 +1682,7 @@ function SelectField({
   );
 }
 
-function StatusField({
-  value,
-  includeDraft = false,
-  onChange,
-}: {
-  value: unknown;
-  includeDraft?: boolean;
-  onChange: (value: string) => void;
-}) {
+function ConfigStatusField({ value, includeDraft = false, onChange }: { value: unknown; includeDraft?: boolean; onChange: (value: string) => void }) {
   const options = includeDraft ? ["rascunho", "ativo", "inativo", "arquivado"] : ["ativo", "inativo", "arquivado"];
 
   return (
@@ -827,6 +1699,75 @@ function StatusField({
   );
 }
 
+function ToolLogo({ record }: { record: Record<string, unknown> }) {
+  const logoUrl = typeof record.logo_url === "string" ? record.logo_url : "";
+
+  if (!logoUrl) {
+    return (
+      <span className="tool-logo fallback">
+        <Bot size={18} />
+      </span>
+    );
+  }
+
+  return (
+    <span className="tool-logo">
+      <img src={logoUrl} alt="" />
+    </span>
+  );
+}
+
+function StatusPill({ status }: { status: string }) {
+  return <span className={`status-pill ${status}`}>{formatStatus(status)}</span>;
+}
+
+function createBlankConfig(moduleKey: ConfigModuleKey) {
+  const base = { status: "ativo" as ConfigStatus };
+
+  if (moduleKey === "ai_tools") {
+    return { name: "", description: "", logo_url: "", access_url: "", usage_instructions: "", ...base };
+  }
+
+  if (moduleKey === "prompt_categories" || moduleKey === "project_types") {
+    return { name: "", description: "", ...base };
+  }
+
+  if (moduleKey === "prompts") {
+    return {
+      title: "",
+      short_description: "",
+      content: "",
+      category_id: "",
+      ai_tool_id: "",
+      project_type_id: "",
+      variables: "{{nome_projeto}}, {{empresa}}",
+      version: "1.0",
+      status: "rascunho" as ConfigStatus,
+    };
+  }
+
+  if (moduleKey === "journey_templates") {
+    return { name: "", description: "", project_type_id: "", ...base };
+  }
+
+  if (moduleKey === "journey_steps") {
+    return {
+      journey_template_id: "",
+      name: "",
+      description: "",
+      step_order: 1,
+      objective: "",
+      ai_tool_id: "",
+      expected_output: "",
+      checklist: "",
+      execution_instructions: "",
+      ...base,
+    };
+  }
+
+  return { title: "", description: "", content: "", category: "", project_type_id: "", journey_step_id: "", ...base };
+}
+
 function normalizePayload(payload: Record<string, unknown>) {
   return Object.fromEntries(
     Object.entries(payload).map(([key, value]) => {
@@ -837,6 +1778,46 @@ function normalizePayload(payload: Record<string, unknown>) {
       return [key, value];
     }),
   );
+}
+
+function normalizeSearch(...values: unknown[]) {
+  return values
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function splitChecklist(value: string | null) {
+  return String(value ?? "")
+    .split(/\r?\n/)
+    .map((item) => item.replace(/^[-*]\s*/, "").trim())
+    .filter(Boolean);
+}
+
+function byOrder<T extends { step_order?: number; item_order?: number; prompt_order?: number; link_order?: number }>(a: T, b: T) {
+  const left = a.step_order ?? a.item_order ?? a.prompt_order ?? a.link_order ?? 0;
+  const right = b.step_order ?? b.item_order ?? b.prompt_order ?? b.link_order ?? 0;
+  return left - right;
+}
+
+function getOrderColumn(tableName: keyof Tables) {
+  if (tableName === "project_steps" || tableName === "journey_steps") {
+    return "step_order";
+  }
+
+  if (tableName === "project_step_checklist_items") {
+    return "item_order";
+  }
+
+  if (tableName === "project_step_prompts" || tableName === "step_prompts") {
+    return "prompt_order";
+  }
+
+  if (tableName === "project_step_links") {
+    return "link_order";
+  }
+
+  return "created_at";
 }
 
 function getRecordTitle(record: Record<string, unknown>) {
@@ -853,22 +1834,49 @@ function getRecordSubtitle(record: Record<string, unknown>, tables: Tables) {
   }
 
   if (record.journey_template_id) {
-    return `Jornada: ${findName(tables.journey_templates, String(record.journey_template_id))}`;
+    return `Template: ${findName(tables.journey_templates, String(record.journey_template_id))}`;
   }
 
   if (record.category) {
     return String(record.category);
   }
 
-  return "Registro configuravel da operacao";
+  return "Cadastro de apoio da operacao";
 }
 
-function findName(records: Array<{ id: string; name: string }>, id: string) {
-  return records.find((record) => record.id === id)?.name ?? "Nao encontrado";
+function findName(records: Array<{ id: string; name: string }>, id: string | null) {
+  if (!id) {
+    return "";
+  }
+
+  return records.find((record) => record.id === id)?.name ?? "";
 }
 
-function findTitle(records: Array<{ id: string; title: string }>, id: string) {
-  return records.find((record) => record.id === id)?.title ?? "Nao encontrado";
+function toOption(record: { id: string; name?: string; title?: string }) {
+  return { value: record.id, label: record.name ?? record.title ?? "Sem titulo" };
+}
+
+function formatStatus(status: string) {
+  const labels: Record<string, string> = {
+    ativo: "Ativo",
+    inativo: "Inativo",
+    rascunho: "Rascunho",
+    arquivado: "Arquivado",
+    planejado: "Planejado",
+    em_andamento: "Em andamento",
+    concluido: "Concluido",
+    bloqueado: "Bloqueado",
+  };
+
+  return labels[status] ?? status;
+}
+
+function formatStepStatus(status: StepStatus) {
+  return formatStatus(status);
+}
+
+async function copyText(value: string) {
+  await navigator.clipboard.writeText(value);
 }
 
 createRoot(document.getElementById("root")!).render(

@@ -2,7 +2,12 @@
 
 Aplicacao interna para configurar e conduzir jornadas operacionais de projetos tecnicos com apoio de IA.
 
-O sistema nasce como uma plataforma configuravel: ferramentas, prompts, tipos de projeto, jornadas, etapas, vinculos e procedimentos sao cadastrados pela propria equipe. Ele nao parte de etapas fixas no codigo.
+O sistema e separado em duas camadas:
+
+- **Execucao**: projetos reais, etapas, checklist, prompts, observacoes e materiais.
+- **Configuracoes**: ferramentas de IA, biblioteca de prompts, tipos de projeto, templates e procedimentos.
+
+A ideia central e permitir que a equipe construa uma jornada dentro do proprio projeto e, quando ela ficar boa, salve essa estrutura como template para reutilizar.
 
 ## Stack
 
@@ -32,7 +37,7 @@ VITE_SUPABASE_ANON_KEY=
 
 Nesta primeira publicacao, o app foi planejado como link publico sem login. O schema habilita RLS, mas cria policies temporarias que permitem `select`, `insert`, `update` e `delete` para `anon`.
 
-Isso serve apenas para validar o fluxo do MVP. Nao cadastre dados sensiveis enquanto o acesso estiver publico. A proxima fase deve trocar essas policies por autenticacao e permissoes da equipe.
+Isso serve apenas para validar o fluxo do MVP. Nao cadastre dados sensiveis enquanto o acesso estiver publico. O Supabase Advisor vai apontar essas policies como permissivas, e isso e esperado neste MVP. A proxima fase deve trocar essas policies por autenticacao e permissoes da equipe.
 
 ## Scripts
 
@@ -42,16 +47,56 @@ npm run dev
 npm run build
 ```
 
+## Fluxo principal
+
+1. Abra **Projetos**.
+2. Clique em **Novo projeto**.
+3. Escolha tipo de projeto, empresa, responsavel e um template opcional.
+4. Execute a **Jornada do Projeto**:
+   - edite etapas diretamente na tela;
+   - marque checklist;
+   - copie prompts;
+   - adicione prompts locais ou da biblioteca;
+   - vincule materiais e links;
+   - conclua ou bloqueie etapas;
+   - salve a jornada real como template.
+
 ## Modulos do MVP
 
+- Projetos reais
+- Jornada do projeto
+- Checklist por etapa
+- Prompts por etapa
+- Links e materiais por etapa
 - Ferramentas de IA
 - Categorias de prompts
 - Prompts reutilizaveis
 - Tipos de projeto
-- Jornadas configuraveis
-- Etapas de jornada
+- Templates de jornada
+- Etapas de template
 - Vinculos entre etapas e prompts
 - Procedimentos internos
+
+## Tabelas principais
+
+Configuracoes:
+
+- `ai_tools`
+- `prompt_categories`
+- `prompts`
+- `project_types`
+- `journey_templates`
+- `journey_steps`
+- `step_prompts`
+- `procedures`
+
+Execucao:
+
+- `projects`
+- `project_steps`
+- `project_step_checklist_items`
+- `project_step_prompts`
+- `project_step_links`
 
 ## Logos de ferramentas
 
