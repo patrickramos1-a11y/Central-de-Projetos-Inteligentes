@@ -5,9 +5,10 @@ Aplicacao interna para configurar e conduzir jornadas operacionais de projetos t
 O sistema e separado em duas camadas:
 
 - **Execucao**: projetos reais, etapas, checklist, prompts, observacoes e materiais.
+- **Clientes**: jornada de entrada/implantacao com checklist, evidencias, logo e progresso.
 - **Configuracoes**: ferramentas de IA, biblioteca de prompts, tipos de projeto, templates e procedimentos.
 
-A ideia central e permitir que a equipe construa uma jornada dentro do proprio projeto e, quando ela ficar boa, salve essa estrutura como template para reutilizar.
+A ideia central e permitir que a equipe construa uma jornada dentro do proprio projeto ou cliente e, quando ela ficar boa, salve essa estrutura como template para reutilizar.
 
 ## Stack
 
@@ -49,6 +50,8 @@ npm run build
 
 ## Fluxo principal
 
+Projetos:
+
 1. Abra **Projetos**.
 2. Clique em **Novo projeto**.
 3. Escolha tipo de projeto, empresa, responsavel e um template opcional.
@@ -61,10 +64,24 @@ npm run build
    - conclua ou bloqueie etapas;
    - salve a jornada real como template.
 
+Clientes:
+
+1. Abra **Clientes**.
+2. Clique em **Novo cliente**.
+3. Informe nome, empresa, logo, responsavel, mes de entrada e template.
+4. Execute a **Jornada do Cliente**:
+   - acompanhe o progresso pela logo/card do cliente;
+   - marque checklist por etapa;
+   - registre links de evidencias, PDFs, Drive ou pastas;
+   - use pre-requisitos para concluir etapas;
+   - salve a jornada real como template de cliente.
+
 ## Modulos do MVP
 
 - Projetos reais
 - Jornada do projeto
+- Clientes
+- Jornada do cliente
 - Checklist por etapa
 - Prompts por etapa
 - Links e materiais por etapa
@@ -97,6 +114,19 @@ Execucao:
 - `project_step_checklist_items`
 - `project_step_prompts`
 - `project_step_links`
+- `clients`
+- `client_steps`
+- `client_step_checklist_items`
+- `client_step_links`
+
+Template inicial de cliente:
+
+- `Integração de Novo Cliente`
+  - Cadastro no SISRAMOS
+  - Plano de Ação
+  - Contrato
+  - Gestão
+  - Comunicação
 
 ## Logos de ferramentas
 

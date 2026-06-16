@@ -224,6 +224,15 @@ button {
   background: #0b625b;
 }
 
+.primary-button:disabled,
+.secondary-button:disabled,
+.ghost-button:disabled,
+.action-button:disabled,
+.chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .secondary-button,
 .ghost-button,
 .action-button {
@@ -323,6 +332,50 @@ button {
   display: flex;
   justify-content: space-between;
   gap: 12px;
+}
+
+.client-card {
+  min-height: 178px;
+}
+
+.client-card-head,
+.client-journey-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.client-card-head {
+  justify-content: space-between;
+}
+
+.client-logo {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid #dfe7e3;
+  border-radius: 8px;
+  color: #0f5f55;
+  background: #e7f3ef;
+}
+
+.client-logo.large {
+  width: 58px;
+  height: 58px;
+}
+
+.client-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.client-logo strong {
+  font-size: 15px;
+  letter-spacing: 0;
 }
 
 .project-card strong {
@@ -746,6 +799,11 @@ button {
 .status-pill.bloqueado {
   color: #8d3219;
   background: #ffe2d8;
+}
+
+.status-pill.em_implantacao {
+  color: #235c87;
+  background: #dff0ff;
 }
 
 .form-panel {

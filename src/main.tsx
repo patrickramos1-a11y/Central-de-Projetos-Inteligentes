@@ -23,14 +23,16 @@ import {
   Settings,
   Sparkles,
   Trash2,
+  Users,
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 import "./styles.css";
 
 type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
 type ProjectStatus = "planejado" | "em_andamento" | "concluido" | "bloqueado" | "arquivado";
+type ClientStatus = "em_implantacao" | "ativo" | "concluido" | "bloqueado" | "arquivado";
 type StepStatus = "pendente" | "em_andamento" | "concluido" | "bloqueado";
-type ViewMode = "projects" | "journey" | "settings";
+type ViewMode = "projects" | "journey" | "clients" | "clientJourney" | "settings";
 
 type AiTool = {
   id: string;
@@ -74,6 +76,7 @@ type JourneyTemplate = {
   name: string;
   description: string | null;
   project_type_id: string | null;
+  context: "projeto" | "cliente" | "geral";
   status: ConfigStatus;
 };
 
@@ -169,6 +172,53 @@ type ProjectStepLink = {
   link_order: number;
 };
 
+type Client = {
+  id: string;
+  name: string;
+  company: string | null;
+  logo_url: string | null;
+  responsible: string | null;
+  project_type_id: string | null;
+  journey_template_id: string | null;
+  entry_month: string | null;
+  status: ClientStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type ClientStep = {
+  id: string;
+  client_id: string;
+  source_journey_step_id: string | null;
+  name: string;
+  description: string | null;
+  step_order: number;
+  objective: string | null;
+  required_evidence_label: string | null;
+  status: StepStatus;
+  notes: string | null;
+  due_date: string | null;
+  completed_at: string | null;
+};
+
+type ClientChecklistItem = {
+  id: string;
+  client_step_id: string;
+  label: string;
+  is_done: boolean;
+  item_order: number;
+};
+
+type ClientStepLink = {
+  id: string;
+  client_step_id: string;
+  title: string;
+  url: string;
+  notes: string | null;
+  link_order: number;
+};
+
 type Tables = {
   ai_tools: AiTool[];
   prompt_categories: PromptCategory[];
@@ -183,6 +233,10 @@ type Tables = {
   project_step_checklist_items: ProjectChecklistItem[];
   project_step_prompts: ProjectStepPrompt[];
   project_step_links: ProjectStepLink[];
+  clients: Client[];
+  client_steps: ClientStep[];
+  client_step_checklist_items: ClientChecklistItem[];
+  client_step_links: ClientStepLink[];
 };
 
 type ConfigModuleKey =
@@ -213,6 +267,10 @@ const emptyTables: Tables = {
   project_step_checklist_items: [],
   project_step_prompts: [],
   project_step_links: [],
+  clients: [],
+  client_steps: [],
+  client_step_checklist_items: [],
+  client_step_links: [],
 };
 
 const configModules: Array<{ key: ConfigModuleKey; label: string; icon: typeof Bot; description: string }> = [
@@ -266,6 +324,8 @@ function App() {
   const [tables, setTables] = useState<Tables>(emptyTables);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [selectedClientStepId, setSelectedClientStepId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [notice, setNotice] = useState("Pronto para conduzir projetos com IA.");
@@ -276,6 +336,12 @@ function App() {
     [tables.project_steps, selectedProjectId],
   );
   const selectedStep = projectSteps.find((step) => step.id === selectedStepId) ?? projectSteps[0] ?? null;
+  const selectedClient = tables.clients.find((client) => client.id === selectedClientId) ?? null;
+  const clientSteps = useMemo(
+    () => tables.client_steps.filter((step) => step.client_id === selectedClientId).sort(byOrder),
+    [tables.client_steps, selectedClientId],
+  );
+  const selectedClientStep = clientSteps.find((step) => step.id === selectedClientStepId) ?? clientSteps[0] ?? null;
 
   const stats = useMemo(() => {
     const activeProjects = tables.projects.filter((project) => project.status !== "arquivado");
@@ -284,6 +350,7 @@ function App() {
 
     return [
       { label: "Projetos ativos", value: activeProjects.length },
+      { label: "Clientes", value: tables.clients.filter((client) => client.status !== "arquivado").length },
       { label: "Prompts", value: tables.prompts.length },
       { label: "Templates", value: tables.journey_templates.length },
       { label: "Etapas concluidas", value: doneSteps.length || doneProjects.length },
@@ -305,6 +372,18 @@ function App() {
       setSelectedStepId(projectSteps[0].id);
     }
   }, [projectSteps, selectedStepId]);
+
+  useEffect(() => {
+    if (!selectedClientId && tables.clients.length > 0) {
+      setSelectedClientId(tables.clients[0].id);
+    }
+  }, [selectedClientId, tables.clients]);
+
+  useEffect(() => {
+    if (clientSteps.length > 0 && !clientSteps.some((step) => step.id === selectedClientStepId)) {
+      setSelectedClientStepId(clientSteps[0].id);
+    }
+  }, [clientSteps, selectedClientStepId]);
 
   async function loadAll() {
     if (!supabase) {
@@ -678,6 +757,7 @@ function App() {
           name: templateName,
           description: `Criado a partir do projeto ${project.name}.`,
           project_type_id: project.project_type_id,
+          context: "projeto",
           status: "ativo",
         }),
       )
@@ -752,6 +832,295 @@ function App() {
     });
   }
 
+  async function createClientJourney(form: NewClientFormState) {
+    if (!supabase || !form.name.trim()) {
+      return;
+    }
+
+    setIsLoading(true);
+    const templateId = form.journey_template_id || getDefaultClientTemplate(tables.journey_templates)?.id || "";
+    const { data: client, error } = await supabase
+      .from("clients")
+      .insert(
+        normalizePayload({
+          name: form.name,
+          company: form.company,
+          logo_url: form.logo_url,
+          responsible: form.responsible,
+          project_type_id: form.project_type_id,
+          journey_template_id: templateId,
+          entry_month: form.entry_month,
+          status: "em_implantacao",
+          notes: form.notes,
+        }),
+      )
+      .select("*")
+      .single();
+
+    if (error || !client) {
+      setNotice(`Nao foi possivel criar o cliente: ${error?.message ?? "erro desconhecido"}`);
+      setIsLoading(false);
+      return;
+    }
+
+    if (templateId) {
+      await instantiateClientTemplate(client as Client, templateId);
+    } else {
+      await createClientStep(client.id, {
+        name: "Primeira etapa",
+        objective: "Defina a primeira atividade da jornada do cliente.",
+        status: "em_andamento",
+      });
+    }
+
+    await loadAll();
+    setSelectedClientId(client.id);
+    setView("clientJourney");
+    setNotice("Cliente criado. A jornada de entrada ja pode ser acompanhada.");
+    setIsLoading(false);
+  }
+
+  async function instantiateClientTemplate(client: Client, templateId: string) {
+    if (!supabase) {
+      return;
+    }
+
+    const templateSteps = tables.journey_steps.filter((step) => step.journey_template_id === templateId).sort(byOrder);
+
+    if (templateSteps.length === 0) {
+      await createClientStep(client.id, {
+        name: "Primeira etapa",
+        objective: "Template sem etapas. Comece configurando a jornada real do cliente.",
+        status: "em_andamento",
+      });
+      return;
+    }
+
+    for (const templateStep of templateSteps) {
+      const { data: step } = await supabase
+        .from("client_steps")
+        .insert(
+          normalizePayload({
+            client_id: client.id,
+            source_journey_step_id: templateStep.id,
+            name: templateStep.name,
+            description: templateStep.description,
+            step_order: templateStep.step_order,
+            objective: templateStep.objective,
+            required_evidence_label: templateStep.expected_output,
+            status: templateStep.step_order === 1 ? "em_andamento" : "pendente",
+          }),
+        )
+        .select("*")
+        .single();
+
+      if (!step) {
+        continue;
+      }
+
+      const checklistRows = splitChecklist(templateStep.checklist).map((label, index) => ({
+        client_step_id: step.id,
+        label,
+        item_order: index + 1,
+      }));
+
+      if (checklistRows.length > 0) {
+        await supabase.from("client_step_checklist_items").insert(checklistRows);
+      }
+    }
+  }
+
+  async function createClientStep(clientId: string, payload: Partial<ClientStep>) {
+    if (!supabase) {
+      return null;
+    }
+
+    const nextOrder =
+      payload.step_order ??
+      Math.max(0, ...tables.client_steps.filter((step) => step.client_id === clientId).map((step) => step.step_order)) + 1;
+
+    const { data, error } = await supabase
+      .from("client_steps")
+      .insert(
+        normalizePayload({
+          client_id: clientId,
+          name: payload.name || "Nova etapa",
+          description: payload.description ?? "",
+          step_order: nextOrder,
+          objective: payload.objective ?? "",
+          required_evidence_label: payload.required_evidence_label ?? "",
+          status: payload.status ?? "pendente",
+          notes: payload.notes ?? "",
+          due_date: payload.due_date ?? "",
+        }),
+      )
+      .select("*")
+      .single();
+
+    if (error) {
+      setNotice(`Erro ao criar etapa do cliente: ${error.message}`);
+      return null;
+    }
+
+    return data as ClientStep;
+  }
+
+  async function updateClient(clientId: string, payload: Partial<Client>) {
+    if (!supabase) {
+      return;
+    }
+
+    const { error } = await supabase.from("clients").update(normalizePayload({ ...payload, updated_at: new Date().toISOString() })).eq("id", clientId);
+
+    if (error) {
+      setNotice(`Erro ao atualizar cliente: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({
+      ...current,
+      clients: current.clients.map((client) => (client.id === clientId ? { ...client, ...payload } : client)),
+    }));
+  }
+
+  async function updateClientStep(stepId: string, payload: Partial<ClientStep>) {
+    if (!supabase) {
+      return;
+    }
+
+    const localPayload: Partial<ClientStep> = {
+      ...payload,
+      completed_at: payload.status === "concluido" ? new Date().toISOString() : (payload.completed_at ?? null),
+    };
+    const dbPayload = { ...localPayload, updated_at: new Date().toISOString() };
+    const { error } = await supabase.from("client_steps").update(normalizePayload(dbPayload)).eq("id", stepId);
+
+    if (error) {
+      setNotice(`Erro ao atualizar etapa do cliente: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({
+      ...current,
+      client_steps: current.client_steps.map((step) => (step.id === stepId ? { ...step, ...localPayload } : step)),
+    }));
+  }
+
+  async function addClientChecklistItem(stepId: string, label: string) {
+    if (!supabase || !label.trim()) {
+      return;
+    }
+
+    const currentItems = tables.client_step_checklist_items.filter((item) => item.client_step_id === stepId);
+    const { data, error } = await supabase
+      .from("client_step_checklist_items")
+      .insert({ client_step_id: stepId, label: label.trim(), item_order: currentItems.length + 1 })
+      .select("*")
+      .single();
+
+    if (error) {
+      setNotice(`Erro ao adicionar checklist do cliente: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({ ...current, client_step_checklist_items: [...current.client_step_checklist_items, data as ClientChecklistItem] }));
+  }
+
+  async function toggleClientChecklistItem(item: ClientChecklistItem) {
+    if (!supabase) {
+      return;
+    }
+
+    const nextDone = !item.is_done;
+    await supabase.from("client_step_checklist_items").update({ is_done: nextDone }).eq("id", item.id);
+    setTables((current) => ({
+      ...current,
+      client_step_checklist_items: current.client_step_checklist_items.map((row) => (row.id === item.id ? { ...row, is_done: nextDone } : row)),
+    }));
+  }
+
+  async function addClientStepLink(stepId: string, title: string, url: string) {
+    if (!supabase || !title.trim() || !url.trim()) {
+      return;
+    }
+
+    const currentLinks = tables.client_step_links.filter((item) => item.client_step_id === stepId);
+    const { data, error } = await supabase
+      .from("client_step_links")
+      .insert({ client_step_id: stepId, title: title.trim(), url: url.trim(), link_order: currentLinks.length + 1 })
+      .select("*")
+      .single();
+
+    if (error) {
+      setNotice(`Erro ao adicionar evidencia do cliente: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({ ...current, client_step_links: [...current.client_step_links, data as ClientStepLink] }));
+  }
+
+  async function addNextClientStep(clientId: string, name: string) {
+    const step = await createClientStep(clientId, { name: name || "Nova etapa" });
+
+    if (step) {
+      await loadAll();
+      setSelectedClientStepId(step.id);
+      setNotice("Etapa adicionada a jornada do cliente.");
+    }
+  }
+
+  async function saveClientAsTemplate(client: Client) {
+    if (!supabase) {
+      return;
+    }
+
+    const templateName = `${client.name} - template cliente`;
+    const { data: template, error } = await supabase
+      .from("journey_templates")
+      .insert(
+        normalizePayload({
+          name: templateName,
+          description: `Criado a partir da jornada do cliente ${client.name}.`,
+          project_type_id: client.project_type_id,
+          context: "cliente",
+          status: "ativo",
+        }),
+      )
+      .select("*")
+      .single();
+
+    if (error || !template) {
+      setNotice(`Erro ao salvar template de cliente: ${error?.message ?? "erro desconhecido"}`);
+      return;
+    }
+
+    const steps = tables.client_steps.filter((step) => step.client_id === client.id).sort(byOrder);
+
+    for (const step of steps) {
+      const checklistText = tables.client_step_checklist_items
+        .filter((item) => item.client_step_id === step.id)
+        .sort(byOrder)
+        .map((item) => item.label)
+        .join("\n");
+
+      await supabase.from("journey_steps").insert(
+        normalizePayload({
+          journey_template_id: template.id,
+          name: step.name,
+          description: step.description,
+          step_order: step.step_order,
+          objective: step.objective,
+          expected_output: step.required_evidence_label,
+          checklist: checklistText,
+          status: "ativo",
+        }),
+      );
+    }
+
+    await loadAll();
+    setNotice(`Template "${templateName}" salvo a partir da jornada do cliente.`);
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -766,6 +1135,10 @@ function App() {
           <button className={`nav-item ${view === "projects" || view === "journey" ? "active" : ""}`} onClick={() => setView("projects")}>
             <PanelLeft size={18} />
             Projetos
+          </button>
+          <button className={`nav-item ${view === "clients" || view === "clientJourney" ? "active" : ""}`} onClick={() => setView("clients")}>
+            <Users size={18} />
+            Clientes
           </button>
           <button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")}>
             <Settings size={18} />
@@ -801,6 +1174,8 @@ function App() {
 
         {view === "projects" && <ProjectsView tables={tables} stats={stats} query={query} setQuery={setQuery} onCreate={createProject} onOpen={(id) => { setSelectedProjectId(id); setView("journey"); }} />}
 
+        {view === "clients" && <ClientsView tables={tables} query={query} setQuery={setQuery} onCreate={createClientJourney} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} />}
+
         {view === "journey" && selectedProject && selectedStep && (
           <JourneyView
             project={selectedProject}
@@ -830,6 +1205,30 @@ function App() {
           <EmptyProjectJourney onBack={() => setView("projects")} />
         )}
 
+        {view === "clientJourney" && selectedClient && selectedClientStep && (
+          <ClientJourneyView
+            client={selectedClient}
+            steps={clientSteps}
+            selectedStep={selectedClientStep}
+            tables={tables}
+            onSelectStep={setSelectedClientStepId}
+            onBack={() => setView("clients")}
+            onUpdateClient={updateClient}
+            onUpdateStep={updateClientStep}
+            onAddChecklist={addClientChecklistItem}
+            onToggleChecklist={toggleClientChecklistItem}
+            onDeleteChecklist={(id) => deleteRecord("client_step_checklist_items", id)}
+            onAddLink={addClientStepLink}
+            onDeleteLink={(id) => deleteRecord("client_step_links", id)}
+            onAddNextStep={addNextClientStep}
+            onSaveTemplate={saveClientAsTemplate}
+          />
+        )}
+
+        {view === "clientJourney" && (!selectedClient || !selectedClientStep) && (
+          <EmptyClientJourney onBack={() => setView("clients")} />
+        )}
+
         {view === "settings" && (
           <SettingsView
             tables={tables}
@@ -853,6 +1252,17 @@ type NewProjectFormState = {
   responsible: string;
   project_type_id: string;
   journey_template_id: string;
+  notes: string;
+};
+
+type NewClientFormState = {
+  name: string;
+  company: string;
+  logo_url: string;
+  responsible: string;
+  project_type_id: string;
+  journey_template_id: string;
+  entry_month: string;
   notes: string;
 };
 
@@ -949,6 +1359,7 @@ function ProjectsView({
 }
 
 function NewProjectPanel({ tables, onCreate }: { tables: Tables; onCreate: (form: NewProjectFormState) => void }) {
+  const projectTemplates = tables.journey_templates.filter((template) => template.context === "projeto" || template.context === "geral");
   const [form, setForm] = useState<NewProjectFormState>({
     name: "",
     company: "",
@@ -979,10 +1390,403 @@ function NewProjectPanel({ tables, onCreate }: { tables: Tables; onCreate: (form
           label="Template"
           value={form.journey_template_id}
           onChange={(value) => setForm({ ...form, journey_template_id: value })}
-          options={tables.journey_templates.map(toOption)}
+          options={projectTemplates.map(toOption)}
           emptyLabel="Comecar vazio"
         />
         <TextArea label="Observacoes iniciais" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
+      </div>
+    </section>
+  );
+}
+
+function ClientsView({
+  tables,
+  query,
+  setQuery,
+  onCreate,
+  onOpen,
+}: {
+  tables: Tables;
+  query: string;
+  setQuery: (query: string) => void;
+  onCreate: (form: NewClientFormState) => void;
+  onOpen: (id: string) => void;
+}) {
+  const [showForm, setShowForm] = useState(false);
+  const filteredClients = tables.clients
+    .filter((client) => normalizeSearch(client.name, client.company, client.responsible).includes(query.toLowerCase()))
+    .sort((a, b) => new Date(b.updated_at ?? b.created_at).getTime() - new Date(a.updated_at ?? a.created_at).getTime());
+
+  const activeClients = tables.clients.filter((client) => client.status !== "arquivado");
+  const doneSteps = tables.client_steps.filter((step) => step.status === "concluido").length;
+  const blockedSteps = tables.client_steps.filter((step) => step.status === "bloqueado").length;
+  const averageProgress = activeClients.length
+    ? Math.round(
+        activeClients.reduce((total, client) => {
+          const steps = tables.client_steps.filter((step) => step.client_id === client.id);
+          const done = steps.filter((step) => step.status === "concluido").length;
+          return total + (steps.length ? done / steps.length : 0);
+        }, 0) /
+          activeClients.length *
+          100,
+      )
+    : 0;
+
+  return (
+    <>
+      <section className="topbar">
+        <div>
+          <h1>Clientes</h1>
+          <p>Acompanhe a jornada de entrada, implantação e organização inicial dos clientes.</p>
+        </div>
+        <button className="primary-button" onClick={() => setShowForm((current) => !current)}>
+          <Plus size={17} />
+          Novo cliente
+        </button>
+      </section>
+
+      <section className="metric-grid client-metrics">
+        <article className="metric-card">
+          <span>Clientes ativos</span>
+          <strong>{activeClients.length}</strong>
+        </article>
+        <article className="metric-card">
+          <span>Progresso medio</span>
+          <strong>{averageProgress}%</strong>
+        </article>
+        <article className="metric-card">
+          <span>Etapas concluidas</span>
+          <strong>{doneSteps}</strong>
+        </article>
+        <article className="metric-card">
+          <span>Etapas bloqueadas</span>
+          <strong>{blockedSteps}</strong>
+        </article>
+      </section>
+
+      {showForm && <NewClientPanel tables={tables} onCreate={onCreate} />}
+
+      <section className="list-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Jornadas de clientes</h2>
+            <p>Abra um cliente para marcar checklist, anexar evidencias e concluir etapas.</p>
+          </div>
+          <label className="search-field">
+            <Search size={16} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar cliente" />
+          </label>
+        </div>
+
+        <div className="project-grid">
+          {filteredClients.map((client) => {
+            const steps = tables.client_steps.filter((step) => step.client_id === client.id);
+            const done = steps.filter((step) => step.status === "concluido").length;
+            const progress = steps.length ? Math.round((done / steps.length) * 100) : 0;
+
+            return (
+              <button className="project-card client-card" key={client.id} onClick={() => onOpen(client.id)}>
+                <div className="client-card-head">
+                  <ClientLogo client={client} />
+                  <StatusPill status={client.status} />
+                </div>
+                <strong>{client.name}</strong>
+                <span>{client.company || client.entry_month || "Cliente sem detalhe definido"}</span>
+                <div className="progress-bar">
+                  <span style={{ width: `${progress}%` }} />
+                </div>
+                <small>
+                  {progress}% concluido - {steps.length} etapas
+                </small>
+              </button>
+            );
+          })}
+        </div>
+
+        {filteredClients.length === 0 && (
+          <div className="empty-state">
+            <Users size={34} />
+            <strong>Nenhum cliente encontrado</strong>
+            <span>Crie o primeiro cliente para acompanhar uma jornada.</span>
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
+function NewClientPanel({ tables, onCreate }: { tables: Tables; onCreate: (form: NewClientFormState) => void }) {
+  const defaultTemplate = getDefaultClientTemplate(tables.journey_templates);
+  const [form, setForm] = useState<NewClientFormState>({
+    name: "",
+    company: "",
+    logo_url: "",
+    responsible: "",
+    project_type_id: "",
+    journey_template_id: defaultTemplate?.id ?? "",
+    entry_month: "",
+    notes: "",
+  });
+
+  const clientTemplates = tables.journey_templates.filter((template) => template.context === "cliente" || template.context === "geral");
+
+  return (
+    <section className="form-panel inline-panel">
+      <div className="form-heading">
+        <div>
+          <h2>Criar cliente</h2>
+          <p>Use o template de integração ou comece uma jornada vazia.</p>
+        </div>
+        <button className="primary-button" onClick={() => onCreate(form)}>
+          <Save size={16} />
+          Criar jornada
+        </button>
+      </div>
+      <div className="form-grid">
+        <Field label="Nome do cliente" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
+        <Field label="Empresa / unidade" value={form.company} onChange={(value) => setForm({ ...form, company: value })} />
+        <Field label="Logo URL" value={form.logo_url} onChange={(value) => setForm({ ...form, logo_url: value })} />
+        <Field label="Responsavel interno" value={form.responsible} onChange={(value) => setForm({ ...form, responsible: value })} />
+        <Field label="Mes de entrada" value={form.entry_month} onChange={(value) => setForm({ ...form, entry_month: value })} />
+        <SelectField label="Produto / tipo" value={form.project_type_id} onChange={(value) => setForm({ ...form, project_type_id: value })} options={tables.project_types.map(toOption)} />
+        <SelectField
+          label="Template de jornada"
+          value={form.journey_template_id}
+          onChange={(value) => setForm({ ...form, journey_template_id: value })}
+          options={clientTemplates.map(toOption)}
+          emptyLabel="Comecar vazio"
+        />
+        <TextArea label="Observacoes iniciais" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
+      </div>
+    </section>
+  );
+}
+
+function ClientJourneyView({
+  client,
+  steps,
+  selectedStep,
+  tables,
+  onSelectStep,
+  onBack,
+  onUpdateClient,
+  onUpdateStep,
+  onAddChecklist,
+  onToggleChecklist,
+  onDeleteChecklist,
+  onAddLink,
+  onDeleteLink,
+  onAddNextStep,
+  onSaveTemplate,
+}: {
+  client: Client;
+  steps: ClientStep[];
+  selectedStep: ClientStep;
+  tables: Tables;
+  onSelectStep: (id: string) => void;
+  onBack: () => void;
+  onUpdateClient: (clientId: string, payload: Partial<Client>) => void;
+  onUpdateStep: (stepId: string, payload: Partial<ClientStep>) => void;
+  onAddChecklist: (stepId: string, label: string) => void;
+  onToggleChecklist: (item: ClientChecklistItem) => void;
+  onDeleteChecklist: (id: string) => void;
+  onAddLink: (stepId: string, title: string, url: string) => void;
+  onDeleteLink: (id: string) => void;
+  onAddNextStep: (clientId: string, name: string) => void;
+  onSaveTemplate: (client: Client) => void;
+}) {
+  const doneSteps = steps.filter((step) => step.status === "concluido").length;
+  const progress = steps.length ? Math.round((doneSteps / steps.length) * 100) : 0;
+  const checklist = tables.client_step_checklist_items.filter((item) => item.client_step_id === selectedStep.id).sort(byOrder);
+  const links = tables.client_step_links.filter((link) => link.client_step_id === selectedStep.id).sort(byOrder);
+  const canComplete = checklist.every((item) => item.is_done);
+
+  return (
+    <>
+      <section className="journey-header client-journey-header">
+        <button className="ghost-button" onClick={onBack}>
+          <PanelLeft size={16} />
+          Clientes
+        </button>
+        <ClientLogo client={client} large />
+        <div className="journey-title">
+          <h1>{client.name}</h1>
+          <p>{client.company || client.entry_month || "Jornada do cliente"}</p>
+        </div>
+        <div className="journey-progress">
+          <strong>{progress}%</strong>
+          <div className="progress-bar">
+            <span style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+      </section>
+
+      <section className="journey-layout client-journey-layout">
+        <aside className="step-rail">
+          <div className="rail-heading">
+            <strong>Jornada</strong>
+            <span>{doneSteps} concluidas</span>
+          </div>
+          {steps.map((step) => (
+            <button key={step.id} className={`step-item ${selectedStep.id === step.id ? "active" : ""}`} onClick={() => onSelectStep(step.id)}>
+              <span className={`step-dot ${step.status}`}>
+                {step.status === "concluido" ? <Check size={13} /> : step.step_order}
+              </span>
+              <span>
+                <strong>{step.name}</strong>
+                <small>{formatStepStatus(step.status)}</small>
+              </span>
+            </button>
+          ))}
+        </aside>
+
+        <section className="work-surface">
+          <div className="work-heading">
+            <div>
+              <span className="eyebrow">Etapa do cliente</span>
+              <InlineText defaultValue={selectedStep.name} className="inline-title" onSave={(value) => onUpdateStep(selectedStep.id, { name: value })} />
+            </div>
+            <div className="status-actions">
+              {(["pendente", "em_andamento", "concluido", "bloqueado"] as StepStatus[]).map((status) => (
+                <button
+                  key={status}
+                  className={`chip ${selectedStep.status === status ? "active" : ""}`}
+                  onClick={() => onUpdateStep(selectedStep.id, { status })}
+                  disabled={status === "concluido" && !canComplete}
+                  title={status === "concluido" && !canComplete ? "Ainda existem itens de checklist pendentes" : undefined}
+                >
+                  {formatStepStatus(status)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="editor-grid">
+            <TextArea label="Objetivo da etapa" value={selectedStep.objective} onChange={() => undefined} onBlur={(value) => onUpdateStep(selectedStep.id, { objective: value })} />
+            <TextArea label="Pre-requisito / evidencia para concluir" value={selectedStep.required_evidence_label} onChange={() => undefined} onBlur={(value) => onUpdateStep(selectedStep.id, { required_evidence_label: value })} />
+            <TextArea label="Observacoes da etapa" value={selectedStep.notes} onChange={() => undefined} onBlur={(value) => onUpdateStep(selectedStep.id, { notes: value })} />
+            <Field label="Prazo" type="date" value={selectedStep.due_date ?? ""} onChange={(value) => onUpdateStep(selectedStep.id, { due_date: value })} />
+          </div>
+
+          <ClientChecklistPanel items={checklist} onAdd={(label) => onAddChecklist(selectedStep.id, label)} onToggle={onToggleChecklist} onDelete={onDeleteChecklist} />
+          <ClientLinksPanel links={links} onAdd={(title, url) => onAddLink(selectedStep.id, title, url)} onDelete={onDeleteLink} />
+        </section>
+
+        <aside className="action-panel">
+          <QuickAddStep onAdd={(name) => onAddNextStep(client.id, name)} />
+          <button className="action-button" disabled={!canComplete} onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}>
+            <CheckCircle2 size={18} />
+            Concluir etapa
+          </button>
+          <button className="action-button" onClick={() => onSaveTemplate(client)}>
+            <Save size={18} />
+            Salvar como template
+          </button>
+          <SelectField
+            label="Status do cliente"
+            value={client.status}
+            onChange={(value) => onUpdateClient(client.id, { status: value as ClientStatus })}
+            options={[
+              { value: "em_implantacao", label: "Em implantacao" },
+              { value: "ativo", label: "Ativo" },
+              { value: "concluido", label: "Concluido" },
+              { value: "bloqueado", label: "Bloqueado" },
+              { value: "arquivado", label: "Arquivado" },
+            ]}
+          />
+        </aside>
+      </section>
+    </>
+  );
+}
+
+function ClientChecklistPanel({
+  items,
+  onAdd,
+  onToggle,
+  onDelete,
+}: {
+  items: ClientChecklistItem[];
+  onAdd: (label: string) => void;
+  onToggle: (item: ClientChecklistItem) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [label, setLabel] = useState("");
+
+  return (
+    <section className="work-block">
+      <div className="block-heading">
+        <h2>Checklist da etapa</h2>
+        <form
+          className="inline-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onAdd(label);
+            setLabel("");
+          }}
+        >
+          <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Adicionar item" />
+          <button className="icon-button" type="submit">
+            <Plus size={16} />
+          </button>
+        </form>
+      </div>
+
+      <div className="checklist">
+        {items.map((item) => (
+          <div className="check-row" key={item.id}>
+            <button className={`checkbox ${item.is_done ? "checked" : ""}`} onClick={() => onToggle(item)}>
+              {item.is_done && <Check size={14} />}
+            </button>
+            <span>{item.label}</span>
+            <button className="icon-button subtle" onClick={() => onDelete(item.id)}>
+              <Trash2 size={15} />
+            </button>
+          </div>
+        ))}
+        {items.length === 0 && <span className="muted">Nenhum checklist nesta etapa.</span>}
+      </div>
+    </section>
+  );
+}
+
+function ClientLinksPanel({ links, onAdd, onDelete }: { links: ClientStepLink[]; onAdd: (title: string, url: string) => void; onDelete: (id: string) => void }) {
+  const [title, setTitle] = useState("");
+  const [url, setUrl] = useState("");
+
+  return (
+    <section className="work-block">
+      <div className="block-heading">
+        <h2>Evidencias e arquivos</h2>
+        <form
+          className="inline-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onAdd(title, url);
+            setTitle("");
+            setUrl("");
+          }}
+        >
+          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Ex.: contrato assinado" />
+          <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="Link Drive, PDF ou pasta" />
+          <button className="icon-button" type="submit">
+            <Plus size={16} />
+          </button>
+        </form>
+      </div>
+      <div className="link-list">
+        {links.map((link) => (
+          <div className="record-row compact" key={link.id}>
+            <div>
+              <strong>{link.title}</strong>
+              <span>{link.url}</span>
+            </div>
+            <button onClick={() => onDelete(link.id)}>
+              <Trash2 size={15} />
+            </button>
+          </div>
+        ))}
+        {links.length === 0 && <span className="muted">Nenhuma evidencia vinculada.</span>}
       </div>
     </section>
   );
@@ -1547,6 +2351,16 @@ function ConfigForm({
         <Field label="Nome do template" value={value.name} onChange={(next) => onChange("name", next)} />
         <TextArea label="Descricao" value={value.description} onChange={(next) => onChange("description", next)} />
         <SelectField label="Tipo de projeto" value={value.project_type_id} onChange={(next) => onChange("project_type_id", next)} options={tables.project_types.map(toOption)} />
+        <SelectField
+          label="Uso do template"
+          value={value.context}
+          onChange={(next) => onChange("context", next)}
+          options={[
+            { value: "projeto", label: "Projetos" },
+            { value: "cliente", label: "Clientes" },
+            { value: "geral", label: "Geral" },
+          ]}
+        />
         <ConfigStatusField value={value.status} onChange={(next) => onChange("status", next)} />
       </div>
     );
@@ -1591,6 +2405,35 @@ function EmptyProjectJourney({ onBack }: { onBack: () => void }) {
         Voltar para projetos
       </button>
     </div>
+  );
+}
+
+function EmptyClientJourney({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="empty-state tall">
+      <Users size={42} />
+      <strong>Nenhum cliente aberto</strong>
+      <span>Crie ou selecione um cliente para acompanhar a jornada.</span>
+      <button className="primary-button" onClick={onBack}>
+        Voltar para clientes
+      </button>
+    </div>
+  );
+}
+
+function ClientLogo({ client, large = false }: { client: Client; large?: boolean }) {
+  const initials = client.name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+
+  return (
+    <span className={`client-logo ${large ? "large" : ""}`}>
+      {client.logo_url ? <img src={client.logo_url} alt="" /> : <strong>{initials || "CL"}</strong>}
+    </span>
   );
 }
 
@@ -1747,7 +2590,7 @@ function createBlankConfig(moduleKey: ConfigModuleKey) {
   }
 
   if (moduleKey === "journey_templates") {
-    return { name: "", description: "", project_type_id: "", ...base };
+    return { name: "", description: "", project_type_id: "", context: "projeto", ...base };
   }
 
   if (moduleKey === "journey_steps") {
@@ -1805,7 +2648,15 @@ function getOrderColumn(tableName: keyof Tables) {
     return "step_order";
   }
 
+  if (tableName === "client_steps") {
+    return "step_order";
+  }
+
   if (tableName === "project_step_checklist_items") {
+    return "item_order";
+  }
+
+  if (tableName === "client_step_checklist_items") {
     return "item_order";
   }
 
@@ -1814,6 +2665,10 @@ function getOrderColumn(tableName: keyof Tables) {
   }
 
   if (tableName === "project_step_links") {
+    return "link_order";
+  }
+
+  if (tableName === "client_step_links") {
     return "link_order";
   }
 
@@ -1863,6 +2718,7 @@ function formatStatus(status: string) {
     rascunho: "Rascunho",
     arquivado: "Arquivado",
     planejado: "Planejado",
+    em_implantacao: "Em implantacao",
     em_andamento: "Em andamento",
     concluido: "Concluido",
     bloqueado: "Bloqueado",
@@ -1877,6 +2733,13 @@ function formatStepStatus(status: StepStatus) {
 
 async function copyText(value: string) {
   await navigator.clipboard.writeText(value);
+}
+
+function getDefaultClientTemplate(templates: JourneyTemplate[]) {
+  return (
+    templates.find((template) => template.context === "cliente" && template.name.toLowerCase().includes("integra")) ??
+    templates.find((template) => template.context === "cliente")
+  );
 }
 
 createRoot(document.getElementById("root")!).render(
