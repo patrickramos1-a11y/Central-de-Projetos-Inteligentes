@@ -1,6 +1,7 @@
 type Env = {
   DB: D1Database;
   FILES?: R2Bucket;
+  ASSETS?: Fetcher;
 };
 
 type RecordValue = string | number | boolean | null;
@@ -54,6 +55,10 @@ export default {
 
       if (parts[0] === "api" && parts[1] === "files") {
         return handleFileRequest(request, env, parts.slice(2), url);
+      }
+
+      if (env.ASSETS) {
+        return env.ASSETS.fetch(request);
       }
 
       return jsonError("Rota nao encontrada.", 404);

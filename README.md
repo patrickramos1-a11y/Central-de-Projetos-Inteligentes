@@ -15,27 +15,26 @@ A ideia central e permitir que a equipe construa uma jornada dentro do proprio p
 - Vite
 - React
 - TypeScript
-- Cloudflare Pages
-- Cloudflare Workers
+- Cloudflare Workers com Static Assets
 - Cloudflare D1
 - Cloudflare R2
 - Cloudflare Access
 
 ## Variaveis de ambiente
 
-Crie `.env.local` localmente ou configure no Cloudflare Pages:
+Crie `.env.local` localmente:
 
 ```env
 VITE_API_BASE_URL=
 ```
 
-Use `VITE_API_BASE_URL` vazio quando o frontend e a API estiverem no mesmo dominio. Use a URL do Worker quando a API estiver em dominio separado, por exemplo `https://central-projetos-ia-api.<subdominio>.workers.dev`.
+Use `VITE_API_BASE_URL` vazio quando o frontend e a API estiverem no mesmo dominio. A publicacao atual usa o proprio Worker para servir frontend e API, entao o build final usa esta variavel vazia.
 
 ## Cloudflare
 
 Arquivos principais:
 
-- `wrangler.jsonc`: configuracao do Worker, D1 e R2.
+- `wrangler.jsonc`: configuracao do Worker, Static Assets, D1 e R2.
 - `worker/index.ts`: API usada pelo frontend.
 - `cloudflare/migrations/0001_initial.sql`: schema inicial do D1 e seeds.
 
@@ -43,8 +42,9 @@ Recursos sugeridos:
 
 - D1: `central-projetos-ia`
 - R2: `central-projetos-ia-files`
-- Worker/API: `central-projetos-ia-api`
-- Pages: `central-de-projetos-inteligentes`
+- Worker/App/API: `central-projetos-ia-api`
+- URL publica atual: `https://central-projetos-ia-api.patrickramos1-a11y.workers.dev`
+- Pages: `central-de-projetos-inteligentes` criado, mas sem uso principal nesta fase.
 
 ## Scripts
 
@@ -59,15 +59,15 @@ npm run cf:dev
 Deploy:
 
 ```bash
+npm run build
 npm run cf:d1:migrate:remote
-npm run cf:deploy:api
-npm run cf:pages:deploy
+npm run cf:deploy
 ```
 
 Antes do deploy remoto, substitua `replace-with-d1-database-id` no `wrangler.jsonc` pelo ID real do banco D1 criado na Cloudflare.
 O D1 remoto atual criado para este projeto e `central-projetos-ia`, ID `8b150f2d-db0d-433e-8f88-98b5f83b3ef8`.
 
-Observacao Cloudflare: a conta precisa ter o subdominio `workers.dev` criado no dashboard em **Workers & Pages** para expor o Worker em URL publica. A API tambem indicou que o R2 ainda precisa ser habilitado no dashboard antes de anexos reais ficarem ativos.
+Observacao Cloudflare: o subdominio `workers.dev` da conta e `patrickramos1-a11y`, e o app esta publicado em `central-projetos-ia-api.patrickramos1-a11y.workers.dev`. O R2 ainda precisa ser habilitado no dashboard antes de anexos reais ficarem ativos.
 
 Para exportar os dados atuais do Supabase e gerar SQL de importacao para D1:
 
@@ -149,6 +149,6 @@ Execucao:
 
 ## Seguranca
 
-O banco D1 nao e exposto diretamente ao navegador. O frontend chama o Worker, e o Worker executa as operacoes no D1/R2.
+O banco D1 nao e exposto diretamente ao navegador. O frontend chama o Worker no mesmo dominio, e o Worker executa as operacoes no D1/R2.
 
-Para uso interno, proteja o Cloudflare Pages e o Worker com Cloudflare Access antes de cadastrar dados sensiveis. O Supabase deve permanecer apenas como backup durante a transicao.
+Para uso interno, proteja o Worker com Cloudflare Access antes de cadastrar dados sensiveis. O Supabase deve permanecer apenas como backup durante a transicao.
