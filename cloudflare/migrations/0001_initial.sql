@@ -211,6 +211,7 @@ CREATE TABLE IF NOT EXISTS client_step_links (
 
 CREATE INDEX IF NOT EXISTS journey_steps_template_order_idx ON journey_steps(journey_template_id, step_order);
 CREATE INDEX IF NOT EXISTS step_prompts_step_order_idx ON step_prompts(journey_step_id, prompt_order);
+CREATE UNIQUE INDEX IF NOT EXISTS step_prompts_step_title_idx ON step_prompts(journey_step_id, title);
 CREATE INDEX IF NOT EXISTS projects_type_idx ON projects(project_type_id);
 CREATE INDEX IF NOT EXISTS project_steps_project_order_idx ON project_steps(project_id, step_order);
 CREATE INDEX IF NOT EXISTS project_checklist_step_idx ON project_step_checklist_items(project_step_id);
@@ -339,4 +340,4 @@ VALUES
   ('projeto-ambiental-step-15', 'Prompt — carregar fotos e diretrizes', '', 'pendente', 1, 'Preencher com o prompt definitivo para preparar o relatório fotográfico.', 1, 'Prompt criado como espaço pendente para preenchimento manual.'),
   ('projeto-ambiental-step-16', 'Prompt — montar relatório fotográfico', '', 'pendente', 1, 'Preencher com o prompt definitivo para organizar fotos, ambientes e legendas técnicas.', 1, 'Prompt criado como espaço pendente para preenchimento manual.'),
   ('projeto-ambiental-step-17', 'Prompt — revisão final', '', 'pendente', 1, 'Preencher com o prompt definitivo para revisão de numeração, sumário, quebras e coerência geral.', 1, 'Prompt criado como espaço pendente para preenchimento manual.')
-ON CONFLICT(journey_step_id, prompt_id) DO NOTHING;
+ON CONFLICT(journey_step_id, title) DO NOTHING;
