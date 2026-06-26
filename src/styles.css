@@ -319,13 +319,22 @@ button {
   min-height: 154px;
   padding: 16px;
   color: inherit;
-  cursor: pointer;
   text-align: left;
 }
 
 .project-card:hover {
   border-color: #9dd8cc;
   box-shadow: 0 12px 32px rgba(15, 54, 49, 0.08);
+}
+
+.project-card-main {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .project-card-head {
@@ -402,6 +411,101 @@ button {
   height: 100%;
   background: #0f766e;
   border-radius: inherit;
+}
+
+.panel-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.compact-select {
+  height: 42px;
+  min-width: 150px;
+  border: 1px solid #dfe7e3;
+  border-radius: 8px;
+  color: #17211f;
+  background: #ffffff;
+  padding: 0 10px;
+}
+
+.danger-text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: max-content;
+  min-height: 34px;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #9f321e;
+  background: #fff1ed;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.danger-text-button:hover {
+  color: #7f2718;
+  background: #ffe0d6;
+}
+
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 18px;
+}
+
+.template-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #dfe7e3;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 16px;
+}
+
+.template-card p,
+.template-card small {
+  color: #66736f;
+  line-height: 1.45;
+}
+
+.template-card strong {
+  font-size: 17px;
+}
+
+.template-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.template-meta span,
+.warning-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border-radius: 999px;
+  padding: 0 9px;
+  color: #0f5f55;
+  background: #e7f3ef;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.template-meta .warning-chip {
+  color: #8d3219;
+  background: #ffe2d8;
+}
+
+.template-step-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 18px;
+  color: #34433f;
 }
 
 .journey-header {
@@ -639,6 +743,46 @@ button {
   padding: 14px;
 }
 
+.prompt-card.pending {
+  border-color: #f2c66d;
+  background: #fffaf0;
+}
+
+.prompt-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.prompt-status,
+.pending-summary {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  min-height: 24px;
+  border-radius: 999px;
+  color: #7b4e08;
+  background: #fff0c2;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.prompt-status.preenchido {
+  color: #0f5f55;
+  background: #dff5ee;
+}
+
+.prompt-status.nao_aplicavel {
+  color: #61706c;
+  background: #eef2f0;
+}
+
+.pending-summary {
+  margin-top: 7px;
+}
+
 .prompt-card strong {
   display: block;
   line-height: 1.25;
@@ -663,6 +807,16 @@ button {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.prompt-placeholder {
+  display: grid;
+  gap: 5px;
+  color: #7b4e08;
+  background: #fff4d6;
+  border: 1px dashed #e7b95a;
+  border-radius: 8px;
+  padding: 12px;
 }
 
 .local-prompt-form {
@@ -969,6 +1123,7 @@ button {
 
   .metric-grid,
   .project-grid,
+  .template-grid,
   .editor-grid,
   .local-prompt-form,
   .step-rail {
@@ -976,7 +1131,13 @@ button {
   }
 
   .search-field,
-  .journey-progress {
+  .journey-progress,
+  .compact-select {
+    width: 100%;
+  }
+
+  .panel-tools {
+    display: grid;
     width: 100%;
   }
 

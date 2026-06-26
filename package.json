@@ -6,10 +6,15 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "cf:dev": "wrangler dev --local --port 8787",
+    "cf:deploy:api": "wrangler deploy",
+    "cf:d1:migrate:local": "wrangler d1 migrations apply central-projetos-ia --local",
+    "cf:d1:migrate:remote": "wrangler d1 migrations apply central-projetos-ia --remote",
+    "cf:pages:deploy": "bun run build && wrangler pages deploy dist --project-name central-de-projetos-inteligentes",
+    "cf:export:supabase": "bun scripts/export-supabase-to-d1.mjs"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.50.0",
     "@vitejs/plugin-react": "^5.0.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
@@ -18,7 +23,9 @@
     "lucide-react": "^0.468.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260617.0",
     "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0"
+    "@types/react-dom": "^19.0.0",
+    "wrangler": "^4.22.0"
   }
 }

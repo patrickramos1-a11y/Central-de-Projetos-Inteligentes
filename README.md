@@ -2,9 +2,9 @@
 
 Aplicacao interna para configurar e conduzir jornadas operacionais de projetos tecnicos com apoio de IA.
 
-O sistema e separado em duas camadas:
+O sistema e separado em tres areas principais:
 
-- **Execucao**: projetos reais, etapas, checklist, prompts, observacoes e materiais.
+- **Projetos**: execucao real de projetos, etapas, checklist, prompts, observacoes e materiais.
 - **Clientes**: jornada de entrada/implantacao com checklist, evidencias, logo e progresso.
 - **Configuracoes**: ferramentas de IA, biblioteca de prompts, tipos de projeto, templates e procedimentos.
 
@@ -15,30 +15,36 @@ A ideia central e permitir que a equipe construa uma jornada dentro do proprio p
 - Vite
 - React
 - TypeScript
-- Supabase
-- Vercel
+- Cloudflare Pages
+- Cloudflare Workers
+- Cloudflare D1
+- Cloudflare R2
+- Cloudflare Access
 
 ## Variaveis de ambiente
 
-Crie `.env.local` localmente ou configure na Vercel:
+Crie `.env.local` localmente ou configure no Cloudflare Pages:
 
 ```env
-VITE_SUPABASE_URL=
-VITE_SUPABASE_ANON_KEY=
+VITE_API_BASE_URL=
 ```
 
-## Banco Supabase
+Use `VITE_API_BASE_URL` vazio quando o frontend e a API estiverem no mesmo dominio. Use a URL do Worker quando a API estiver em dominio separado, por exemplo `https://central-projetos-ia-api.<subdominio>.workers.dev`.
 
-1. Crie um projeto novo no Supabase, sugerido: `central-projetos-ia`.
-2. Abra o SQL Editor.
-3. Execute o arquivo [`supabase/schema.sql`](supabase/schema.sql).
-4. Copie a Project URL e a anon public key para as variaveis do app.
+## Cloudflare
 
-## Aviso de seguranca do MVP
+Arquivos principais:
 
-Nesta primeira publicacao, o app foi planejado como link publico sem login. O schema habilita RLS, mas cria policies temporarias que permitem `select`, `insert`, `update` e `delete` para `anon`.
+- `wrangler.jsonc`: configuracao do Worker, D1 e R2.
+- `worker/index.ts`: API usada pelo frontend.
+- `cloudflare/migrations/0001_initial.sql`: schema inicial do D1 e seeds.
 
-Isso serve apenas para validar o fluxo do MVP. Nao cadastre dados sensiveis enquanto o acesso estiver publico. O Supabase Advisor vai apontar essas policies como permissivas, e isso e esperado neste MVP. A proxima fase deve trocar essas policies por autenticacao e permissoes da equipe.
+Recursos sugeridos:
+
+- D1: `central-projetos-ia`
+- R2: `central-projetos-ia-files`
+- Worker/API: `central-projetos-ia-api`
+- Pages: `central-de-projetos-inteligentes`
 
 ## Scripts
 
@@ -46,6 +52,28 @@ Isso serve apenas para validar o fluxo do MVP. Nao cadastre dados sensiveis enqu
 npm install
 npm run dev
 npm run build
+npm run cf:d1:migrate:local
+npm run cf:dev
+```
+
+Deploy:
+
+```bash
+npm run cf:d1:migrate:remote
+npm run cf:deploy:api
+npm run cf:pages:deploy
+```
+
+Antes do deploy remoto, substitua `replace-with-d1-database-id` no `wrangler.jsonc` pelo ID real do banco D1 criado na Cloudflare.
+O D1 remoto atual criado para este projeto e `central-projetos-ia`, ID `8b150f2d-db0d-433e-8f88-98b5f83b3ef8`.
+
+Observacao Cloudflare: a conta precisa ter o subdominio `workers.dev` criado no dashboard em **Workers & Pages** para expor o Worker em URL publica. A API tambem indicou que o R2 ainda precisa ser habilitado no dashboard antes de anexos reais ficarem ativos.
+
+Para exportar os dados atuais do Supabase e gerar SQL de importacao para D1:
+
+```bash
+SUPABASE_URL=https://seu-projeto.supabase.co SUPABASE_SERVICE_ROLE_KEY=sua-chave bun run cf:export:supabase
+wrangler d1 execute central-projetos-ia --remote --file cloudflare/import/supabase-data.sql
 ```
 
 ## Fluxo principal
@@ -119,23 +147,8 @@ Execucao:
 - `client_step_checklist_items`
 - `client_step_links`
 
-Template inicial de cliente:
+## Seguranca
 
-- `Integração de Novo Cliente`
-  - Cadastro no SISRAMOS
-  - Plano de Ação
-  - Contrato
-  - Gestão
-  - Comunicação
+O banco D1 nao e exposto diretamente ao navegador. O frontend chama o Worker, e o Worker executa as operacoes no D1/R2.
 
-## Logos de ferramentas
-
-As logos iniciais ficam em `public/ai-tools`:
-
-- `/ai-tools/chatgpt.png`
-- `/ai-tools/claude.png`
-- `/ai-tools/notebooklm.png`
-
-O campo `logo_url` da tabela `ai_tools` deve receber um desses caminhos, ou uma URL externa.
-
-Se o banco ja tiver sido criado antes da inclusao das logos, execute apenas `supabase/add-ai-tool-logos.sql`.
+Para uso interno, proteja o Cloudflare Pages e o Worker com Cloudflare Access antes de cadastrar dados sensiveis. O Supabase deve permanecer apenas como backup durante a transicao.

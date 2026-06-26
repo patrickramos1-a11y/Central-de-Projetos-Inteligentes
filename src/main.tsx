@@ -25,14 +25,14 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
-import { createClient } from "@supabase/supabase-js";
+import { createCloudflareApi } from "./lib/cloudflareApi";
 import "./styles.css";
 
 type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
 type ProjectStatus = "planejado" | "em_andamento" | "concluido" | "bloqueado" | "arquivado";
 type ClientStatus = "em_implantacao" | "ativo" | "concluido" | "bloqueado" | "arquivado";
 type StepStatus = "pendente" | "em_andamento" | "concluido" | "bloqueado";
-type ViewMode = "projects" | "journey" | "clients" | "clientJourney" | "settings";
+type ViewMode = "projects" | "journey" | "projectTemplates" | "clients" | "clientJourney" | "settings";
 
 type AiTool = {
   id: string;
@@ -101,6 +101,9 @@ type StepPrompt = {
   title: string | null;
   content: string | null;
   ai_tool_id: string | null;
+  prompt_status: "pendente" | "preenchido" | "nao_aplicavel";
+  is_required: boolean;
+  placeholder_note: string | null;
   prompt_order: number;
   usage_notes: string | null;
 };
@@ -159,6 +162,9 @@ type ProjectStepPrompt = {
   title: string;
   content: string;
   ai_tool_id: string | null;
+  prompt_status: "pendente" | "preenchido" | "nao_aplicavel";
+  is_required: boolean;
+  placeholder_note: string | null;
   prompt_order: number;
   usage_notes: string | null;
 };
@@ -248,10 +254,9 @@ type ConfigModuleKey =
   | "journey_steps"
   | "procedures";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
-const hasSupabaseConfig = Boolean(supabaseUrl && supabaseAnonKey);
-const supabase = hasSupabaseConfig ? createClient(supabaseUrl!, supabaseAnonKey!) : null;
+const cloudflareApiUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
+const hasCloudflareApi = true;
+const supabase = createCloudflareApi(cloudflareApiUrl);
 
 const emptyTables: Tables = {
   ai_tools: [],
@@ -387,7 +392,7 @@ function App() {
 
   async function loadAll() {
     if (!supabase) {
-      setNotice("Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY para conectar ao banco.");
+      setNotice("Configure a API Cloudflare para conectar ao banco D1.");
       return;
     }
 
@@ -412,7 +417,7 @@ function App() {
 
     setTables(nextTables);
     setIsLoading(false);
-    setNotice(errors.length ? `Algumas tabelas ainda precisam ser criadas no Supabase (${errors.length}).` : "Dados sincronizados.");
+    setNotice(errors.length ? `Algumas tabelas ainda precisam ser criadas no Cloudflare D1 (${errors.length}).` : "Dados sincronizados.");
   }
 
   async function createProject(form: NewProjectFormState) {
@@ -422,7 +427,7 @@ function App() {
 
     setIsLoading(true);
     const { data: project, error } = await supabase
-      .from("projects")
+      .from<Project>("projects")
       .insert(
         normalizePayload({
           name: form.name,
@@ -478,7 +483,7 @@ function App() {
 
     for (const templateStep of templateSteps) {
       const { data: step } = await supabase
-        .from("project_steps")
+        .from<ProjectStep>("project_steps")
         .insert(
           normalizePayload({
             project_id: project.id,
@@ -521,11 +526,14 @@ function App() {
             title: link.title ?? libraryPrompt?.title ?? "Prompt da etapa",
             content: link.content ?? libraryPrompt?.content ?? "",
             ai_tool_id: link.ai_tool_id ?? libraryPrompt?.ai_tool_id ?? templateStep.ai_tool_id,
+            prompt_status: link.prompt_status ?? (link.content || libraryPrompt?.content ? "preenchido" : "pendente"),
+            is_required: link.is_required ?? true,
+            placeholder_note: link.placeholder_note,
             prompt_order: link.prompt_order || index + 1,
             usage_notes: link.usage_notes,
           };
         })
-        .filter((row) => row.content);
+        .filter((row) => row.title && (row.content || row.prompt_status === "pendente"));
 
       if (promptRows.length > 0) {
         await supabase.from("project_step_prompts").insert(promptRows);
@@ -543,7 +551,7 @@ function App() {
       Math.max(0, ...tables.project_steps.filter((step) => step.project_id === projectId).map((step) => step.step_order)) + 1;
 
     const { data, error } = await supabase
-      .from("project_steps")
+      .from<ProjectStep>("project_steps")
       .insert(
         normalizePayload({
           project_id: projectId,
@@ -605,6 +613,45 @@ function App() {
     }));
   }
 
+  async function deleteProject(projectId: string) {
+    const project = tables.projects.find((item) => item.id === projectId);
+
+    if (!project) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Excluir o projeto "${project.name}" e todas as etapas vinculadas?`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    await deleteRecord("projects", projectId);
+
+    setTables((current) => ({
+      ...current,
+      projects: current.projects.filter((item) => item.id !== projectId),
+      project_steps: current.project_steps.filter((step) => step.project_id !== projectId),
+      project_step_checklist_items: current.project_step_checklist_items.filter(
+        (item) => !current.project_steps.some((step) => step.project_id === projectId && step.id === item.project_step_id),
+      ),
+      project_step_prompts: current.project_step_prompts.filter(
+        (item) => !current.project_steps.some((step) => step.project_id === projectId && step.id === item.project_step_id),
+      ),
+      project_step_links: current.project_step_links.filter(
+        (item) => !current.project_steps.some((step) => step.project_id === projectId && step.id === item.project_step_id),
+      ),
+    }));
+
+    if (selectedProjectId === projectId) {
+      setSelectedProjectId(null);
+      setSelectedStepId(null);
+      setView("projects");
+    }
+
+    setNotice("Projeto excluido.");
+  }
+
   async function addChecklistItem(stepId: string, label: string) {
     if (!supabase || !label.trim()) {
       return;
@@ -612,7 +659,7 @@ function App() {
 
     const currentItems = tables.project_step_checklist_items.filter((item) => item.project_step_id === stepId);
     const { data, error } = await supabase
-      .from("project_step_checklist_items")
+      .from<ProjectChecklistItem>("project_step_checklist_items")
       .insert({ project_step_id: stepId, label: label.trim(), item_order: currentItems.length + 1 })
       .select("*")
       .single();
@@ -666,13 +713,15 @@ function App() {
 
     const currentPrompts = tables.project_step_prompts.filter((item) => item.project_step_id === stepId);
     const { data, error } = await supabase
-      .from("project_step_prompts")
+      .from<ProjectStepPrompt>("project_step_prompts")
       .insert({
         project_step_id: stepId,
         prompt_id: prompt.id,
         title: prompt.title,
         content: prompt.content,
         ai_tool_id: prompt.ai_tool_id,
+        prompt_status: prompt.content ? "preenchido" : "pendente",
+        is_required: true,
         prompt_order: currentPrompts.length + 1,
       })
       .select("*")
@@ -693,13 +742,15 @@ function App() {
 
     const currentPrompts = tables.project_step_prompts.filter((item) => item.project_step_id === stepId);
     const { data, error } = await supabase
-      .from("project_step_prompts")
+      .from<ProjectStepPrompt>("project_step_prompts")
       .insert(
         normalizePayload({
           project_step_id: stepId,
           title: title.trim(),
           content: content.trim(),
           ai_tool_id: aiToolId,
+          prompt_status: content.trim() ? "preenchido" : "pendente",
+          is_required: true,
           prompt_order: currentPrompts.length + 1,
         }),
       )
@@ -721,7 +772,7 @@ function App() {
 
     const currentLinks = tables.project_step_links.filter((item) => item.project_step_id === stepId);
     const { data, error } = await supabase
-      .from("project_step_links")
+      .from<ProjectStepLink>("project_step_links")
       .insert({ project_step_id: stepId, title: title.trim(), url: url.trim(), link_order: currentLinks.length + 1 })
       .select("*")
       .single();
@@ -751,7 +802,7 @@ function App() {
 
     const templateName = `${project.name} - template`;
     const { data: template, error } = await supabase
-      .from("journey_templates")
+      .from<JourneyTemplate>("journey_templates")
       .insert(
         normalizePayload({
           name: templateName,
@@ -808,6 +859,9 @@ function App() {
         title: prompt.prompt_id ? null : prompt.title,
         content: prompt.prompt_id ? null : prompt.content,
         ai_tool_id: prompt.ai_tool_id,
+        prompt_status: prompt.prompt_status,
+        is_required: prompt.is_required,
+        placeholder_note: prompt.placeholder_note,
         prompt_order: prompt.prompt_order || index + 1,
         usage_notes: prompt.usage_notes,
       }));
@@ -840,7 +894,7 @@ function App() {
     setIsLoading(true);
     const templateId = form.journey_template_id || getDefaultClientTemplate(tables.journey_templates)?.id || "";
     const { data: client, error } = await supabase
-      .from("clients")
+      .from<Client>("clients")
       .insert(
         normalizePayload({
           name: form.name,
@@ -898,7 +952,7 @@ function App() {
 
     for (const templateStep of templateSteps) {
       const { data: step } = await supabase
-        .from("client_steps")
+        .from<ClientStep>("client_steps")
         .insert(
           normalizePayload({
             client_id: client.id,
@@ -940,7 +994,7 @@ function App() {
       Math.max(0, ...tables.client_steps.filter((step) => step.client_id === clientId).map((step) => step.step_order)) + 1;
 
     const { data, error } = await supabase
-      .from("client_steps")
+      .from<ClientStep>("client_steps")
       .insert(
         normalizePayload({
           client_id: clientId,
@@ -1013,7 +1067,7 @@ function App() {
 
     const currentItems = tables.client_step_checklist_items.filter((item) => item.client_step_id === stepId);
     const { data, error } = await supabase
-      .from("client_step_checklist_items")
+      .from<ClientChecklistItem>("client_step_checklist_items")
       .insert({ client_step_id: stepId, label: label.trim(), item_order: currentItems.length + 1 })
       .select("*")
       .single();
@@ -1046,7 +1100,7 @@ function App() {
 
     const currentLinks = tables.client_step_links.filter((item) => item.client_step_id === stepId);
     const { data, error } = await supabase
-      .from("client_step_links")
+      .from<ClientStepLink>("client_step_links")
       .insert({ client_step_id: stepId, title: title.trim(), url: url.trim(), link_order: currentLinks.length + 1 })
       .select("*")
       .single();
@@ -1076,7 +1130,7 @@ function App() {
 
     const templateName = `${client.name} - template cliente`;
     const { data: template, error } = await supabase
-      .from("journey_templates")
+      .from<JourneyTemplate>("journey_templates")
       .insert(
         normalizePayload({
           name: templateName,
@@ -1136,6 +1190,10 @@ function App() {
             <PanelLeft size={18} />
             Projetos
           </button>
+          <button className={`nav-item ${view === "projectTemplates" ? "active" : ""}`} onClick={() => setView("projectTemplates")}>
+            <Route size={18} />
+            Templates
+          </button>
           <button className={`nav-item ${view === "clients" || view === "clientJourney" ? "active" : ""}`} onClick={() => setView("clients")}>
             <Users size={18} />
             Clientes
@@ -1163,7 +1221,7 @@ function App() {
       </aside>
 
       <main className="workspace">
-        <div className={`setup-alert ${hasSupabaseConfig ? "connected" : ""}`}>
+        <div className={`setup-alert ${hasCloudflareApi ? "connected" : ""}`}>
           {isLoading ? <Loader2 className="spin" size={18} /> : <Database size={18} />}
           <span>{notice}</span>
           <button className="ghost-button" onClick={() => void loadAll()}>
@@ -1172,7 +1230,22 @@ function App() {
           </button>
         </div>
 
-        {view === "projects" && <ProjectsView tables={tables} stats={stats} query={query} setQuery={setQuery} onCreate={createProject} onOpen={(id) => { setSelectedProjectId(id); setView("journey"); }} />}
+        {view === "projects" && (
+          <ProjectsView
+            tables={tables}
+            stats={stats}
+            query={query}
+            setQuery={setQuery}
+            onCreate={createProject}
+            onOpen={(id) => {
+              setSelectedProjectId(id);
+              setView("journey");
+            }}
+            onDelete={deleteProject}
+          />
+        )}
+
+        {view === "projectTemplates" && <ProjectTemplatesView tables={tables} query={query} setQuery={setQuery} />}
 
         {view === "clients" && <ClientsView tables={tables} query={query} setQuery={setQuery} onCreate={createClientJourney} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} />}
 
@@ -1273,6 +1346,7 @@ function ProjectsView({
   setQuery,
   onCreate,
   onOpen,
+  onDelete,
 }: {
   tables: Tables;
   stats: Array<{ label: string; value: number }>;
@@ -1280,9 +1354,12 @@ function ProjectsView({
   setQuery: (query: string) => void;
   onCreate: (form: NewProjectFormState) => void;
   onOpen: (id: string) => void;
+  onDelete: (id: string) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<ProjectStatus | "todos">("todos");
   const filteredProjects = tables.projects
+    .filter((project) => statusFilter === "todos" || project.status === statusFilter)
     .filter((project) => normalizeSearch(project.name, project.company, project.responsible).includes(query.toLowerCase()))
     .sort((a, b) => new Date(b.updated_at ?? b.created_at).getTime() - new Date(a.updated_at ?? a.created_at).getTime());
 
@@ -1316,10 +1393,20 @@ function ProjectsView({
             <h2>Projetos reais</h2>
             <p>Abra um projeto para executar a jornada, copiar prompts e marcar entregas.</p>
           </div>
-          <label className="search-field">
-            <Search size={16} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar projeto" />
-          </label>
+          <div className="panel-tools">
+            <label className="search-field">
+              <Search size={16} />
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar projeto" />
+            </label>
+            <select className="compact-select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ProjectStatus | "todos")}>
+              <option value="todos">Todos</option>
+              <option value="em_andamento">Em andamento</option>
+              <option value="planejado">Planejados</option>
+              <option value="concluido">Concluidos</option>
+              <option value="bloqueado">Bloqueados</option>
+              <option value="arquivado">Arquivados</option>
+            </select>
+          </div>
         </div>
 
         <div className="project-grid">
@@ -1329,19 +1416,25 @@ function ProjectsView({
             const progress = steps.length ? Math.round((done / steps.length) * 100) : 0;
 
             return (
-              <button className="project-card" key={project.id} onClick={() => onOpen(project.id)}>
-                <div className="project-card-head">
-                  <strong>{project.name}</strong>
-                  <StatusPill status={project.status} />
-                </div>
-                <span>{project.company || "Sem empresa definida"}</span>
-                <div className="progress-bar">
-                  <span style={{ width: `${progress}%` }} />
-                </div>
-                <small>
-                  {progress}% concluido - {steps.length} etapas
-                </small>
-              </button>
+              <article className="project-card" key={project.id}>
+                <button className="project-card-main" onClick={() => onOpen(project.id)}>
+                  <div className="project-card-head">
+                    <strong>{project.name}</strong>
+                    <StatusPill status={project.status} />
+                  </div>
+                  <span>{project.company || "Sem empresa definida"}</span>
+                  <div className="progress-bar">
+                    <span style={{ width: `${progress}%` }} />
+                  </div>
+                  <small>
+                    {progress}% concluido - {steps.length} etapas
+                  </small>
+                </button>
+                <button className="danger-text-button" onClick={() => onDelete(project.id)}>
+                  <Trash2 size={15} />
+                  Excluir projeto
+                </button>
+              </article>
             );
           })}
         </div>
@@ -1351,6 +1444,75 @@ function ProjectsView({
             <FileText size={34} />
             <strong>Nenhum projeto encontrado</strong>
             <span>Crie o primeiro projeto para iniciar uma jornada executavel.</span>
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
+function ProjectTemplatesView({ tables, query, setQuery }: { tables: Tables; query: string; setQuery: (query: string) => void }) {
+  const templates = tables.journey_templates
+    .filter((template) => template.context === "projeto" || template.context === "geral")
+    .filter((template) => normalizeSearch(template.name, template.description).includes(query.toLowerCase()))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return (
+    <>
+      <section className="topbar">
+        <div>
+          <h1>Templates</h1>
+          <p>Modelos de jornadas que podem ser usados para criar novos projetos.</p>
+        </div>
+      </section>
+
+      <section className="list-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Templates de projeto</h2>
+            <p>Veja a estrutura salva, as etapas e os prompts pendentes de preenchimento.</p>
+          </div>
+          <label className="search-field">
+            <Search size={16} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar template" />
+          </label>
+        </div>
+
+        <div className="template-grid">
+          {templates.map((template) => {
+            const steps = tables.journey_steps.filter((step) => step.journey_template_id === template.id).sort(byOrder);
+            const stepIds = new Set(steps.map((step) => step.id));
+            const prompts = tables.step_prompts.filter((prompt) => stepIds.has(prompt.journey_step_id));
+            const pendingPrompts = prompts.filter((prompt) => prompt.prompt_status === "pendente" || !String(prompt.content ?? "").trim()).length;
+
+            return (
+              <article className="template-card" key={template.id}>
+                <div className="project-card-head">
+                  <strong>{template.name}</strong>
+                  <StatusPill status={template.status} />
+                </div>
+                <p>{template.description || "Template sem descricao."}</p>
+                <div className="template-meta">
+                  <span>{steps.length} etapas</span>
+                  <span>{prompts.length} prompts</span>
+                  {pendingPrompts > 0 && <span className="warning-chip">{pendingPrompts} pendentes</span>}
+                </div>
+                <ol className="template-step-list">
+                  {steps.slice(0, 6).map((step) => (
+                    <li key={step.id}>{step.name}</li>
+                  ))}
+                </ol>
+                {steps.length > 6 && <small>+ {steps.length - 6} etapas</small>}
+              </article>
+            );
+          })}
+        </div>
+
+        {templates.length === 0 && (
+          <div className="empty-state">
+            <Route size={34} />
+            <strong>Nenhum template encontrado</strong>
+            <span>Cadastre ou salve uma jornada real como template.</span>
           </div>
         )}
       </section>
@@ -2006,11 +2168,15 @@ function PromptsPanel({
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [aiToolId, setAiToolId] = useState("");
+  const pendingCount = prompts.filter((prompt) => prompt.prompt_status === "pendente" || !prompt.content.trim()).length;
 
   return (
     <section className="work-block">
       <div className="block-heading">
-        <h2>Prompts da etapa</h2>
+        <div>
+          <h2>Prompts da etapa</h2>
+          {pendingCount > 0 && <span className="pending-summary">{pendingCount} prompt(s) pendente(s) de preenchimento</span>}
+        </div>
         <div className="inline-form">
           <select value={promptId} onChange={(event) => setPromptId(event.target.value)}>
             <option value="">Buscar na biblioteca</option>
@@ -2028,14 +2194,24 @@ function PromptsPanel({
 
       <div className="prompt-list">
         {prompts.map((prompt) => (
-          <article className="prompt-card" key={prompt.id}>
+          <article className={`prompt-card ${prompt.prompt_status === "pendente" || !prompt.content.trim() ? "pending" : ""}`} key={prompt.id}>
             <div>
-              <strong>{prompt.title}</strong>
+              <div className="prompt-card-title">
+                <strong>{prompt.title}</strong>
+                <span className={`prompt-status ${prompt.prompt_status}`}>{formatPromptStatus(prompt.prompt_status, prompt.content)}</span>
+              </div>
               <span>{findName(tables.ai_tools, prompt.ai_tool_id) || "Ferramenta livre"}</span>
             </div>
-            <pre>{prompt.content}</pre>
+            {prompt.content.trim() ? (
+              <pre>{prompt.content}</pre>
+            ) : (
+              <div className="prompt-placeholder">
+                <strong>Falta preencher este prompt.</strong>
+                <span>{prompt.placeholder_note || "Edite este prompt na etapa ou em Configuracoes antes de usar."}</span>
+              </div>
+            )}
             <div className="row-actions">
-              <button onClick={() => void copyText(prompt.content)}>
+              <button disabled={!prompt.content.trim()} onClick={() => void copyText(prompt.content)}>
                 <Copy size={16} />
               </button>
               <button onClick={() => onDelete(prompt.id)}>
@@ -2729,6 +2905,18 @@ function formatStatus(status: string) {
 
 function formatStepStatus(status: StepStatus) {
   return formatStatus(status);
+}
+
+function formatPromptStatus(status: ProjectStepPrompt["prompt_status"], content: string) {
+  if (status === "nao_aplicavel") {
+    return "Nao aplicavel";
+  }
+
+  if (status === "pendente" || !content.trim()) {
+    return "Falta preencher";
+  }
+
+  return "Pronto";
 }
 
 async function copyText(value: string) {

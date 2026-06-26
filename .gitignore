@@ -1,9 +1,11 @@
 node_modules
 dist
+worker-dist
 .env
 .env.local
 *.log
 
 .vercel
+.wrangler
 .agents
 skills-lock.json

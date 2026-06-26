@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "central-projetos-ia-api",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-06-17",
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "central-projetos-ia",
+      "database_id": "8b150f2d-db0d-433e-8f88-98b5f83b3ef8",
+      "migrations_dir": "cloudflare/migrations"
+    }
+  ],
+  // Ative o R2 no dashboard Cloudflare e descomente para habilitar anexos.
+  // "r2_buckets": [
+  //   {
+  //     "binding": "FILES",
+  //     "bucket_name": "central-projetos-ia-files"
+  //   }
+  // ]
+}
