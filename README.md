@@ -6,7 +6,7 @@ O sistema e separado em tres areas principais:
 
 - **Projetos**: execucao real de projetos, etapas, checklist, prompts, observacoes e materiais.
 - **Clientes**: jornada de entrada/implantacao com checklist, evidencias, logo e progresso.
-- **Configuracoes**: ferramentas de IA, biblioteca de prompts, tipos de projeto, templates e procedimentos.
+- **Configuracoes**: usuarios simples, ferramentas de IA, biblioteca de prompts, tipos de projeto, templates e procedimentos.
 
 A ideia central e permitir que a equipe construa uma jornada dentro do proprio projeto ou cliente e, quando ela ficar boa, salve essa estrutura como template para reutilizar.
 
@@ -18,7 +18,7 @@ A ideia central e permitir que a equipe construa uma jornada dentro do proprio p
 - Cloudflare Workers com Static Assets
 - Cloudflare D1
 - Cloudflare R2
-- Cloudflare Access
+- Entrada simples por usuario interno, sem login externo nesta fase
 
 ## Variaveis de ambiente
 
@@ -128,6 +128,7 @@ Clientes:
 
 Configuracoes:
 
+- `app_users`
 - `ai_tools`
 - `prompt_categories`
 - `prompts`
@@ -153,6 +154,6 @@ Execucao:
 
 O banco D1 nao e exposto diretamente ao navegador. O frontend chama o Worker no mesmo dominio, e o Worker executa as operacoes no D1/R2.
 
-O Worker publicado esta protegido por Cloudflare Access. A aplicacao Access `Central de Projetos IA` usa o dominio de login `central-projetos-ia.cloudflareaccess.com` e permite acesso inicial ao e-mail `Patrickramos1@gmail.com`.
+Nesta fase, o Worker publicado fica aberto e o painel usa apenas uma entrada simples por usuario interno. O usuario inicial e `Patrick`, e novos usuarios podem ser cadastrados na tela inicial ou em **Configuracoes > Usuarios**. Isso nao e autenticacao forte; serve apenas para organizar o uso durante o MVP.
 
 O Supabase deve permanecer apenas como backup durante a transicao.

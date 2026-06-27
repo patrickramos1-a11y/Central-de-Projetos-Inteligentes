@@ -1,5 +1,13 @@
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE IF NOT EXISTS app_users (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ativo' CHECK (status IN ('ativo', 'inativo', 'arquivado')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
 CREATE TABLE IF NOT EXISTS ai_tools (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   name TEXT NOT NULL,

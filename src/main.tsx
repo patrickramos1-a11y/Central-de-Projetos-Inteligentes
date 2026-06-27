@@ -35,6 +35,14 @@ type ClientStatus = "em_implantacao" | "ativo" | "concluido" | "bloqueado" | "ar
 type StepStatus = "pendente" | "em_andamento" | "concluido" | "bloqueado";
 type ViewMode = "projects" | "journey" | "projectTemplates" | "clients" | "clientJourney" | "settings";
 
+type AppUser = {
+  id: string;
+  name: string;
+  status: ConfigStatus;
+  created_at: string;
+  updated_at: string;
+};
+
 type AiTool = {
   id: string;
   name: string;
@@ -227,6 +235,7 @@ type ClientStepLink = {
 };
 
 type Tables = {
+  app_users: AppUser[];
   ai_tools: AiTool[];
   prompt_categories: PromptCategory[];
   project_types: ProjectType[];
@@ -247,6 +256,7 @@ type Tables = {
 };
 
 type ConfigModuleKey =
+  | "app_users"
   | "ai_tools"
   | "prompt_categories"
   | "prompts"
@@ -265,6 +275,7 @@ type UploadedFile = {
 };
 
 const emptyTables: Tables = {
+  app_users: [],
   ai_tools: [],
   prompt_categories: [],
   project_types: [],
@@ -285,6 +296,12 @@ const emptyTables: Tables = {
 };
 
 const configModules: Array<{ key: ConfigModuleKey; label: string; icon: typeof Bot; description: string }> = [
+  {
+    key: "app_users",
+    label: "Usuarios",
+    icon: Users,
+    description: "Pessoas que aparecem na entrada simples do painel, sem e-mail ou senha.",
+  },
   {
     key: "ai_tools",
     label: "Ferramentas de IA",
@@ -333,6 +350,7 @@ function App() {
   const [view, setView] = useState<ViewMode>("projects");
   const [activeConfig, setActiveConfig] = useState<ConfigModuleKey>("prompts");
   const [tables, setTables] = useState<Tables>(emptyTables);
+  const [currentUserId, setCurrentUserId] = useState(() => localStorage.getItem("central_ia_user_id") ?? "");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
@@ -353,6 +371,8 @@ function App() {
     [tables.client_steps, selectedClientId],
   );
   const selectedClientStep = clientSteps.find((step) => step.id === selectedClientStepId) ?? clientSteps[0] ?? null;
+  const activeUsers = tables.app_users.filter((user) => user.status === "ativo");
+  const currentUser = tables.app_users.find((user) => user.id === currentUserId) ?? null;
 
   const stats = useMemo(() => {
     const activeProjects = tables.projects.filter((project) => project.status !== "arquivado");
@@ -396,6 +416,17 @@ function App() {
     }
   }, [clientSteps, selectedClientStepId]);
 
+  useEffect(() => {
+    if (!currentUserId) {
+      return;
+    }
+
+    if (tables.app_users.length > 0 && !tables.app_users.some((user) => user.id === currentUserId && user.status === "ativo")) {
+      localStorage.removeItem("central_ia_user_id");
+      setCurrentUserId("");
+    }
+  }, [currentUserId, tables.app_users]);
+
   async function loadAll() {
     if (!supabase) {
       setNotice("Configure a API Cloudflare para conectar ao banco D1.");
@@ -424,6 +455,40 @@ function App() {
     setTables(nextTables);
     setIsLoading(false);
     setNotice(errors.length ? `Algumas tabelas ainda precisam ser criadas no Cloudflare D1 (${errors.length}).` : "Dados sincronizados.");
+  }
+
+  function selectUser(userId: string) {
+    localStorage.setItem("central_ia_user_id", userId);
+    setCurrentUserId(userId);
+  }
+
+  async function createAppUser(name: string) {
+    if (!supabase || !name.trim()) {
+      return;
+    }
+
+    setIsLoading(true);
+    const { data, error } = await supabase
+      .from<AppUser>("app_users")
+      .insert(
+        normalizePayload({
+          name: name.trim(),
+          status: "ativo",
+          updated_at: new Date().toISOString(),
+        }),
+      )
+      .select("*")
+      .single();
+    setIsLoading(false);
+
+    if (error || !data) {
+      setNotice(`Erro ao criar usuario: ${error?.message ?? "erro desconhecido"}`);
+      return;
+    }
+
+    setTables((current) => ({ ...current, app_users: [...current.app_users, data as AppUser] }));
+    selectUser(data.id);
+    setNotice(`Usuario ${data.name} criado.`);
   }
 
   async function createProject(form: NewProjectFormState) {
@@ -1231,6 +1296,19 @@ function App() {
     setNotice(`Template "${templateName}" salvo a partir da jornada do cliente.`);
   }
 
+  if (!currentUser) {
+    return (
+      <UserEntryScreen
+        users={activeUsers}
+        isLoading={isLoading}
+        notice={notice}
+        onSelect={selectUser}
+        onCreate={createAppUser}
+        onRefresh={() => void loadAll()}
+      />
+    );
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -1259,6 +1337,12 @@ function App() {
             Configuracoes
           </button>
         </nav>
+
+        <div className="sidebar-user">
+          <span>Usuario atual</span>
+          <strong>{currentUser.name}</strong>
+          <button onClick={() => setCurrentUserId("")}>Trocar usuario</button>
+        </div>
 
         {view === "settings" && (
           <div className="subnav">
@@ -2193,6 +2277,75 @@ function FileUploadButton({ onUpload }: { onUpload: (file: File) => void }) {
   );
 }
 
+function UserEntryScreen({
+  users,
+  isLoading,
+  notice,
+  onSelect,
+  onCreate,
+  onRefresh,
+}: {
+  users: AppUser[];
+  isLoading: boolean;
+  notice: string;
+  onSelect: (userId: string) => void;
+  onCreate: (name: string) => void;
+  onRefresh: () => void;
+}) {
+  const [name, setName] = useState("");
+
+  return (
+    <main className="user-entry">
+      <section className="user-entry-panel">
+        <div className="brand">
+          <span className="brand-mark">
+            <Sparkles size={20} />
+          </span>
+          <span>Central de Projetos IA</span>
+        </div>
+
+        <div className="user-entry-heading">
+          <h1>Escolha o usuario</h1>
+          <p>Entrada simples para identificar quem esta usando o painel nesta fase.</p>
+        </div>
+
+        <div className="user-list">
+          {users.map((user) => (
+            <button className="user-card" key={user.id} onClick={() => onSelect(user.id)}>
+              <span>{getInitials(user.name)}</span>
+              <strong>{user.name}</strong>
+            </button>
+          ))}
+          {users.length === 0 && <span className="muted">Nenhum usuario ativo encontrado.</span>}
+        </div>
+
+        <form
+          className="user-create"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onCreate(name);
+            setName("");
+          }}
+        >
+          <Field label="Novo usuario" value={name} onChange={setName} />
+          <button className="primary-button" type="submit" disabled={!name.trim() || isLoading}>
+            <Plus size={16} />
+            Criar e entrar
+          </button>
+        </form>
+
+        <div className="entry-footer">
+          <span>{notice}</span>
+          <button className="ghost-button" onClick={onRefresh}>
+            <RefreshCw size={16} />
+            Sincronizar
+          </button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function ChecklistPanel({
   items,
   onAdd,
@@ -2602,6 +2755,15 @@ function ConfigForm({
     );
   }
 
+  if (moduleKey === "app_users") {
+    return (
+      <div className="form-grid">
+        <Field label="Nome" value={value.name} onChange={(next) => onChange("name", next)} />
+        <ConfigStatusField value={value.status} onChange={(next) => onChange("status", next)} />
+      </div>
+    );
+  }
+
   if (moduleKey === "prompt_categories" || moduleKey === "project_types") {
     return (
       <div className="form-grid">
@@ -2705,13 +2867,7 @@ function EmptyClientJourney({ onBack }: { onBack: () => void }) {
 }
 
 function ClientLogo({ client, large = false }: { client: Client; large?: boolean }) {
-  const initials = client.name
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase();
+  const initials = getInitials(client.name);
 
   return (
     <span className={`client-logo ${large ? "large" : ""}`}>
@@ -2850,6 +3006,10 @@ function StatusPill({ status }: { status: string }) {
 function createBlankConfig(moduleKey: ConfigModuleKey) {
   const base = { status: "ativo" as ConfigStatus };
 
+  if (moduleKey === "app_users") {
+    return { name: "", ...base };
+  }
+
   if (moduleKey === "ai_tools") {
     return { name: "", description: "", logo_url: "", access_url: "", usage_instructions: "", ...base };
   }
@@ -2911,6 +3071,16 @@ function normalizeSearch(...values: unknown[]) {
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+}
+
+function getInitials(value: string) {
+  return value
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
 }
 
 function splitChecklist(value: string | null) {

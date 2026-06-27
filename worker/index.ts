@@ -8,6 +8,7 @@ type RecordValue = string | number | boolean | null;
 type DataRecord = Record<string, RecordValue | undefined>;
 
 const tableColumns: Record<string, string[]> = {
+  app_users: ["id", "name", "status", "created_at", "updated_at"],
   ai_tools: ["id", "name", "description", "logo_url", "access_url", "usage_instructions", "status", "created_at"],
   prompt_categories: ["id", "name", "description", "status", "created_at"],
   project_types: ["id", "name", "description", "status", "created_at"],

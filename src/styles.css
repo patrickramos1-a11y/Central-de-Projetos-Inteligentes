@@ -35,6 +35,94 @@ button {
   min-height: 100vh;
 }
 
+.user-entry {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.user-entry-panel {
+  width: min(620px, 100%);
+  background: #ffffff;
+  border: 1px solid #dfe7e3;
+  border-radius: 8px;
+  padding: 24px;
+}
+
+.user-entry-panel .brand {
+  margin-bottom: 26px;
+}
+
+.user-entry-heading h1 {
+  margin: 0;
+  color: #102f2c;
+  font-size: 30px;
+  line-height: 1.15;
+}
+
+.user-entry-heading p {
+  margin: 8px 0 0;
+  color: #66736f;
+}
+
+.user-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin: 22px 0;
+}
+
+.user-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px;
+  color: #102f2c;
+  background: #f8fbfa;
+  border: 1px solid #dfe7e3;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.user-card:hover {
+  background: #e7f3ef;
+}
+
+.user-card span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  color: #ffffff;
+  background: #0f766e;
+  font-weight: 800;
+}
+
+.user-create,
+.entry-footer {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+}
+
+.user-create .field {
+  flex: 1;
+}
+
+.entry-footer {
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #edf1ef;
+  color: #66736f;
+  font-size: 14px;
+}
+
 .sidebar {
   position: sticky;
   top: 0;
@@ -72,6 +160,32 @@ button {
 .subnav {
   display: grid;
   gap: 6px;
+}
+
+.sidebar-user {
+  display: grid;
+  gap: 5px;
+  margin-top: 18px;
+  padding: 12px;
+  color: #102f2c;
+  background: #f8fbfa;
+  border: 1px solid #dfe7e3;
+  border-radius: 8px;
+}
+
+.sidebar-user span {
+  color: #66736f;
+  font-size: 12px;
+}
+
+.sidebar-user button {
+  justify-self: start;
+  padding: 0;
+  color: #0f766e;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 750;
 }
 
 .subnav {

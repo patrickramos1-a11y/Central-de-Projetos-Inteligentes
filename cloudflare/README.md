@@ -5,7 +5,7 @@ Infraestrutura alvo da Central de Projetos IA:
 - Cloudflare Worker com Static Assets para o Vite/React e API.
 - Cloudflare D1 para dados relacionais.
 - Cloudflare R2 para arquivos.
-- Cloudflare Access para proteger o painel da equipe.
+- Entrada simples por usuario interno nesta fase, sem Cloudflare Access ativo.
 
 ## Recursos sugeridos
 
@@ -32,7 +32,7 @@ npm run build
 npm run cf:deploy
 ```
 
-Depois, valide o login pelo Cloudflare Access antes de cadastrar dados sensiveis.
+Depois, valide a entrada simples por usuario no painel antes de cadastrar dados operacionais.
 
 Estado remoto ja criado:
 
@@ -40,15 +40,13 @@ Estado remoto ja criado:
 - R2 `central-projetos-ia-files`
 - Worker/App/API `central-projetos-ia-api`
 - Subdominio workers.dev `patrickramos1-a11y`
-- Zero Trust organization `Central de Projetos IA`: `central-projetos-ia.cloudflareaccess.com`
-- Access application `Central de Projetos IA`: `40da548d-e7bd-45c0-b382-08fc1fa58ab4`
-- Access policy `Equipe Ramos Engenharia`: permite `Patrickramos1@gmail.com`
+- D1 table `app_users`, com usuario inicial `Patrick`
 - Pages project `central-de-projetos-inteligentes`, sem deployment principal
 
 Pendencias opcionais no dashboard Cloudflare:
 
-- Adicionar outros e-mails da equipe na policy `Equipe Ramos Engenharia`.
-- Ajustar identidade/login se quiser usar Google Workspace ou outro provedor como IdP dedicado.
+- Reativar Cloudflare Access no futuro, quando o painel precisar de autenticacao forte por e-mail ou provedor de identidade.
+- Configurar dominio proprio para substituir a rota `workers.dev`.
 
 ## Exportar dados do Supabase
 
