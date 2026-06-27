@@ -7,6 +7,7 @@ import {
   Clipboard,
   Copy,
   Database,
+  Upload,
   FileText,
   GitBranch,
   Layers3,
@@ -257,6 +258,11 @@ type ConfigModuleKey =
 const cloudflareApiUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 const hasCloudflareApi = true;
 const supabase = createCloudflareApi(cloudflareApiUrl);
+
+type UploadedFile = {
+  key: string;
+  url: string;
+};
 
 const emptyTables: Tables = {
   ai_tools: [],
@@ -785,6 +791,16 @@ function App() {
     setTables((current) => ({ ...current, project_step_links: [...current.project_step_links, data as ProjectStepLink] }));
   }
 
+  async function uploadStepFile(stepId: string, file: File) {
+    const uploaded = await uploadFileToR2(file);
+
+    if (!uploaded) {
+      return;
+    }
+
+    await addStepLink(stepId, file.name, uploaded.url);
+  }
+
   async function addNextStep(projectId: string, name: string) {
     const step = await createProjectStep(projectId, { name: name || "Nova etapa" });
 
@@ -1113,6 +1129,46 @@ function App() {
     setTables((current) => ({ ...current, client_step_links: [...current.client_step_links, data as ClientStepLink] }));
   }
 
+  async function uploadClientStepFile(stepId: string, file: File) {
+    const uploaded = await uploadFileToR2(file);
+
+    if (!uploaded) {
+      return;
+    }
+
+    await addClientStepLink(stepId, file.name, uploaded.url);
+  }
+
+  async function uploadFileToR2(file: File) {
+    try {
+      setIsLoading(true);
+      const contentBase64 = await fileToBase64(file);
+      const response = await fetch(`${cloudflareApiUrl.replace(/\/$/, "")}/api/files`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: file.name,
+          contentBase64,
+          contentType: file.type || "application/octet-stream",
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { data?: UploadedFile; error?: string };
+
+      if (!response.ok || !payload.data) {
+        setNotice(`Erro ao enviar arquivo: ${payload.error ?? "upload nao concluido"}`);
+        return null;
+      }
+
+      setNotice("Arquivo enviado e vinculado a etapa.");
+      return payload.data;
+    } catch (error) {
+      setNotice(`Erro ao enviar arquivo: ${error instanceof Error ? error.message : "erro desconhecido"}`);
+      return null;
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   async function addNextClientStep(clientId: string, name: string) {
     const step = await createClientStep(clientId, { name: name || "Nova etapa" });
 
@@ -1267,6 +1323,7 @@ function App() {
             onAddLocalPrompt={addLocalPrompt}
             onDeletePrompt={(id) => deleteRecord("project_step_prompts", id)}
             onAddLink={addStepLink}
+            onUploadFile={uploadStepFile}
             onDeleteLink={(id) => deleteRecord("project_step_links", id)}
             onAddNextStep={addNextStep}
             onSaveTemplate={saveProjectAsTemplate}
@@ -1292,6 +1349,7 @@ function App() {
             onToggleChecklist={toggleClientChecklistItem}
             onDeleteChecklist={(id) => deleteRecord("client_step_checklist_items", id)}
             onAddLink={addClientStepLink}
+            onUploadFile={uploadClientStepFile}
             onDeleteLink={(id) => deleteRecord("client_step_links", id)}
             onAddNextStep={addNextClientStep}
             onSaveTemplate={saveClientAsTemplate}
@@ -1737,6 +1795,7 @@ function ClientJourneyView({
   onToggleChecklist,
   onDeleteChecklist,
   onAddLink,
+  onUploadFile,
   onDeleteLink,
   onAddNextStep,
   onSaveTemplate,
@@ -1753,6 +1812,7 @@ function ClientJourneyView({
   onToggleChecklist: (item: ClientChecklistItem) => void;
   onDeleteChecklist: (id: string) => void;
   onAddLink: (stepId: string, title: string, url: string) => void;
+  onUploadFile: (stepId: string, file: File) => void;
   onDeleteLink: (id: string) => void;
   onAddNextStep: (clientId: string, name: string) => void;
   onSaveTemplate: (client: Client) => void;
@@ -1831,7 +1891,7 @@ function ClientJourneyView({
           </div>
 
           <ClientChecklistPanel items={checklist} onAdd={(label) => onAddChecklist(selectedStep.id, label)} onToggle={onToggleChecklist} onDelete={onDeleteChecklist} />
-          <ClientLinksPanel links={links} onAdd={(title, url) => onAddLink(selectedStep.id, title, url)} onDelete={onDeleteLink} />
+          <ClientLinksPanel links={links} onAdd={(title, url) => onAddLink(selectedStep.id, title, url)} onUpload={(file) => onUploadFile(selectedStep.id, file)} onDelete={onDeleteLink} />
         </section>
 
         <aside className="action-panel">
@@ -1912,7 +1972,17 @@ function ClientChecklistPanel({
   );
 }
 
-function ClientLinksPanel({ links, onAdd, onDelete }: { links: ClientStepLink[]; onAdd: (title: string, url: string) => void; onDelete: (id: string) => void }) {
+function ClientLinksPanel({
+  links,
+  onAdd,
+  onUpload,
+  onDelete,
+}: {
+  links: ClientStepLink[];
+  onAdd: (title: string, url: string) => void;
+  onUpload: (file: File) => void;
+  onDelete: (id: string) => void;
+}) {
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
 
@@ -1934,6 +2004,7 @@ function ClientLinksPanel({ links, onAdd, onDelete }: { links: ClientStepLink[];
           <button className="icon-button" type="submit">
             <Plus size={16} />
           </button>
+          <FileUploadButton onUpload={onUpload} />
         </form>
       </div>
       <div className="link-list">
@@ -1941,7 +2012,9 @@ function ClientLinksPanel({ links, onAdd, onDelete }: { links: ClientStepLink[];
           <div className="record-row compact" key={link.id}>
             <div>
               <strong>{link.title}</strong>
-              <span>{link.url}</span>
+              <a href={link.url} target="_blank" rel="noreferrer">
+                {link.url}
+              </a>
             </div>
             <button onClick={() => onDelete(link.id)}>
               <Trash2 size={15} />
@@ -1970,6 +2043,7 @@ function JourneyView({
   onAddLocalPrompt,
   onDeletePrompt,
   onAddLink,
+  onUploadFile,
   onDeleteLink,
   onAddNextStep,
   onSaveTemplate,
@@ -1991,6 +2065,7 @@ function JourneyView({
   onAddLocalPrompt: (stepId: string, title: string, content: string, aiToolId: string) => void;
   onDeletePrompt: (id: string) => void;
   onAddLink: (stepId: string, title: string, url: string) => void;
+  onUploadFile: (stepId: string, file: File) => void;
   onDeleteLink: (id: string) => void;
   onAddNextStep: (projectId: string, name: string) => void;
   onSaveTemplate: (project: Project) => void;
@@ -2064,7 +2139,7 @@ function JourneyView({
 
           <ChecklistPanel items={checklist} onAdd={(label) => onAddChecklist(selectedStep.id, label)} onToggle={onToggleChecklist} onDelete={onDeleteChecklist} />
           <PromptsPanel tables={tables} prompts={prompts} stepId={selectedStep.id} onAddExisting={onAddExistingPrompt} onAddLocal={onAddLocalPrompt} onDelete={onDeletePrompt} />
-          <LinksPanel links={links} onAdd={(title, url) => onAddLink(selectedStep.id, title, url)} onDelete={onDeleteLink} />
+          <LinksPanel links={links} onAdd={(title, url) => onAddLink(selectedStep.id, title, url)} onUpload={(file) => onUploadFile(selectedStep.id, file)} onDelete={onDeleteLink} />
         </section>
 
         <aside className="action-panel">
@@ -2096,6 +2171,25 @@ function JourneyView({
         </aside>
       </section>
     </>
+  );
+}
+
+function FileUploadButton({ onUpload }: { onUpload: (file: File) => void }) {
+  return (
+    <label className="icon-button file-upload-button" title="Enviar arquivo">
+      <Upload size={16} />
+      <input
+        type="file"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+
+          if (file) {
+            onUpload(file);
+            event.currentTarget.value = "";
+          }
+        }}
+      />
+    </label>
   );
 }
 
@@ -2243,7 +2337,17 @@ function PromptsPanel({
   );
 }
 
-function LinksPanel({ links, onAdd, onDelete }: { links: ProjectStepLink[]; onAdd: (title: string, url: string) => void; onDelete: (id: string) => void }) {
+function LinksPanel({
+  links,
+  onAdd,
+  onUpload,
+  onDelete,
+}: {
+  links: ProjectStepLink[];
+  onAdd: (title: string, url: string) => void;
+  onUpload: (file: File) => void;
+  onDelete: (id: string) => void;
+}) {
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
 
@@ -2265,6 +2369,7 @@ function LinksPanel({ links, onAdd, onDelete }: { links: ProjectStepLink[]; onAd
           <button className="icon-button" type="submit">
             <Plus size={16} />
           </button>
+          <FileUploadButton onUpload={onUpload} />
         </form>
       </div>
       <div className="link-list">
@@ -2272,7 +2377,9 @@ function LinksPanel({ links, onAdd, onDelete }: { links: ProjectStepLink[]; onAd
           <div className="record-row compact" key={link.id}>
             <div>
               <strong>{link.title}</strong>
-              <span>{link.url}</span>
+              <a href={link.url} target="_blank" rel="noreferrer">
+                {link.url}
+              </a>
             </div>
             <button onClick={() => onDelete(link.id)}>
               <Trash2 size={15} />
@@ -2921,6 +3028,20 @@ function formatPromptStatus(status: ProjectStepPrompt["prompt_status"], content:
 
 async function copyText(value: string) {
   await navigator.clipboard.writeText(value);
+}
+
+function fileToBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const value = String(reader.result ?? "");
+      resolve(value.includes(",") ? value.split(",")[1] : value);
+    };
+
+    reader.onerror = () => reject(reader.error ?? new Error("Falha ao ler arquivo."));
+    reader.readAsDataURL(file);
+  });
 }
 
 function getDefaultClientTemplate(templates: JourneyTemplate[]) {

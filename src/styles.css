@@ -912,6 +912,14 @@ button {
   cursor: pointer;
 }
 
+.file-upload-button {
+  cursor: pointer;
+}
+
+.file-upload-button input {
+  display: none;
+}
+
 .row-actions button:hover,
 .record-row.compact button:hover,
 .icon-button:hover {
@@ -922,6 +930,16 @@ button {
 .icon-button.subtle {
   color: #7a8782;
   background: transparent;
+}
+
+.link-list a {
+  color: #0f766e;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.link-list a:hover {
+  text-decoration: underline;
 }
 
 .status-pill {

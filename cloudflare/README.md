@@ -37,13 +37,16 @@ Depois, configure o Cloudflare Access para proteger o Worker publicado.
 Estado remoto ja criado:
 
 - D1 `central-projetos-ia`: `8b150f2d-db0d-433e-8f88-98b5f83b3ef8`
+- R2 `central-projetos-ia-files`
 - Worker/App/API `central-projetos-ia-api`
 - Subdominio workers.dev `patrickramos1-a11y`
 - Pages project `central-de-projetos-inteligentes`, sem deployment principal
 
 Pendencias no dashboard Cloudflare:
 
-- Habilitar **R2** para criar `central-projetos-ia-files` e reativar o binding `FILES` no `wrangler.jsonc`.
+- Configurar **Cloudflare Access** no Worker para restringir o painel a equipe.
+
+Como o token atual do Wrangler nao tem escopo de Access, essa protecao precisa ser feita no dashboard ou com um token da Cloudflare que tenha permissao de **Access: Apps and Policies Write**. Pelo dashboard: Workers & Pages > `central-projetos-ia-api` > Settings > Domains & Routes > habilitar Cloudflare Access na rota `workers.dev`, depois definir a politica com os e-mails permitidos.
 
 ## Exportar dados do Supabase
 

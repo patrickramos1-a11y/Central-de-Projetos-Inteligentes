@@ -23,11 +23,10 @@
       "migrations_dir": "cloudflare/migrations"
     }
   ],
-  // Ative o R2 no dashboard Cloudflare e descomente para habilitar anexos.
-  // "r2_buckets": [
-  //   {
-  //     "binding": "FILES",
-  //     "bucket_name": "central-projetos-ia-files"
-  //   }
-  // ]
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "central-projetos-ia-files"
+    }
+  ]
 }

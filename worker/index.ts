@@ -128,8 +128,8 @@ async function handleFileRequest(request: Request, env: Env, pathParts: string[]
   if (request.method === "POST" && pathParts.length === 0) {
     const body = (await request.json()) as { name?: string; contentBase64?: string; contentType?: string };
     const fileKey = `${crypto.randomUUID()}-${sanitizeFileName(body.name ?? "arquivo")}`;
-    const bytes = Uint8Array.from(atob(body.contentBase64 ?? ""), (char) => char.charCodeAt(0));
-    await env.FILES.put(fileKey, bytes, { httpMetadata: { contentType: body.contentType ?? "application/octet-stream" } });
+    const bytes = decodeBase64(body.contentBase64 ?? "");
+    await env.FILES.put(fileKey, bytes.buffer, { httpMetadata: { contentType: body.contentType ?? "application/octet-stream" } });
     return json({ data: { key: fileKey, url: `/api/files/${encodeURIComponent(fileKey)}` } });
   }
 
@@ -210,6 +210,17 @@ async function getById(db: D1Database, tableName: string, id: string) {
 
 function sanitizeFileName(value: string) {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "arquivo";
+}
+
+function decodeBase64(value: string) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
 }
 
 function json(payload: unknown, status = 200) {

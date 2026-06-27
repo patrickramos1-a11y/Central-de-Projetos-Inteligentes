@@ -67,7 +67,9 @@ npm run cf:deploy
 Antes do deploy remoto, substitua `replace-with-d1-database-id` no `wrangler.jsonc` pelo ID real do banco D1 criado na Cloudflare.
 O D1 remoto atual criado para este projeto e `central-projetos-ia`, ID `8b150f2d-db0d-433e-8f88-98b5f83b3ef8`.
 
-Observacao Cloudflare: o subdominio `workers.dev` da conta e `patrickramos1-a11y`, e o app esta publicado em `central-projetos-ia-api.patrickramos1-a11y.workers.dev`. O R2 ainda precisa ser habilitado no dashboard antes de anexos reais ficarem ativos.
+Observacao Cloudflare: o subdominio `workers.dev` da conta e `patrickramos1-a11y`, e o app esta publicado em `central-projetos-ia-api.patrickramos1-a11y.workers.dev`. O bucket R2 `central-projetos-ia-files` ja foi criado e esta vinculado ao Worker pelo binding `FILES`.
+
+Anexos e materiais das etapas usam a API `/api/files`. O arquivo e salvo no R2 e o link gerado e registrado na etapa como material/evidencia.
 
 Para exportar os dados atuais do Supabase e gerar SQL de importacao para D1:
 
