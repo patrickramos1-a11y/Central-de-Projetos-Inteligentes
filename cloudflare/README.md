@@ -32,7 +32,7 @@ npm run build
 npm run cf:deploy
 ```
 
-Depois, configure o Cloudflare Access para proteger o Worker publicado.
+Depois, valide o login pelo Cloudflare Access antes de cadastrar dados sensiveis.
 
 Estado remoto ja criado:
 
@@ -40,13 +40,15 @@ Estado remoto ja criado:
 - R2 `central-projetos-ia-files`
 - Worker/App/API `central-projetos-ia-api`
 - Subdominio workers.dev `patrickramos1-a11y`
+- Zero Trust organization `Central de Projetos IA`: `central-projetos-ia.cloudflareaccess.com`
+- Access application `Central de Projetos IA`: `40da548d-e7bd-45c0-b382-08fc1fa58ab4`
+- Access policy `Equipe Ramos Engenharia`: permite `Patrickramos1@gmail.com`
 - Pages project `central-de-projetos-inteligentes`, sem deployment principal
 
-Pendencias no dashboard Cloudflare:
+Pendencias opcionais no dashboard Cloudflare:
 
-- Configurar **Cloudflare Access** no Worker para restringir o painel a equipe.
-
-Como o token atual do Wrangler nao tem escopo de Access, essa protecao precisa ser feita no dashboard ou com um token da Cloudflare que tenha permissao de **Access: Apps and Policies Write**. Pelo dashboard: Workers & Pages > `central-projetos-ia-api` > Settings > Domains & Routes > habilitar Cloudflare Access na rota `workers.dev`, depois definir a politica com os e-mails permitidos.
+- Adicionar outros e-mails da equipe na policy `Equipe Ramos Engenharia`.
+- Ajustar identidade/login se quiser usar Google Workspace ou outro provedor como IdP dedicado.
 
 ## Exportar dados do Supabase
 

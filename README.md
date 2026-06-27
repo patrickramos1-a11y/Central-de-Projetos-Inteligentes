@@ -153,4 +153,6 @@ Execucao:
 
 O banco D1 nao e exposto diretamente ao navegador. O frontend chama o Worker no mesmo dominio, e o Worker executa as operacoes no D1/R2.
 
-Para uso interno, proteja o Worker com Cloudflare Access antes de cadastrar dados sensiveis. O Supabase deve permanecer apenas como backup durante a transicao.
+O Worker publicado esta protegido por Cloudflare Access. A aplicacao Access `Central de Projetos IA` usa o dominio de login `central-projetos-ia.cloudflareaccess.com` e permite acesso inicial ao e-mail `Patrickramos1@gmail.com`.
+
+O Supabase deve permanecer apenas como backup durante a transicao.
