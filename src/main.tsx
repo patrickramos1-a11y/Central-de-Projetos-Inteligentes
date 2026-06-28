@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useMemo, useState } from "react";
+import { StrictMode, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Bot,
@@ -1561,10 +1561,15 @@ function ProjectsView({
               <article className="project-card" key={project.id}>
                 <button className="project-card-main" onClick={() => onOpen(project.id)}>
                   <div className="project-card-head">
-                    <strong>{project.name}</strong>
+                    <span className="progress-ring" style={{ "--progress": `${progress * 3.6}deg` } as CSSProperties}>
+                      <strong>{progress}%</strong>
+                    </span>
+                    <div>
+                      <strong>{project.name}</strong>
+                      <span>{project.company || "Sem empresa definida"}</span>
+                    </div>
                     <StatusPill status={project.status} />
                   </div>
-                  <span>{project.company || "Sem empresa definida"}</span>
                   <div className="progress-bar">
                     <span style={{ width: `${progress}%` }} />
                   </div>
@@ -1791,7 +1796,12 @@ function ClientsView({
             return (
               <button className="project-card client-card" key={client.id} onClick={() => onOpen(client.id)}>
                 <div className="client-card-head">
-                  <ClientLogo client={client} />
+                  <div className="client-avatar-stack">
+                    <ClientLogo client={client} />
+                    <span className="progress-ring small" style={{ "--progress": `${progress * 3.6}deg` } as CSSProperties}>
+                      <strong>{progress}%</strong>
+                    </span>
+                  </div>
                   <StatusPill status={client.status} />
                 </div>
                 <strong>{client.name}</strong>
