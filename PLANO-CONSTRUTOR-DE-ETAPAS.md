@@ -1,9 +1,31 @@
 # Plano de Execucao - Construtor de Etapas
 
-Status: planejado, ainda nao implementado
-Ultima atualizacao: 2026-06-30
+Status: implementacao parcial em andamento; fases e contextos estao publicados
+Ultima atualizacao: 2026-07-01
 Projeto: Central de Projetos IA
 Stack: Vite, React, TypeScript, Cloudflare Workers, D1 e R2
+
+## Atualizacao de execucao - 2026-07-01
+
+Entregue sobre a estrutura atual da Jornada:
+
+- fases internas cadastraveis por etapa, com ordem, status e dependencia;
+- bloqueio de avanco quando o pre-requisito nao foi concluido;
+- contextos salvos por projeto/etapa, vinculaveis a uma fase;
+- copia de contexto e download em Markdown;
+- migrations D1, Worker e interface publicados no Cloudflare;
+- build Vite/TypeScript e D1 remoto validados.
+
+Ainda nao entregue pelo Construtor completo:
+
+- contrato de blocos em producao e validador de schema por versao;
+- canvas Executar/Editar com biblioteca, reordenacao e propriedades;
+- rascunho, autosave, revisoes, publicacao atomica e restauracao;
+- motor de regras autoritativo no Worker e conclusao atomica;
+- versionamento de anexos, auditoria e historico visual;
+- comparacao/aplicacao de templates e blocos avancados.
+
+A implementacao atual e uma evolucao segura do fluxo legado, nao a conclusao das fases CE-0 a CE-7.
 
 ## 1. Objetivo
 

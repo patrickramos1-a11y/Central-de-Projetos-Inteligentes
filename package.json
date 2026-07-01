@@ -27,6 +27,6 @@
     "@cloudflare/workers-types": "^4.20260617.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "wrangler": "^4.22.0"
+    "wrangler": "^4.106.0"
   }
 }

@@ -27,6 +27,7 @@ import {
   Users,
 } from "lucide-react";
 import { createCloudflareApi } from "./lib/cloudflareApi";
+import { buildConsolidatedSummaryText, parseProjectSummary } from "./lib/summaryParser";
 import "./styles.css";
 
 type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
@@ -213,6 +214,73 @@ type ProjectStepContext = {
   updated_at: string | null;
 };
 
+type ProjectSummary = {
+  id: string;
+  project_id: string;
+  raw_text: string;
+  consolidated_text: string | null;
+  version_number: number;
+  status: "draft" | "active" | "archived";
+  parse_status: "not_analyzed" | "analyzed" | "needs_review" | "reviewed";
+  item_count: number;
+  selected_item_count: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string | null;
+  activated_at: string | null;
+  archived_at: string | null;
+};
+
+type SummaryItemStatus = "pendente" | "em_andamento" | "desenvolvido" | "em_revisao" | "concluido" | "bloqueado" | "arquivado";
+
+type ProjectSummaryItem = {
+  id: string;
+  summary_id: string;
+  project_id: string;
+  parent_id: string | null;
+  topic_number: string;
+  title: string;
+  level: number;
+  sort_order: number;
+  original_text: string;
+  is_selected: boolean;
+  status: SummaryItemStatus;
+  notes: string | null;
+  parse_confidence: number;
+  parse_warning: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+type PromptBlock = {
+  id: string;
+  title: string;
+  description: string | null;
+  content: string;
+  category: string | null;
+  ai_tool_id: string | null;
+  project_type_id: string | null;
+  journey_step_id: string | null;
+  status: "ativo" | "inativo" | "arquivado";
+  created_at: string;
+  updated_at: string | null;
+};
+
+type GeneratedPrompt = {
+  id: string;
+  project_id: string;
+  summary_id: string | null;
+  summary_item_id: string | null;
+  base_prompt_id: string | null;
+  base_prompt_snapshot: string | null;
+  selected_blocks_json: string | null;
+  final_prompt: string;
+  notes: string | null;
+  ai_tool_id: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
 type Client = {
   id: string;
   name: string;
@@ -277,6 +345,10 @@ type Tables = {
   project_step_links: ProjectStepLink[];
   project_step_phases: ProjectStepPhase[];
   project_step_contexts: ProjectStepContext[];
+  project_summaries: ProjectSummary[];
+  project_summary_items: ProjectSummaryItem[];
+  prompt_blocks: PromptBlock[];
+  generated_prompts: GeneratedPrompt[];
   clients: Client[];
   client_steps: ClientStep[];
   client_step_checklist_items: ClientChecklistItem[];
@@ -291,9 +363,14 @@ type ConfigModuleKey =
   | "project_types"
   | "journey_templates"
   | "journey_steps"
-  | "procedures";
+  | "procedures"
+  | "prompt_blocks";
 
-const cloudflareApiUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
+const configuredApiUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
+// In production, the frontend and API are served by the same Cloudflare Worker.
+// Keeping the local Wrangler URL out of production prevents browsers from
+// trying to load D1 data from the visitor's own computer.
+const cloudflareApiUrl = import.meta.env.PROD ? "" : configuredApiUrl;
 const hasCloudflareApi = true;
 const supabase = createCloudflareApi(cloudflareApiUrl);
 
@@ -319,6 +396,10 @@ const emptyTables: Tables = {
   project_step_links: [],
   project_step_phases: [],
   project_step_contexts: [],
+  project_summaries: [],
+  project_summary_items: [],
+  prompt_blocks: [],
+  generated_prompts: [],
   clients: [],
   client_steps: [],
   client_step_checklist_items: [],
@@ -349,6 +430,12 @@ const configModules: Array<{ key: ConfigModuleKey; label: string; icon: typeof B
     label: "Biblioteca de Prompts",
     icon: Clipboard,
     description: "Prompts reutilizaveis que podem entrar nas etapas dos projetos.",
+  },
+  {
+    key: "prompt_blocks",
+    label: "Complementos de Prompt",
+    icon: Sparkles,
+    description: "Blocos menores e reutilizaveis para compor prompts por topico.",
   },
   {
     key: "project_types",
@@ -388,6 +475,7 @@ function App() {
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [notice, setNotice] = useState("Pronto para conduzir projetos com IA.");
+  const [tableErrors, setTableErrors] = useState<string[]>([]);
 
   const selectedProject = tables.projects.find((project) => project.id === selectedProjectId) ?? null;
   const projectSteps = useMemo(
@@ -460,6 +548,7 @@ function App() {
   async function loadAll() {
     if (!supabase) {
       setNotice("Configure a API Cloudflare para conectar ao banco D1.");
+      setTableErrors(Object.keys(emptyTables));
       return;
     }
 
@@ -482,9 +571,29 @@ function App() {
       nextTables[result.tableName] = result.data as never;
     });
 
+    if (!errors.length && nextTables.app_users.length === 0) {
+      const { data: defaultUser, error } = await supabase
+        .from<AppUser>("app_users")
+        .insert(
+          normalizePayload({
+            id: "user-patrick",
+            name: "Patrick",
+            status: "ativo",
+            updated_at: new Date().toISOString(),
+          }),
+        )
+        .select("*")
+        .single();
+
+      if (!error && defaultUser) {
+        nextTables.app_users = [defaultUser as AppUser];
+      }
+    }
+
     setTables(nextTables);
     setIsLoading(false);
-    setNotice(errors.length ? `Algumas tabelas ainda precisam ser criadas no Cloudflare D1 (${errors.length}).` : "Dados sincronizados.");
+    setTableErrors(errors.map((result) => String(result.tableName)));
+    setNotice(errors.length ? `Falha ao sincronizar ${errors.length} tabela(s): ${errors.map((result) => result.tableName).join(", ")}.` : "Dados sincronizados.");
   }
 
   function selectUser(userId: string) {
@@ -748,6 +857,9 @@ function App() {
       project_step_contexts: current.project_step_contexts.filter(
         (item) => !current.project_steps.some((step) => step.project_id === projectId && step.id === item.project_step_id),
       ),
+      project_summaries: current.project_summaries.filter((item) => item.project_id !== projectId),
+      project_summary_items: current.project_summary_items.filter((item) => item.project_id !== projectId),
+      generated_prompts: current.generated_prompts.filter((item) => item.project_id !== projectId),
     }));
 
     if (selectedProjectId === projectId) {
@@ -1003,6 +1115,314 @@ function App() {
   async function deleteProjectStepContext(contextId: string) {
     await deleteRecord("project_step_contexts", contextId);
   }
+
+  async function importProjectSummary(project: Project, rawText: string) {
+    if (!supabase || !rawText.trim()) {
+      return;
+    }
+
+    const parsed = parseProjectSummary({ rawText });
+
+    if (parsed.items.length === 0) {
+      setNotice("Nao encontrei topicos numerados nesse sumario. Cole uma estrutura como 1, 1.1, 1.1.1.");
+      return;
+    }
+
+    const summaryId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const versionNumber = Math.max(0, ...tables.project_summaries.filter((summary) => summary.project_id === project.id).map((summary) => summary.version_number)) + 1;
+    const itemIds = new Map(parsed.items.map((item) => [item.topicNumber, crypto.randomUUID()]));
+    const itemRows = parsed.items.map((item) => ({
+      id: itemIds.get(item.topicNumber)!,
+      summary_id: summaryId,
+      project_id: project.id,
+      parent_id: item.parentTopicNumber ? itemIds.get(item.parentTopicNumber) ?? null : null,
+      topic_number: item.topicNumber,
+      title: item.title,
+      level: item.level,
+      sort_order: item.sortOrder,
+      original_text: item.originalText,
+      is_selected: item.selected,
+      status: "pendente" as SummaryItemStatus,
+      notes: "",
+      parse_confidence: item.confidence,
+      parse_warning: item.warning ?? null,
+      updated_at: now,
+    }));
+
+    const summaryPayload = normalizePayload({
+      id: summaryId,
+      project_id: project.id,
+      raw_text: rawText,
+      consolidated_text: parsed.consolidatedPreview,
+      version_number: versionNumber,
+      status: "draft",
+      parse_status: parsed.warnings.length || parsed.items.some((item) => item.warning) ? "needs_review" : "analyzed",
+      item_count: itemRows.length,
+      selected_item_count: itemRows.filter((item) => item.is_selected).length,
+      created_by: currentUser?.name ?? "Patrick",
+      updated_at: now,
+    });
+
+    const { data: summary, error } = await supabase.from<ProjectSummary>("project_summaries").insert(summaryPayload).select("*").single();
+
+    if (error || !summary) {
+      setNotice(`Erro ao importar sumario: ${error?.message ?? "erro desconhecido"}`);
+      return;
+    }
+
+    const { error: itemsError } = await supabase.from<ProjectSummaryItem>("project_summary_items").insert(itemRows);
+
+    if (itemsError) {
+      setNotice(`Sumario criado, mas os topicos falharam: ${itemsError.message}`);
+      return;
+    }
+
+    setTables((current) => ({
+      ...current,
+      project_summaries: [...current.project_summaries, summary as ProjectSummary],
+      project_summary_items: [...current.project_summary_items, ...(itemRows as ProjectSummaryItem[])],
+    }));
+    setNotice(`Sumario analisado com ${itemRows.length} topicos. Revise e salve como consolidado.`);
+  }
+
+  async function updateProjectSummaryItem(itemId: string, payload: Partial<ProjectSummaryItem>) {
+    if (!supabase) {
+      return;
+    }
+
+    const { error } = await supabase.from("project_summary_items").update(normalizePayload({ ...payload, updated_at: new Date().toISOString() })).eq("id", itemId);
+
+    if (error) {
+      setNotice(`Erro ao atualizar item do sumario: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({
+      ...current,
+      project_summary_items: current.project_summary_items.map((item) => (item.id === itemId ? { ...item, ...payload } : item)),
+    }));
+  }
+
+  async function setSummaryItemSelection(summaryId: string, itemId: string, isSelected: boolean) {
+    if (!supabase) {
+      return;
+    }
+
+    const items = tables.project_summary_items.filter((item) => item.summary_id === summaryId);
+    const affected = new Map<string, boolean>();
+    const target = items.find((item) => item.id === itemId);
+
+    if (!target) {
+      return;
+    }
+
+    affected.set(itemId, isSelected);
+
+    if (isSelected) {
+      let parentId = target.parent_id;
+      while (parentId) {
+        const parent = items.find((item) => item.id === parentId);
+        if (!parent) break;
+        affected.set(parent.id, true);
+        parentId = parent.parent_id;
+      }
+    } else {
+      const collectChildren = (parentId: string) => {
+        items.filter((item) => item.parent_id === parentId).forEach((child) => {
+          affected.set(child.id, false);
+          collectChildren(child.id);
+        });
+      };
+      collectChildren(itemId);
+    }
+
+    await Promise.all(
+      [...affected.entries()].map(([id, selected]) =>
+        supabase.from("project_summary_items").update({ is_selected: selected, updated_at: new Date().toISOString() }).eq("id", id),
+      ),
+    );
+
+    const nextItems = tables.project_summary_items.map((item) => (affected.has(item.id) ? { ...item, is_selected: affected.get(item.id)! } : item));
+    const selectedCount = nextItems.filter((item) => item.summary_id === summaryId && item.is_selected).length;
+    await supabase.from("project_summaries").update({ selected_item_count: selectedCount, updated_at: new Date().toISOString() }).eq("id", summaryId);
+
+    setTables((current) => ({
+      ...current,
+      project_summary_items: current.project_summary_items.map((item) => (affected.has(item.id) ? { ...item, is_selected: affected.get(item.id)! } : item)),
+      project_summaries: current.project_summaries.map((summary) => (summary.id === summaryId ? { ...summary, selected_item_count: selectedCount } : summary)),
+    }));
+  }
+
+  async function addProjectSummaryItem(summaryId: string, parentId: string, title: string) {
+    if (!supabase || !title.trim()) {
+      return;
+    }
+
+    const summary = tables.project_summaries.find((item) => item.id === summaryId);
+    const items = tables.project_summary_items.filter((item) => item.summary_id === summaryId).sort(byOrder);
+
+    if (!summary) {
+      return;
+    }
+
+    const parent = parentId ? items.find((item) => item.id === parentId) : null;
+    const siblingCount = parent ? items.filter((item) => item.parent_id === parent.id).length : items.filter((item) => !item.parent_id).length;
+    const topicNumber = parent ? `${parent.topic_number}.${siblingCount + 1}` : String(siblingCount + 1);
+    const row: ProjectSummaryItem = {
+      id: crypto.randomUUID(),
+      summary_id: summaryId,
+      project_id: summary.project_id,
+      parent_id: parent?.id ?? null,
+      topic_number: topicNumber,
+      title: title.trim(),
+      level: parent ? parent.level + 1 : 1,
+      sort_order: Math.max(0, ...items.map((item) => item.sort_order)) + 1,
+      original_text: `${topicNumber} ${title.trim()}`,
+      is_selected: true,
+      status: "pendente",
+      notes: "",
+      parse_confidence: 1,
+      parse_warning: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase.from<ProjectSummaryItem>("project_summary_items").insert(normalizePayload(row)).select("*").single();
+
+    if (error || !data) {
+      setNotice(`Erro ao adicionar topico: ${error?.message ?? "erro desconhecido"}`);
+      return;
+    }
+
+    const nextItemCount = summary.item_count + 1;
+    const nextSelectedCount = summary.selected_item_count + 1;
+    await supabase.from("project_summaries").update({ item_count: nextItemCount, selected_item_count: nextSelectedCount, updated_at: new Date().toISOString() }).eq("id", summaryId);
+
+    setTables((current) => ({
+      ...current,
+      project_summary_items: [...current.project_summary_items, data as ProjectSummaryItem],
+      project_summaries: current.project_summaries.map((item) => (item.id === summaryId ? { ...item, item_count: nextItemCount, selected_item_count: nextSelectedCount } : item)),
+    }));
+  }
+
+  async function deleteProjectSummaryItem(summaryId: string, itemId: string) {
+    if (!supabase) {
+      return;
+    }
+
+    const items = tables.project_summary_items.filter((item) => item.summary_id === summaryId);
+    const ids = new Set<string>([itemId]);
+    const collectChildren = (parentId: string) => {
+      items.filter((item) => item.parent_id === parentId).forEach((child) => {
+        ids.add(child.id);
+        collectChildren(child.id);
+      });
+    };
+    collectChildren(itemId);
+
+    for (const id of ids) {
+      await supabase.from("project_summary_items").delete().eq("id", id);
+    }
+
+    const nextItems = tables.project_summary_items.filter((item) => item.summary_id === summaryId && !ids.has(item.id));
+    const summary = tables.project_summaries.find((item) => item.id === summaryId);
+    const nextItemCount = nextItems.length;
+    const nextSelectedCount = nextItems.filter((item) => item.is_selected).length;
+
+    if (summary) {
+      await supabase.from("project_summaries").update({ item_count: nextItemCount, selected_item_count: nextSelectedCount, updated_at: new Date().toISOString() }).eq("id", summaryId);
+    }
+
+    setTables((current) => ({
+      ...current,
+      project_summary_items: current.project_summary_items.filter((item) => !ids.has(item.id)),
+      project_summaries: current.project_summaries.map((item) => (item.id === summaryId ? { ...item, item_count: nextItemCount, selected_item_count: nextSelectedCount } : item)),
+    }));
+  }
+
+  async function consolidateProjectSummary(summaryId: string) {
+    if (!supabase) {
+      return;
+    }
+
+    const summary = tables.project_summaries.find((item) => item.id === summaryId);
+    const items = tables.project_summary_items.filter((item) => item.summary_id === summaryId).sort(byOrder);
+    const selectedItems = items.filter((item) => item.is_selected);
+
+    if (!summary || selectedItems.length === 0) {
+      setNotice("Selecione pelo menos um topico antes de consolidar o sumario.");
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const consolidatedText = buildProjectSummaryText(items);
+    const activeSummaries = tables.project_summaries.filter((item) => item.project_id === summary.project_id && item.status === "active" && item.id !== summaryId);
+
+    for (const active of activeSummaries) {
+      await supabase.from("project_summaries").update({ status: "archived", archived_at: now, updated_at: now }).eq("id", active.id);
+    }
+
+    const { error } = await supabase
+      .from("project_summaries")
+      .update({
+        status: "active",
+        parse_status: "reviewed",
+        consolidated_text: consolidatedText,
+        item_count: items.length,
+        selected_item_count: selectedItems.length,
+        activated_at: now,
+        updated_at: now,
+      })
+      .eq("id", summaryId);
+
+    if (error) {
+      setNotice(`Erro ao consolidar sumario: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({
+      ...current,
+      project_summaries: current.project_summaries.map((item) => {
+        if (item.id === summaryId) {
+          return { ...item, status: "active", parse_status: "reviewed", consolidated_text: consolidatedText, item_count: items.length, selected_item_count: selectedItems.length, activated_at: now, updated_at: now };
+        }
+
+        if (activeSummaries.some((active) => active.id === item.id)) {
+          return { ...item, status: "archived", archived_at: now, updated_at: now };
+        }
+
+        return item;
+      }),
+    }));
+    setNotice("Sumario consolidado e ativado para este projeto.");
+  }
+
+  async function saveGeneratedPrompt(payload: Omit<GeneratedPrompt, "id" | "created_at">) {
+    if (!supabase || !payload.final_prompt.trim()) {
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from<GeneratedPrompt>("generated_prompts")
+      .insert(
+        normalizePayload({
+          ...payload,
+          created_by: payload.created_by || currentUser?.name || "Patrick",
+        }),
+      )
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      setNotice(`Erro ao salvar historico do prompt: ${error?.message ?? "erro desconhecido"}`);
+      return;
+    }
+
+    setTables((current) => ({ ...current, generated_prompts: [...current.generated_prompts, data as GeneratedPrompt] }));
+    setNotice("Prompt salvo no historico do projeto.");
+  }
+
   async function addStepLink(stepId: string, title: string, url: string) {
     if (!supabase || !title.trim() || !url.trim()) {
       return;
@@ -1469,6 +1889,7 @@ function App() {
         users={activeUsers}
         isLoading={isLoading}
         notice={notice}
+        tableErrors={tableErrors}
         onSelect={selectUser}
         onCreate={createAppUser}
         onRefresh={() => void loadAll()}
@@ -1531,6 +1952,7 @@ function App() {
         <div className={`setup-alert ${hasCloudflareApi ? "connected" : ""}`}>
           {isLoading ? <Loader2 className="spin" size={18} /> : <Database size={18} />}
           <span>{notice}</span>
+          {tableErrors.length > 0 && <span className="table-error-count">{tableErrors.length} pendencia(s)</span>}
           <button className="ghost-button" onClick={() => void loadAll()}>
             <RefreshCw size={16} />
             Sincronizar
@@ -1585,6 +2007,14 @@ function App() {
             onAddNextStep={addNextStep}
             onSaveTemplate={saveProjectAsTemplate}
             onDuplicate={duplicateProject}
+            currentUser={currentUser}
+            onImportSummary={importProjectSummary}
+            onUpdateSummaryItem={updateProjectSummaryItem}
+            onSetSummaryItemSelection={setSummaryItemSelection}
+            onAddSummaryItem={addProjectSummaryItem}
+            onDeleteSummaryItem={deleteProjectSummaryItem}
+            onConsolidateSummary={consolidateProjectSummary}
+            onSaveGeneratedPrompt={saveGeneratedPrompt}
           />
         )}
 
@@ -2321,6 +2751,14 @@ function JourneyView({
   onAddNextStep,
   onSaveTemplate,
   onDuplicate,
+  currentUser,
+  onImportSummary,
+  onUpdateSummaryItem,
+  onSetSummaryItemSelection,
+  onAddSummaryItem,
+  onDeleteSummaryItem,
+  onConsolidateSummary,
+  onSaveGeneratedPrompt,
 }: {
   project: Project;
   steps: ProjectStep[];
@@ -2349,6 +2787,14 @@ function JourneyView({
   onAddNextStep: (projectId: string, name: string) => void;
   onSaveTemplate: (project: Project) => void;
   onDuplicate: (project: Project) => void;
+  currentUser: AppUser | null;
+  onImportSummary: (project: Project, rawText: string) => void;
+  onUpdateSummaryItem: (itemId: string, payload: Partial<ProjectSummaryItem>) => void;
+  onSetSummaryItemSelection: (summaryId: string, itemId: string, isSelected: boolean) => void;
+  onAddSummaryItem: (summaryId: string, parentId: string, title: string) => void;
+  onDeleteSummaryItem: (summaryId: string, itemId: string) => void;
+  onConsolidateSummary: (summaryId: string) => void;
+  onSaveGeneratedPrompt: (payload: Omit<GeneratedPrompt, "id" | "created_at">) => void;
 }) {
   const doneSteps = steps.filter((step) => step.status === "concluido").length;
   const progress = steps.length ? Math.round((doneSteps / steps.length) * 100) : 0;
@@ -2357,6 +2803,9 @@ function JourneyView({
   const links = tables.project_step_links.filter((link) => link.project_step_id === selectedStep.id).sort(byOrder);
   const phases = tables.project_step_phases.filter((phase) => phase.project_step_id === selectedStep.id).sort(byOrder);
   const contexts = tables.project_step_contexts.filter((context) => context.project_step_id === selectedStep.id).sort(byOrder);
+  const summaries = tables.project_summaries.filter((summary) => summary.project_id === project.id);
+  const summaryItems = tables.project_summary_items.filter((item) => item.project_id === project.id).sort(byOrder);
+  const generatedPrompts = tables.generated_prompts.filter((prompt) => prompt.project_id === project.id);
   const canCompleteStep = phases.length === 0 || phases.every((phase) => phase.status === "concluido");
 
   return (
@@ -2425,6 +2874,24 @@ function JourneyView({
             <TextArea label="Observacoes da execucao" value={selectedStep.notes} onChange={() => undefined} onBlur={(value) => onUpdateStep(selectedStep.id, { notes: value })} />
           </div>
 
+          <ProjectSummaryPanel
+            project={project}
+            selectedStep={selectedStep}
+            summaries={summaries}
+            items={summaryItems}
+            promptBlocks={tables.prompt_blocks}
+            generatedPrompts={generatedPrompts}
+            tables={tables}
+            currentUser={currentUser}
+            onImport={onImportSummary}
+            onUpdateItem={onUpdateSummaryItem}
+            onSetSelection={onSetSummaryItemSelection}
+            onAddItem={onAddSummaryItem}
+            onDeleteItem={onDeleteSummaryItem}
+            onConsolidate={onConsolidateSummary}
+            onSaveGeneratedPrompt={onSaveGeneratedPrompt}
+          />
+
           <PhasePanel
             phases={phases}
             onAdd={(title) => onAddPhase(selectedStep.id, title)}
@@ -2482,6 +2949,248 @@ function JourneyView({
   );
 }
 
+
+function ProjectSummaryPanel({
+  project,
+  selectedStep,
+  summaries,
+  items,
+  promptBlocks,
+  generatedPrompts,
+  tables,
+  currentUser,
+  onImport,
+  onUpdateItem,
+  onSetSelection,
+  onAddItem,
+  onDeleteItem,
+  onConsolidate,
+  onSaveGeneratedPrompt,
+}: {
+  project: Project;
+  selectedStep: ProjectStep;
+  summaries: ProjectSummary[];
+  items: ProjectSummaryItem[];
+  promptBlocks: PromptBlock[];
+  generatedPrompts: GeneratedPrompt[];
+  tables: Tables;
+  currentUser: AppUser | null;
+  onImport: (project: Project, rawText: string) => void;
+  onUpdateItem: (itemId: string, payload: Partial<ProjectSummaryItem>) => void;
+  onSetSelection: (summaryId: string, itemId: string, isSelected: boolean) => void;
+  onAddItem: (summaryId: string, parentId: string, title: string) => void;
+  onDeleteItem: (summaryId: string, itemId: string) => void;
+  onConsolidate: (summaryId: string) => void;
+  onSaveGeneratedPrompt: (payload: Omit<GeneratedPrompt, "id" | "created_at">) => void;
+}) {
+  const [rawText, setRawText] = useState("");
+  const [summaryId, setSummaryId] = useState("");
+  const [newItemTitle, setNewItemTitle] = useState("");
+  const [newParentId, setNewParentId] = useState("");
+  const [selectedItemId, setSelectedItemId] = useState("");
+  const [basePromptId, setBasePromptId] = useState("");
+  const [selectedBlockIds, setSelectedBlockIds] = useState<string[]>([]);
+
+  const sortedSummaries = useMemo(
+    () => [...summaries].sort((left, right) => right.version_number - left.version_number),
+    [summaries],
+  );
+
+  useEffect(() => {
+    if (!summaryId && sortedSummaries[0]) {
+      setSummaryId(sortedSummaries[0].id);
+      return;
+    }
+
+    if (summaryId && !sortedSummaries.some((summary) => summary.id === summaryId)) {
+      setSummaryId(sortedSummaries[0]?.id ?? "");
+    }
+  }, [summaryId, sortedSummaries]);
+
+  const activeSummary = sortedSummaries.find((summary) => summary.id === summaryId) ?? sortedSummaries[0] ?? null;
+  const summaryItems = activeSummary ? items.filter((item) => item.summary_id === activeSummary.id).sort(byOrder) : [];
+  const selectedItems = summaryItems.filter((item) => item.is_selected);
+  const selectedItem = summaryItems.find((item) => item.id === selectedItemId) ?? selectedItems[0] ?? summaryItems[0] ?? null;
+  const basePrompt = tables.prompts.find((prompt) => prompt.id === basePromptId) ?? null;
+  const relevantBlocks = promptBlocks.filter((block) => {
+    if (block.status !== "ativo") return false;
+    if (block.project_type_id && block.project_type_id !== project.project_type_id) return false;
+    if (block.journey_step_id && block.journey_step_id !== selectedStep.source_journey_step_id) return false;
+    return true;
+  });
+  const selectedBlocks = relevantBlocks.filter((block) => selectedBlockIds.includes(block.id));
+  const finalPrompt = composeGeneratedPrompt({ project, step: selectedStep, summary: activeSummary, item: selectedItem, basePrompt, blocks: selectedBlocks });
+  const generatedCount = activeSummary ? generatedPrompts.filter((prompt) => prompt.summary_id === activeSummary.id).length : 0;
+
+  function toggleBlock(blockId: string) {
+    setSelectedBlockIds((current) => (current.includes(blockId) ? current.filter((id) => id !== blockId) : [...current, blockId]));
+  }
+
+  function savePromptHistory() {
+    if (!activeSummary || !finalPrompt.trim()) {
+      return;
+    }
+
+    onSaveGeneratedPrompt({
+      project_id: project.id,
+      summary_id: activeSummary.id,
+      summary_item_id: selectedItem?.id ?? null,
+      base_prompt_id: basePrompt?.id ?? null,
+      base_prompt_snapshot: basePrompt?.content ?? null,
+      selected_blocks_json: JSON.stringify(selectedBlocks.map((block) => ({ id: block.id, title: block.title, content: block.content }))),
+      final_prompt: finalPrompt,
+      notes: selectedItem ? `Topico ${selectedItem.topic_number} - ${selectedItem.title}` : "Prompt geral do sumario",
+      ai_tool_id: basePrompt?.ai_tool_id ?? selectedBlocks.find((block) => block.ai_tool_id)?.ai_tool_id ?? null,
+      created_by: currentUser?.name ?? null,
+    });
+  }
+
+  return (
+    <section className="work-block summary-panel">
+      <div className="block-heading summary-heading">
+        <div>
+          <h2>Sumario inteligente</h2>
+          <span className="pending-summary">
+            {activeSummary ? `${selectedItems.length}/${summaryItems.length} topicos selecionados - ${generatedCount} prompts salvos` : "Importe ou cole o sumario do projeto"}
+          </span>
+        </div>
+        {activeSummary && (
+          <button className="secondary-button" onClick={() => onConsolidate(activeSummary.id)} disabled={selectedItems.length === 0}>
+            <CheckCircle2 size={16} />
+            Consolidar sumario
+          </button>
+        )}
+      </div>
+
+      <div className="summary-import-grid">
+        <label className="field">
+          <span>Colar sumario bruto</span>
+          <textarea rows={7} value={rawText} onChange={(event) => setRawText(event.target.value)} placeholder="Cole aqui uma estrutura numerada: 1, 1.1, 1.1.1..." />
+        </label>
+        <div className="summary-import-actions">
+          <button
+            className="primary-button"
+            disabled={!rawText.trim()}
+            onClick={() => {
+              onImport(project, rawText);
+              setRawText("");
+            }}
+          >
+            <Sparkles size={16} />
+            Analisar sumario
+          </button>
+          <p>O sistema separa os topicos numerados, marca tudo como pendente e deixa voce revisar antes de consolidar.</p>
+        </div>
+      </div>
+
+      {activeSummary ? (
+        <div className="summary-workspace">
+          <div className="summary-review-card">
+            <div className="summary-toolbar">
+              <SelectField
+                label="Versao do sumario"
+                value={activeSummary.id}
+                onChange={setSummaryId}
+                options={sortedSummaries.map((summary) => ({ value: summary.id, label: `Versao ${summary.version_number} - ${formatStatus(summary.status)}` }))}
+              />
+              <div className="summary-meta">
+                <StatusPill status={activeSummary.status} />
+                <span>{formatSummaryParseStatus(activeSummary.parse_status)}</span>
+              </div>
+            </div>
+
+            <div className="summary-item-list">
+              {summaryItems.map((item) => (
+                <article className={`summary-item level-${Math.min(item.level, 4)} ${item.is_selected ? "selected" : ""}`} key={item.id}>
+                  <button className={`checkbox ${item.is_selected ? "checked" : ""}`} onClick={() => onSetSelection(activeSummary.id, item.id, !item.is_selected)}>
+                    {item.is_selected && <Check size={14} />}
+                  </button>
+                  <button className={`summary-topic-button ${selectedItem?.id === item.id ? "active" : ""}`} onClick={() => setSelectedItemId(item.id)}>
+                    <strong>{item.topic_number}</strong>
+                  </button>
+                  <div className="summary-item-main">
+                    <InlineText defaultValue={item.title} className="summary-title-input" onSave={(value) => onUpdateItem(item.id, { title: value })} />
+                    <div className="summary-item-controls">
+                      <select value={item.status} onChange={(event) => onUpdateItem(item.id, { status: event.target.value as SummaryItemStatus })}>
+                        {(["pendente", "em_andamento", "desenvolvido", "em_revisao", "concluido", "bloqueado", "arquivado"] as SummaryItemStatus[]).map((status) => (
+                          <option value={status} key={status}>{formatStatus(status)}</option>
+                        ))}
+                      </select>
+                      {item.parse_warning && <span className="summary-warning">{item.parse_warning}</span>}
+                    </div>
+                    <TextArea label="Nota do topico" value={item.notes} rows={2} onChange={() => undefined} onBlur={(value) => onUpdateItem(item.id, { notes: value })} />
+                  </div>
+                  <button className="icon-button subtle" onClick={() => onDeleteItem(activeSummary.id, item.id)}>
+                    <Trash2 size={15} />
+                  </button>
+                </article>
+              ))}
+            </div>
+
+            <div className="summary-add-row">
+              <SelectField label="Dentro de" value={newParentId} onChange={setNewParentId} options={summaryItems.map((item) => ({ value: item.id, label: `${item.topic_number} ${item.title}` }))} emptyLabel="Topico raiz" />
+              <Field label="Novo topico" value={newItemTitle} onChange={setNewItemTitle} />
+              <button
+                className="secondary-button"
+                disabled={!newItemTitle.trim()}
+                onClick={() => {
+                  onAddItem(activeSummary.id, newParentId, newItemTitle);
+                  setNewItemTitle("");
+                  setNewParentId("");
+                }}
+              >
+                <Plus size={16} />
+                Adicionar topico
+              </button>
+            </div>
+          </div>
+
+          <aside className="summary-prompt-card">
+            <div className="prompt-card-title">
+              <strong>Prompt por topico</strong>
+              <span>{selectedItem ? `${selectedItem.topic_number} selecionado` : "Sem topico"}</span>
+            </div>
+            <SelectField label="Prompt base" value={basePromptId} onChange={setBasePromptId} options={tables.prompts.filter((prompt) => prompt.status !== "arquivado").map((prompt) => ({ value: prompt.id, label: prompt.title }))} emptyLabel="Sem prompt base" />
+            <div className="prompt-block-picker">
+              <span>Complementos</span>
+              {relevantBlocks.map((block) => (
+                <label key={block.id} className="summary-block-option">
+                  <input type="checkbox" checked={selectedBlockIds.includes(block.id)} onChange={() => toggleBlock(block.id)} />
+                  <span>{block.title}</span>
+                </label>
+              ))}
+              {relevantBlocks.length === 0 && <small>Nenhum complemento ativo para este tipo de projeto/etapa.</small>}
+            </div>
+            <label className="field">
+              <span>Prompt final gerado</span>
+              <textarea className="prompt-preview" rows={12} value={finalPrompt} readOnly />
+            </label>
+            <div className="row-actions prompt-builder-actions">
+              <button disabled={!finalPrompt.trim()} onClick={() => void copyText(finalPrompt)}>
+                <Copy size={16} />
+                Copiar
+              </button>
+              <button disabled={!finalPrompt.trim()} onClick={() => downloadMarkdown(finalPrompt, `${project.name}-${selectedItem?.topic_number ?? "sumario"}-prompt.md`)}>
+                <FileText size={16} />
+                MD
+              </button>
+              <button disabled={!finalPrompt.trim() || !activeSummary} onClick={savePromptHistory}>
+                <Save size={16} />
+                Salvar historico
+              </button>
+            </div>
+          </aside>
+        </div>
+      ) : (
+        <div className="empty-state compact">
+          <Clipboard size={30} />
+          <strong>Nenhum sumario importado</strong>
+          <span>Cole o sumario do projeto para revisar topicos e gerar prompts por item.</span>
+        </div>
+      )}
+    </section>
+  );
+}
 function FileUploadButton({ onUpload }: { onUpload: (file: File) => void }) {
   return (
     <label className="icon-button file-upload-button" title="Enviar arquivo">
@@ -2505,6 +3214,7 @@ function UserEntryScreen({
   users,
   isLoading,
   notice,
+  tableErrors,
   onSelect,
   onCreate,
   onRefresh,
@@ -2512,6 +3222,7 @@ function UserEntryScreen({
   users: AppUser[];
   isLoading: boolean;
   notice: string;
+  tableErrors: string[];
   onSelect: (userId: string) => void;
   onCreate: (name: string) => void;
   onRefresh: () => void;
@@ -2560,6 +3271,7 @@ function UserEntryScreen({
 
         <div className="entry-footer">
           <span>{notice}</span>
+          {tableErrors.length > 0 && <span className="table-error-count">{tableErrors.length} pendencia(s)</span>}
           <button className="ghost-button" onClick={onRefresh}>
             <RefreshCw size={16} />
             Sincronizar
@@ -3234,6 +3946,21 @@ function ConfigForm({
     );
   }
 
+  if (moduleKey === "prompt_blocks") {
+    return (
+      <div className="form-grid">
+        <Field label="Titulo" value={value.title} onChange={(next) => onChange("title", next)} />
+        <Field label="Categoria" value={value.category} onChange={(next) => onChange("category", next)} />
+        <TextArea label="Descricao" value={value.description} onChange={(next) => onChange("description", next)} />
+        <TextArea label="Conteudo do complemento" value={value.content} onChange={(next) => onChange("content", next)} rows={7} />
+        <SelectField label="Ferramenta" value={value.ai_tool_id} onChange={(next) => onChange("ai_tool_id", next)} options={tables.ai_tools.map(toOption)} />
+        <SelectField label="Tipo de projeto" value={value.project_type_id} onChange={(next) => onChange("project_type_id", next)} options={tables.project_types.map(toOption)} />
+        <SelectField label="Etapa relacionada" value={value.journey_step_id} onChange={(next) => onChange("journey_step_id", next)} options={tables.journey_steps.map(toOption)} />
+        <ConfigStatusField value={value.status} onChange={(next) => onChange("status", next)} />
+      </div>
+    );
+  }
+
   return (
     <div className="form-grid">
       <Field label="Titulo" value={value.title} onChange={(next) => onChange("title", next)} />
@@ -3458,6 +4185,10 @@ function createBlankConfig(moduleKey: ConfigModuleKey) {
     };
   }
 
+  if (moduleKey === "prompt_blocks") {
+    return { title: "", description: "", content: "", category: "", ai_tool_id: "", project_type_id: "", journey_step_id: "", ...base };
+  }
+
   return { title: "", description: "", content: "", category: "", project_type_id: "", journey_step_id: "", ...base };
 }
 
@@ -3497,9 +4228,9 @@ function splitChecklist(value: string | null) {
     .filter(Boolean);
 }
 
-function byOrder<T extends { step_order?: number; item_order?: number; prompt_order?: number; link_order?: number; phase_order?: number; context_order?: number }>(a: T, b: T) {
-  const left = a.step_order ?? a.item_order ?? a.prompt_order ?? a.link_order ?? a.phase_order ?? a.context_order ?? 0;
-  const right = b.step_order ?? b.item_order ?? b.prompt_order ?? b.link_order ?? b.phase_order ?? b.context_order ?? 0;
+function byOrder<T extends { step_order?: number; item_order?: number; prompt_order?: number; link_order?: number; phase_order?: number; context_order?: number; sort_order?: number }>(a: T, b: T) {
+  const left = a.step_order ?? a.item_order ?? a.prompt_order ?? a.link_order ?? a.phase_order ?? a.context_order ?? a.sort_order ?? 0;
+  const right = b.step_order ?? b.item_order ?? b.prompt_order ?? b.link_order ?? b.phase_order ?? b.context_order ?? b.sort_order ?? 0;
   return left - right;
 }
 
@@ -3534,6 +4265,10 @@ function getOrderColumn(tableName: keyof Tables) {
 
   if (tableName === "project_step_contexts") {
     return "context_order";
+  }
+
+  if (tableName === "project_summary_items") {
+    return "sort_order";
   }
 
   if (tableName === "client_step_links") {
@@ -3585,10 +4320,19 @@ function formatStatus(status: string) {
     inativo: "Inativo",
     rascunho: "Rascunho",
     arquivado: "Arquivado",
+    draft: "Rascunho",
+    active: "Ativo",
+    archived: "Arquivado",
+    not_analyzed: "Nao analisado",
+    analyzed: "Analisado",
+    needs_review: "Precisa revisar",
+    reviewed: "Revisado",
     planejado: "Planejado",
     em_implantacao: "Em implantacao",
     em_andamento: "Em andamento",
     concluido: "Concluido",
+    desenvolvido: "Desenvolvido",
+    em_revisao: "Em revisao",
     bloqueado: "Bloqueado",
   };
 
@@ -3633,6 +4377,70 @@ function getBlockingPhase(phase: ProjectStepPhase | null | undefined, phases: Pr
   return previousPhase && previousPhase.status !== "concluido" ? previousPhase : null;
 }
 
+function buildProjectSummaryText(items: ProjectSummaryItem[]) {
+  return buildConsolidatedSummaryText(
+    items.map((item) => ({
+      topicNumber: item.topic_number,
+      title: item.title,
+      level: item.level,
+      selected: item.is_selected,
+      sortOrder: item.sort_order,
+    })),
+  );
+}
+
+function composeGeneratedPrompt({
+  project,
+  step,
+  summary,
+  item,
+  basePrompt,
+  blocks,
+}: {
+  project: Project;
+  step: ProjectStep;
+  summary: ProjectSummary | null;
+  item: ProjectSummaryItem | null;
+  basePrompt: Prompt | null;
+  blocks: PromptBlock[];
+}) {
+  const header = [
+    "# Prompt de desenvolvimento do projeto",
+    `Projeto: ${project.name}`,
+    project.company ? `Empresa: ${project.company}` : "",
+    `Etapa atual: ${step.name}`,
+    summary ? `Sumario: versao ${summary.version_number} (${formatStatus(summary.status)})` : "",
+  ].filter(Boolean);
+  const topic = item
+    ? [`## Topico selecionado`, `${item.topic_number} ${item.title}`, item.notes ? `Notas internas: ${item.notes}` : ""]
+    : ["## Topico selecionado", "Use o sumario consolidado do projeto como referencia geral."];
+  const base = basePrompt?.content?.trim() ? ["## Prompt base", basePrompt.content.trim()] : [];
+  const complements = blocks.flatMap((block) => [
+    `## Complemento - ${block.title}`,
+    block.description ? block.description : "",
+    block.content.trim(),
+  ]);
+  const instruction = [
+    "## Instrucao final",
+    "Desenvolva a resposta respeitando o topico selecionado, o contexto do projeto, os criterios tecnicos da Ramos Engenharia e os complementos marcados acima.",
+  ];
+
+  return [...header, "", ...topic, "", ...base, "", ...complements, "", ...instruction]
+    .filter((part) => String(part).trim().length > 0)
+    .join("\n\n")
+    .trim();
+}
+
+function formatSummaryParseStatus(status: ProjectSummary["parse_status"]) {
+  const labels: Record<ProjectSummary["parse_status"], string> = {
+    not_analyzed: "Nao analisado",
+    analyzed: "Analisado",
+    needs_review: "Precisa revisar",
+    reviewed: "Revisado",
+  };
+
+  return labels[status];
+}
 function buildContextMarkdown(project: Project, step: ProjectStep, context: ProjectStepContext, phases: ProjectStepPhase[]) {
   const phase = phases.find((item) => item.id === context.phase_id);
   const parts = [
@@ -3698,3 +4506,7 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </StrictMode>,
 );
+
+
+
+
