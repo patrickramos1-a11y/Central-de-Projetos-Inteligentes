@@ -2,11 +2,15 @@ export const STEP_SCHEMA_VERSION = 1;
 
 export const STEP_BLOCK_TYPES = [
   "section",
+  "phase",
   "short_text",
   "long_text",
   "checklist",
   "file_upload",
   "prompt",
+  "context",
+  "project_summary",
+  "materials",
   "date",
   "due_date",
   "select",
@@ -125,6 +129,13 @@ export type StepBlockConfig = {
   action?: "complete_step" | "open_url" | "copy_text" | "set_status";
   actionValue?: string;
   confirmationMessage?: string;
+  legacySource?: string;
+  legacyId?: string | null;
+  parentBlockId?: string | null;
+  status?: string;
+  links?: Array<{ id: string; title: string; url: string; notes?: string | null }>;
+  summaryId?: string | null;
+  compact?: boolean;
   condition?: ConditionGroup | null;
   calculation?: {
     operation: "sum" | "average" | "count";
@@ -340,6 +351,7 @@ export function createBlock(type: StepBlockType, order: number): StepBlock {
 export function blockTypeLabel(type: StepBlockType) {
   const labels: Record<StepBlockType, string> = {
     section: "Secao",
+    phase: "Fase",
     short_text: "Texto curto",
     long_text: "Texto longo",
     checklist: "Checklist",

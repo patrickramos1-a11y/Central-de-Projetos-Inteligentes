@@ -1,3 +1,5 @@
+import { handleProjectStepRequest } from "./blockBuilder";
+
 type Env = {
   DB: D1Database;
   FILES?: R2Bucket;
@@ -28,6 +30,10 @@ const tableColumns: Record<string, string[]> = {
   project_summary_items: ["id", "summary_id", "project_id", "parent_id", "topic_number", "title", "level", "sort_order", "original_text", "is_selected", "status", "notes", "parse_confidence", "parse_warning", "created_at", "updated_at"],
   prompt_blocks: ["id", "title", "description", "content", "category", "ai_tool_id", "project_type_id", "journey_step_id", "status", "created_at", "updated_at"],
   generated_prompts: ["id", "project_id", "summary_id", "summary_item_id", "base_prompt_id", "base_prompt_snapshot", "selected_blocks_json", "final_prompt", "notes", "ai_tool_id", "created_by", "created_at"],
+  project_step_structures: ["id", "owner_type", "project_step_id", "client_step_id", "template_step_id", "schema_version", "version_number", "revision", "state", "title", "document_json", "created_by", "created_at", "updated_at", "published_at", "archived_at"],
+  project_step_block_values: ["id", "project_step_id", "structure_id", "block_id", "value_json", "completion_state", "updated_by", "created_at", "updated_at"],
+  project_step_block_files: ["id", "project_step_id", "structure_id", "block_id", "item_id", "name", "content_type", "size_bytes", "version_number", "description", "approval_status", "url", "created_by", "created_at"],
+  project_step_block_events: ["id", "project_step_id", "structure_id", "block_id", "event_type", "event_payload_json", "created_by", "created_at"],
   clients: ["id", "name", "company", "logo_url", "responsible", "project_type_id", "journey_template_id", "entry_month", "status", "notes", "created_at", "updated_at"],
   client_steps: ["id", "client_id", "source_journey_step_id", "name", "description", "step_order", "objective", "required_evidence_label", "status", "notes", "due_date", "completed_at", "created_at", "updated_at"],
   client_step_checklist_items: ["id", "client_step_id", "label", "is_done", "item_order", "created_at"],
@@ -54,6 +60,10 @@ export default {
 
       if (url.pathname === "/api/health") {
         return json({ ok: true, storage: "cloudflare-d1" });
+      }
+
+      if (parts[0] === "api" && parts[1] === "project-steps" && parts[2]) {
+        return handleProjectStepRequest(request, env, parts[2], parts.slice(3));
       }
 
       if (parts[0] === "api" && parts[1] === "tables") {

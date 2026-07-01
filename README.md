@@ -1,6 +1,6 @@
-# Central de Projetos IA
+# Ramos Jornadas
 
-Aplicacao interna para configurar e conduzir jornadas operacionais de projetos tecnicos com apoio de IA.
+Aplicacao interna para configurar e conduzir jornadas operacionais de projetos, clientes e processos tecnicos com apoio de IA.
 
 O sistema e separado em tres areas principais:
 
