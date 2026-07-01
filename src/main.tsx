@@ -187,6 +187,32 @@ type ProjectStepLink = {
   link_order: number;
 };
 
+type ProjectStepPhase = {
+  id: string;
+  project_step_id: string;
+  title: string;
+  description: string | null;
+  phase_order: number;
+  status: StepStatus;
+  requires_previous_phase: boolean;
+  prerequisite_phase_id: string | null;
+  completion_condition: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+type ProjectStepContext = {
+  id: string;
+  project_step_id: string;
+  phase_id: string | null;
+  title: string;
+  content: string;
+  context_order: number;
+  status: "ativo" | "rascunho" | "arquivado";
+  created_at: string;
+  updated_at: string | null;
+};
+
 type Client = {
   id: string;
   name: string;
@@ -249,6 +275,8 @@ type Tables = {
   project_step_checklist_items: ProjectChecklistItem[];
   project_step_prompts: ProjectStepPrompt[];
   project_step_links: ProjectStepLink[];
+  project_step_phases: ProjectStepPhase[];
+  project_step_contexts: ProjectStepContext[];
   clients: Client[];
   client_steps: ClientStep[];
   client_step_checklist_items: ClientChecklistItem[];
@@ -289,6 +317,8 @@ const emptyTables: Tables = {
   project_step_checklist_items: [],
   project_step_prompts: [],
   project_step_links: [],
+  project_step_phases: [],
+  project_step_contexts: [],
   clients: [],
   client_steps: [],
   client_step_checklist_items: [],
@@ -712,6 +742,12 @@ function App() {
       project_step_links: current.project_step_links.filter(
         (item) => !current.project_steps.some((step) => step.project_id === projectId && step.id === item.project_step_id),
       ),
+      project_step_phases: current.project_step_phases.filter(
+        (item) => !current.project_steps.some((step) => step.project_id === projectId && step.id === item.project_step_id),
+      ),
+      project_step_contexts: current.project_step_contexts.filter(
+        (item) => !current.project_steps.some((step) => step.project_id === projectId && step.id === item.project_step_id),
+      ),
     }));
 
     if (selectedProjectId === projectId) {
@@ -836,6 +872,137 @@ function App() {
     setTables((current) => ({ ...current, project_step_prompts: [...current.project_step_prompts, data as ProjectStepPrompt] }));
   }
 
+  async function addProjectStepPhase(stepId: string, title: string) {
+    if (!supabase || !title.trim()) {
+      return;
+    }
+
+    const currentPhases = tables.project_step_phases.filter((phase) => phase.project_step_id === stepId).sort(byOrder);
+    const previousPhase = currentPhases[currentPhases.length - 1] ?? null;
+    const { data, error } = await supabase
+      .from<ProjectStepPhase>("project_step_phases")
+      .insert(
+        normalizePayload({
+          project_step_id: stepId,
+          title: title.trim(),
+          description: "",
+          phase_order: Math.max(0, ...currentPhases.map((phase) => phase.phase_order)) + 1,
+          status: currentPhases.length === 0 ? "em_andamento" : "pendente",
+          requires_previous_phase: currentPhases.length > 0,
+          prerequisite_phase_id: previousPhase?.id ?? "",
+          completion_condition: currentPhases.length > 0 ? "Concluir a fase anterior antes de avancar." : "",
+          updated_at: new Date().toISOString(),
+        }),
+      )
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      setNotice(`Erro ao adicionar fase: ${error?.message ?? "erro desconhecido"}`);
+      return;
+    }
+
+    setTables((current) => ({ ...current, project_step_phases: [...current.project_step_phases, data as ProjectStepPhase] }));
+    setNotice("Fase adicionada a etapa.");
+  }
+
+  async function updateProjectStepPhase(phaseId: string, payload: Partial<ProjectStepPhase>) {
+    if (!supabase) {
+      return;
+    }
+
+    const phase = tables.project_step_phases.find((item) => item.id === phaseId);
+    const blockingPhase = getBlockingPhase(phase, tables.project_step_phases);
+
+    if (payload.status && payload.status !== "pendente" && blockingPhase) {
+      setNotice(`Conclua "${blockingPhase.title}" antes de avancar esta fase.`);
+      return;
+    }
+
+    const { error } = await supabase.from("project_step_phases").update(normalizePayload({ ...payload, updated_at: new Date().toISOString() })).eq("id", phaseId);
+
+    if (error) {
+      setNotice(`Erro ao atualizar fase: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({
+      ...current,
+      project_step_phases: current.project_step_phases.map((item) => (item.id === phaseId ? { ...item, ...payload } : item)),
+    }));
+  }
+
+  async function deleteProjectStepPhase(phaseId: string) {
+    if (!supabase) {
+      return;
+    }
+
+    const { error } = await supabase.from("project_step_phases").delete().eq("id", phaseId);
+
+    if (error) {
+      setNotice(`Erro ao excluir fase: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({
+      ...current,
+      project_step_phases: current.project_step_phases.filter((item) => item.id !== phaseId),
+      project_step_contexts: current.project_step_contexts.map((item) => (item.phase_id === phaseId ? { ...item, phase_id: null } : item)),
+    }));
+  }
+
+  async function addProjectStepContext(stepId: string, title: string, content: string, phaseId: string) {
+    if (!supabase || !title.trim() || !content.trim()) {
+      return;
+    }
+
+    const currentContexts = tables.project_step_contexts.filter((context) => context.project_step_id === stepId);
+    const { data, error } = await supabase
+      .from<ProjectStepContext>("project_step_contexts")
+      .insert(
+        normalizePayload({
+          project_step_id: stepId,
+          phase_id: phaseId,
+          title: title.trim(),
+          content: content.trim(),
+          context_order: Math.max(0, ...currentContexts.map((context) => context.context_order)) + 1,
+          status: "ativo",
+          updated_at: new Date().toISOString(),
+        }),
+      )
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      setNotice(`Erro ao salvar contexto: ${error?.message ?? "erro desconhecido"}`);
+      return;
+    }
+
+    setTables((current) => ({ ...current, project_step_contexts: [...current.project_step_contexts, data as ProjectStepContext] }));
+    setNotice("Contexto salvo na etapa.");
+  }
+
+  async function updateProjectStepContext(contextId: string, payload: Partial<ProjectStepContext>) {
+    if (!supabase) {
+      return;
+    }
+
+    const { error } = await supabase.from("project_step_contexts").update(normalizePayload({ ...payload, updated_at: new Date().toISOString() })).eq("id", contextId);
+
+    if (error) {
+      setNotice(`Erro ao atualizar contexto: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({
+      ...current,
+      project_step_contexts: current.project_step_contexts.map((item) => (item.id === contextId ? { ...item, ...payload } : item)),
+    }));
+  }
+
+  async function deleteProjectStepContext(contextId: string) {
+    await deleteRecord("project_step_contexts", contextId);
+  }
   async function addStepLink(stepId: string, title: string, url: string) {
     if (!supabase || !title.trim() || !url.trim()) {
       return;
@@ -1409,6 +1576,12 @@ function App() {
             onAddLink={addStepLink}
             onUploadFile={uploadStepFile}
             onDeleteLink={(id) => deleteRecord("project_step_links", id)}
+            onAddPhase={addProjectStepPhase}
+            onUpdatePhase={updateProjectStepPhase}
+            onDeletePhase={deleteProjectStepPhase}
+            onAddContext={addProjectStepContext}
+            onUpdateContext={updateProjectStepContext}
+            onDeleteContext={deleteProjectStepContext}
             onAddNextStep={addNextStep}
             onSaveTemplate={saveProjectAsTemplate}
             onDuplicate={duplicateProject}
@@ -2139,6 +2312,12 @@ function JourneyView({
   onAddLink,
   onUploadFile,
   onDeleteLink,
+  onAddPhase,
+  onUpdatePhase,
+  onDeletePhase,
+  onAddContext,
+  onUpdateContext,
+  onDeleteContext,
   onAddNextStep,
   onSaveTemplate,
   onDuplicate,
@@ -2161,6 +2340,12 @@ function JourneyView({
   onAddLink: (stepId: string, title: string, url: string) => void;
   onUploadFile: (stepId: string, file: File) => void;
   onDeleteLink: (id: string) => void;
+  onAddPhase: (stepId: string, title: string) => void;
+  onUpdatePhase: (phaseId: string, payload: Partial<ProjectStepPhase>) => void;
+  onDeletePhase: (phaseId: string) => void;
+  onAddContext: (stepId: string, title: string, content: string, phaseId: string) => void;
+  onUpdateContext: (contextId: string, payload: Partial<ProjectStepContext>) => void;
+  onDeleteContext: (contextId: string) => void;
   onAddNextStep: (projectId: string, name: string) => void;
   onSaveTemplate: (project: Project) => void;
   onDuplicate: (project: Project) => void;
@@ -2170,6 +2355,9 @@ function JourneyView({
   const checklist = tables.project_step_checklist_items.filter((item) => item.project_step_id === selectedStep.id).sort(byOrder);
   const prompts = tables.project_step_prompts.filter((prompt) => prompt.project_step_id === selectedStep.id).sort(byOrder);
   const links = tables.project_step_links.filter((link) => link.project_step_id === selectedStep.id).sort(byOrder);
+  const phases = tables.project_step_phases.filter((phase) => phase.project_step_id === selectedStep.id).sort(byOrder);
+  const contexts = tables.project_step_contexts.filter((context) => context.project_step_id === selectedStep.id).sort(byOrder);
+  const canCompleteStep = phases.length === 0 || phases.every((phase) => phase.status === "concluido");
 
   return (
     <>
@@ -2217,7 +2405,13 @@ function JourneyView({
             </div>
             <div className="status-actions">
               {(["pendente", "em_andamento", "concluido", "bloqueado"] as StepStatus[]).map((status) => (
-                <button key={status} className={`chip ${selectedStep.status === status ? "active" : ""}`} onClick={() => onUpdateStep(selectedStep.id, { status })}>
+                <button
+                  key={status}
+                  className={`chip ${selectedStep.status === status ? "active" : ""}`}
+                  onClick={() => onUpdateStep(selectedStep.id, { status })}
+                  disabled={status === "concluido" && !canCompleteStep}
+                  title={status === "concluido" && !canCompleteStep ? "Conclua todas as fases antes de concluir a etapa" : undefined}
+                >
                   {formatStepStatus(status)}
                 </button>
               ))}
@@ -2231,14 +2425,34 @@ function JourneyView({
             <TextArea label="Observacoes da execucao" value={selectedStep.notes} onChange={() => undefined} onBlur={(value) => onUpdateStep(selectedStep.id, { notes: value })} />
           </div>
 
+          <PhasePanel
+            phases={phases}
+            onAdd={(title) => onAddPhase(selectedStep.id, title)}
+            onUpdate={onUpdatePhase}
+            onDelete={onDeletePhase}
+          />
           <ChecklistPanel items={checklist} onAdd={(label) => onAddChecklist(selectedStep.id, label)} onToggle={onToggleChecklist} onDelete={onDeleteChecklist} />
           <PromptsPanel tables={tables} prompts={prompts} stepId={selectedStep.id} onAddExisting={onAddExistingPrompt} onAddLocal={onAddLocalPrompt} onDelete={onDeletePrompt} />
+          <ContextPanel
+            project={project}
+            step={selectedStep}
+            phases={phases}
+            contexts={contexts}
+            onAdd={(title, content, phaseId) => onAddContext(selectedStep.id, title, content, phaseId)}
+            onUpdate={onUpdateContext}
+            onDelete={onDeleteContext}
+          />
           <LinksPanel links={links} onAdd={(title, url) => onAddLink(selectedStep.id, title, url)} onUpload={(file) => onUploadFile(selectedStep.id, file)} onDelete={onDeleteLink} />
         </section>
 
         <aside className="action-panel">
           <QuickAddStep onAdd={(name) => onAddNextStep(project.id, name)} />
-          <button className="action-button" onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}>
+          <button
+            className="action-button"
+            disabled={!canCompleteStep}
+            title={!canCompleteStep ? "Conclua todas as fases antes de concluir a etapa" : undefined}
+            onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}
+          >
             <CheckCircle2 size={18} />
             Concluir etapa
           </button>
@@ -2500,6 +2714,189 @@ function PromptsPanel({
   );
 }
 
+function PhasePanel({
+  phases,
+  onAdd,
+  onUpdate,
+  onDelete,
+}: {
+  phases: ProjectStepPhase[];
+  onAdd: (title: string) => void;
+  onUpdate: (phaseId: string, payload: Partial<ProjectStepPhase>) => void;
+  onDelete: (phaseId: string) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const doneCount = phases.filter((phase) => phase.status === "concluido").length;
+
+  return (
+    <section className="work-block phase-panel">
+      <div className="block-heading">
+        <div>
+          <h2>Fases da etapa</h2>
+          <span className="pending-summary">{phases.length ? `${doneCount}/${phases.length} fase(s) concluidas` : "Organize a etapa em fases menores"}</span>
+        </div>
+        <form
+          className="inline-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onAdd(title);
+            setTitle("");
+          }}
+        >
+          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Ex.: Fase 1 - contexto" />
+          <button className="icon-button" type="submit" disabled={!title.trim()}>
+            <Plus size={16} />
+          </button>
+        </form>
+      </div>
+
+      <div className="phase-grid">
+        {phases.map((phase, index) => {
+          const blockingPhase = getBlockingPhase(phase, phases);
+          const previousPhase = phases[index - 1] ?? null;
+
+          return (
+            <article className={`phase-card ${phase.status} ${blockingPhase ? "locked" : ""}`} key={phase.id}>
+              <div className="phase-card-head">
+                <span className={`phase-node ${phase.status}`}>{phase.phase_order}</span>
+                <InlineText defaultValue={phase.title} className="phase-title-input" onSave={(value) => onUpdate(phase.id, { title: value })} />
+                <button className="icon-button subtle" onClick={() => onDelete(phase.id)}>
+                  <Trash2 size={15} />
+                </button>
+              </div>
+
+              {blockingPhase && <span className="phase-warning">Depende de: {blockingPhase.title}</span>}
+
+              <TextArea label="Descricao / criterio" value={phase.description} rows={2} onChange={() => undefined} onBlur={(value) => onUpdate(phase.id, { description: value })} />
+              <TextArea label="Condicao de conclusao" value={phase.completion_condition} rows={2} onChange={() => undefined} onBlur={(value) => onUpdate(phase.id, { completion_condition: value })} />
+
+              <div className="status-actions phase-status-actions">
+                {(["pendente", "em_andamento", "concluido", "bloqueado"] as StepStatus[]).map((status) => (
+                  <button
+                    key={status}
+                    className={`chip ${phase.status === status ? "active" : ""}`}
+                    disabled={status !== "pendente" && Boolean(blockingPhase)}
+                    onClick={() => onUpdate(phase.id, { status })}
+                  >
+                    {formatStepStatus(status)}
+                  </button>
+                ))}
+              </div>
+
+              <label className="phase-toggle">
+                <input
+                  type="checkbox"
+                  checked={phase.requires_previous_phase}
+                  onChange={(event) =>
+                    onUpdate(phase.id, {
+                      requires_previous_phase: event.target.checked,
+                      prerequisite_phase_id: event.target.checked ? (phase.prerequisite_phase_id ?? previousPhase?.id ?? null) : null,
+                    })
+                  }
+                />
+                Exigir fase anterior antes de avancar
+              </label>
+
+              <SelectField
+                label="Pre-requisito especifico"
+                value={phase.prerequisite_phase_id}
+                onChange={(value) => onUpdate(phase.id, { prerequisite_phase_id: value || null })}
+                options={phases.filter((item) => item.id !== phase.id).map((item) => ({ value: item.id, label: item.title }))}
+                emptyLabel="Sem pre-requisito especifico"
+              />
+            </article>
+          );
+        })}
+        {phases.length === 0 && <span className="muted">Nenhuma fase criada. Use fases para dividir uma etapa longa em partes controlaveis.</span>}
+      </div>
+    </section>
+  );
+}
+
+function ContextPanel({
+  project,
+  step,
+  phases,
+  contexts,
+  onAdd,
+  onUpdate,
+  onDelete,
+}: {
+  project: Project;
+  step: ProjectStep;
+  phases: ProjectStepPhase[];
+  contexts: ProjectStepContext[];
+  onAdd: (title: string, content: string, phaseId: string) => void;
+  onUpdate: (contextId: string, payload: Partial<ProjectStepContext>) => void;
+  onDelete: (contextId: string) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [phaseId, setPhaseId] = useState("");
+  const [content, setContent] = useState("");
+
+  return (
+    <section className="work-block context-panel">
+      <div className="block-heading">
+        <div>
+          <h2>Contextos salvos</h2>
+          <span className="pending-summary">Textos reutilizaveis para copiar ou baixar em Markdown</span>
+        </div>
+      </div>
+
+      <div className="context-form">
+        <Field label="Titulo do contexto" value={title} onChange={setTitle} />
+        <SelectField label="Fase vinculada" value={phaseId} onChange={setPhaseId} options={phases.map((phase) => ({ value: phase.id, label: phase.title }))} emptyLabel="Contexto geral da etapa" />
+        <TextArea label="Texto do contexto" value={content} onChange={setContent} rows={5} />
+        <button
+          className="secondary-button"
+          disabled={!title.trim() || !content.trim()}
+          onClick={() => {
+            onAdd(title, content, phaseId);
+            setTitle("");
+            setPhaseId("");
+            setContent("");
+          }}
+        >
+          <Plus size={16} />
+          Salvar contexto
+        </button>
+      </div>
+
+      <div className="context-list">
+        {contexts.map((context) => {
+          const markdown = buildContextMarkdown(project, step, context, phases);
+          const phase = phases.find((item) => item.id === context.phase_id);
+
+          return (
+            <article className="context-card" key={context.id}>
+              <div className="context-card-head">
+                <div>
+                  <InlineText defaultValue={context.title} className="context-title-input" onSave={(value) => onUpdate(context.id, { title: value })} />
+                  <span>{phase ? `Fase: ${phase.title}` : "Contexto geral da etapa"}</span>
+                </div>
+                <div className="row-actions">
+                  <button onClick={() => void copyText(markdown)} title="Copiar contexto em Markdown">
+                    <Copy size={16} />
+                  </button>
+                  <button onClick={() => downloadMarkdown(markdown, `${project.name}-${step.name}-${context.title}.md`)} title="Baixar arquivo Markdown">
+                    <Save size={16} />
+                  </button>
+                  <button onClick={() => onDelete(context.id)} title="Excluir contexto">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </div>
+
+              <SelectField label="Fase" value={context.phase_id} onChange={(value) => onUpdate(context.id, { phase_id: value || null })} options={phases.map((item) => ({ value: item.id, label: item.title }))} emptyLabel="Contexto geral" />
+              <TextArea label="Conteudo" value={context.content} rows={5} onChange={() => undefined} onBlur={(value) => onUpdate(context.id, { content: value })} />
+            </article>
+          );
+        })}
+        {contexts.length === 0 && <span className="muted">Nenhum contexto salvo nesta etapa.</span>}
+      </div>
+    </section>
+  );
+}
 function LinksPanel({
   links,
   onAdd,
@@ -3100,9 +3497,9 @@ function splitChecklist(value: string | null) {
     .filter(Boolean);
 }
 
-function byOrder<T extends { step_order?: number; item_order?: number; prompt_order?: number; link_order?: number }>(a: T, b: T) {
-  const left = a.step_order ?? a.item_order ?? a.prompt_order ?? a.link_order ?? 0;
-  const right = b.step_order ?? b.item_order ?? b.prompt_order ?? b.link_order ?? 0;
+function byOrder<T extends { step_order?: number; item_order?: number; prompt_order?: number; link_order?: number; phase_order?: number; context_order?: number }>(a: T, b: T) {
+  const left = a.step_order ?? a.item_order ?? a.prompt_order ?? a.link_order ?? a.phase_order ?? a.context_order ?? 0;
+  const right = b.step_order ?? b.item_order ?? b.prompt_order ?? b.link_order ?? b.phase_order ?? b.context_order ?? 0;
   return left - right;
 }
 
@@ -3129,6 +3526,14 @@ function getOrderColumn(tableName: keyof Tables) {
 
   if (tableName === "project_step_links") {
     return "link_order";
+  }
+
+  if (tableName === "project_step_phases") {
+    return "phase_order";
+  }
+
+  if (tableName === "project_step_contexts") {
+    return "context_order";
   }
 
   if (tableName === "client_step_links") {
@@ -3206,6 +3611,63 @@ function formatPromptStatus(status: ProjectStepPrompt["prompt_status"], content:
   return "Pronto";
 }
 
+function getBlockingPhase(phase: ProjectStepPhase | null | undefined, phases: ProjectStepPhase[]) {
+  if (!phase) {
+    return null;
+  }
+
+  const explicitPrerequisite = phase.prerequisite_phase_id ? phases.find((item) => item.id === phase.prerequisite_phase_id) : null;
+
+  if (explicitPrerequisite && explicitPrerequisite.status !== "concluido") {
+    return explicitPrerequisite;
+  }
+
+  if (!phase.requires_previous_phase) {
+    return null;
+  }
+
+  const previousPhase = [...phases]
+    .filter((item) => item.project_step_id === phase.project_step_id && item.phase_order < phase.phase_order)
+    .sort((left, right) => right.phase_order - left.phase_order)[0];
+
+  return previousPhase && previousPhase.status !== "concluido" ? previousPhase : null;
+}
+
+function buildContextMarkdown(project: Project, step: ProjectStep, context: ProjectStepContext, phases: ProjectStepPhase[]) {
+  const phase = phases.find((item) => item.id === context.phase_id);
+  const parts = [
+    `# ${context.title}`,
+    "",
+    `Projeto: ${project.name}`,
+    project.company ? `Empresa: ${project.company}` : "",
+    `Etapa: ${step.name}`,
+    phase ? `Fase: ${phase.title}` : "Fase: contexto geral da etapa",
+    "",
+    "## Contexto",
+    "",
+    context.content.trim(),
+  ].filter(Boolean);
+
+  return `${parts.join("\n")}\n`;
+}
+
+function downloadMarkdown(markdown: string, fileName: string) {
+  const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = slugifyFileName(fileName.endsWith(".md") ? fileName : `${fileName}.md`);
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function slugifyFileName(value: string) {
+  const extension = value.toLowerCase().endsWith(".md") ? ".md" : "";
+  const base = extension ? value.slice(0, -3) : value;
+  return `${base.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "contexto"}${extension || ".md"}`;
+}
 async function copyText(value: string) {
   await navigator.clipboard.writeText(value);
 }

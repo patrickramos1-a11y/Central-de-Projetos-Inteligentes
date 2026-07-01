@@ -770,3 +770,46 @@ Ao concluir CE-*:
 ## 25. Proxima acao
 
 Executar apenas a Fase 0: tipos TypeScript, validador e backup do D1. Nao reescrever a tela antes de esses itens estarem verificados.
+
+---
+
+## Adendo - Fases internas e contextos salvos
+
+Status: iniciado em 2026-06-30.
+
+### Objetivo
+
+Ampliar a Jornada do Projeto para que cada etapa possa ser quebrada em fases menores e para que o contexto gerado durante a conversa com IA possa ser salvo, organizado, copiado e baixado como arquivo Markdown.
+
+### Fases da etapa
+
+Cada etapa pode ter uma lista de fases com:
+
+- titulo editavel;
+- descricao ou criterio da fase;
+- condicao de conclusao;
+- status: pendente, em andamento, concluido ou bloqueado;
+- opcao para exigir fase anterior concluida;
+- opcao para escolher uma fase especifica como pre-requisito.
+
+A regra operacional inicial e simples: se uma fase possui pre-requisito pendente, ela nao deve avancar para em andamento/concluida ate que a fase anterior ou especifica esteja concluida. A conclusao da etapa completa deve considerar todas as fases concluidas quando existirem fases cadastradas.
+
+### Contextos salvos
+
+Cada etapa pode ter contextos reutilizaveis com:
+
+- titulo;
+- conteudo integral do contexto;
+- vinculo opcional com uma fase;
+- acao de copiar em formato Markdown;
+- acao de baixar arquivo `.md` com nome baseado no projeto, etapa e contexto.
+
+Uso esperado: o usuario conversa com ChatGPT/Claude/NotebookLM, recebe um contexto importante, salva esse texto na etapa, e depois consegue copiar ou baixar o contexto para usar em novos prompts ou organizar a memoria operacional do projeto.
+
+### Implementacao incremental
+
+1. Criar tabelas D1 `project_step_phases` e `project_step_contexts`.
+2. Permitir CRUD dessas tabelas no Worker.
+3. Exibir painel de fases dentro da Jornada do Projeto.
+4. Exibir painel de contextos dentro da Jornada do Projeto.
+5. Integrar fases e contextos ao Construtor de Etapas completo depois que o contrato de blocos for publicado.

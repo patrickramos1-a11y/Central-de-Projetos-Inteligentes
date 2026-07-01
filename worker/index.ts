@@ -22,13 +22,15 @@ const tableColumns: Record<string, string[]> = {
   project_step_checklist_items: ["id", "project_step_id", "label", "is_done", "item_order", "created_at"],
   project_step_prompts: ["id", "project_step_id", "prompt_id", "title", "content", "ai_tool_id", "prompt_status", "is_required", "placeholder_note", "prompt_order", "usage_notes", "created_at"],
   project_step_links: ["id", "project_step_id", "title", "url", "notes", "link_order", "created_at"],
+  project_step_phases: ["id", "project_step_id", "title", "description", "phase_order", "status", "requires_previous_phase", "prerequisite_phase_id", "completion_condition", "created_at", "updated_at"],
+  project_step_contexts: ["id", "project_step_id", "phase_id", "title", "content", "context_order", "status", "created_at", "updated_at"],
   clients: ["id", "name", "company", "logo_url", "responsible", "project_type_id", "journey_template_id", "entry_month", "status", "notes", "created_at", "updated_at"],
   client_steps: ["id", "client_id", "source_journey_step_id", "name", "description", "step_order", "objective", "required_evidence_label", "status", "notes", "due_date", "completed_at", "created_at", "updated_at"],
   client_step_checklist_items: ["id", "client_step_id", "label", "is_done", "item_order", "created_at"],
   client_step_links: ["id", "client_step_id", "title", "url", "notes", "link_order", "created_at"],
 };
 
-const booleanColumns = new Set(["is_done", "is_required"]);
+const booleanColumns = new Set(["is_done", "is_required", "requires_previous_phase"]);
 
 const corsHeaders = {
   "access-control-allow-origin": "*",

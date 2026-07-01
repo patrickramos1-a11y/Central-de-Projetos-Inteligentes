@@ -1807,6 +1807,158 @@ button {
   box-shadow: 0 0 22px rgba(var(--brand-green-rgb), 0.22);
 }
 
+
+.phase-panel,
+.context-panel {
+  overflow: hidden;
+}
+
+.phase-grid,
+.context-list {
+  display: grid;
+  gap: 12px;
+}
+
+.phase-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.phase-card,
+.context-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  border-radius: var(--radius-panel);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.54), rgba(255, 255, 255, 0.28)),
+    rgba(255, 255, 255, 0.24);
+  box-shadow: 0 14px 34px rgba(35, 58, 50, 0.08);
+}
+
+.phase-card.concluido {
+  border-color: rgba(var(--brand-green-rgb), 0.32);
+  box-shadow: 0 14px 34px rgba(35, 58, 50, 0.08), 0 0 24px rgba(var(--brand-green-rgb), 0.16);
+}
+
+.phase-card.locked {
+  border-color: rgba(233, 170, 66, 0.38);
+  background:
+    linear-gradient(145deg, rgba(255, 249, 230, 0.58), rgba(255, 255, 255, 0.28)),
+    rgba(255, 255, 255, 0.24);
+}
+
+.phase-card-head,
+.context-card-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.phase-card-head > div,
+.context-card-head > div:first-child {
+  min-width: 0;
+}
+
+.phase-node {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 999px;
+  color: #0a5148;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+}
+
+.phase-node.em_andamento,
+.phase-node.concluido {
+  color: #ffffff;
+  background: linear-gradient(135deg, var(--brand-green), var(--deep-teal));
+  box-shadow: 0 0 18px rgba(var(--brand-green-rgb), 0.28);
+}
+
+.phase-node.bloqueado {
+  color: #813016;
+  background: rgba(255, 223, 207, 0.72);
+}
+
+.phase-title-input,
+.context-title-input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  color: #0d2924;
+  background: transparent;
+  font-size: 0.98rem;
+  font-weight: 800;
+}
+
+.phase-title-input:focus,
+.context-title-input:focus {
+  outline: none;
+}
+
+.phase-warning {
+  display: inline-flex;
+  width: fit-content;
+  padding: 6px 9px;
+  border-radius: 999px;
+  color: #73510b;
+  background: rgba(255, 240, 194, 0.68);
+  border: 1px solid rgba(233, 170, 66, 0.28);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.phase-status-actions {
+  gap: 6px;
+}
+
+.phase-status-actions .chip {
+  min-height: 30px;
+  padding-inline: 8px;
+  font-size: 0.76rem;
+}
+
+.phase-toggle {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: #37534c;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.phase-toggle input {
+  accent-color: var(--deep-teal);
+}
+
+.context-form {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.8fr) minmax(190px, 0.8fr) minmax(240px, 1.4fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.context-card-head span {
+  display: block;
+  color: var(--muted-text);
+  font-size: 0.82rem;
+}
+
+.context-card textarea {
+  max-height: 220px;
+}
+
+@media (max-width: 980px) {
+  .context-form {
+    grid-template-columns: 1fr;
+  }
+}
 @keyframes spin {
   to {
     transform: rotate(360deg);

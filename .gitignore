@@ -9,3 +9,8 @@ worker-dist
 .wrangler
 .agents
 skills-lock.json
+.dev.vars
+cloudflare/backups/
+tmp/
+.codex-write-test.tmp
+worker-dist-new/
