@@ -387,7 +387,7 @@ function calculateCompletion(document: StepDocument, valueRows: Array<Record<str
   const reasons = measuredBlocks.filter((block) => !isBlockComplete(block, valueMap.get(block.id), fileRows)).map((block) => ({ code: "required_block_incomplete", message: `Preencha o bloco ${block.title}.`, blockId: block.id }));
   const total = measuredBlocks.length;
   const progress = total ? Math.round((completed.length / total) * 100) : 0;
-  const anyContent = progressBlocks.some((block) => isBlockComplete(block, valueMap.get(block.id), fileRows) || !isEmpty(valueMap.get(block.id)) || !isEmpty(block.config.content) || !isEmpty(block.config.contentSnapshot));
+  const anyContent = progressBlocks.some((block) => isBlockComplete(block, valueMap.get(block.id), fileRows) || !isEmpty(valueMap.get(block.id)) || !isEmpty(block.config.content) || !isEmpty(block.config.contentSnapshot) || !isEmpty(block.config.contexts));
   const status = total > 0 && completed.length === total ? "concluido" : anyContent ? "em_andamento" : "pendente";
   return { status, progress, completedBlocks: completed.length, totalBlocks: total, canComplete: total > 0 && completed.length === total, reasons };
 }
@@ -396,6 +396,7 @@ function isBlockComplete(block: StepBlock, value: unknown, fileRows: Array<Recor
   if (block.type === "file_upload") return fileRows.some((file) => file.block_id === block.id);
   if (block.type === "project_summary") return Boolean(block.config.summaryId);
   if (block.type === "materials") return Array.isArray(block.config.links) && block.config.links.length > 0;
+  if (block.type === "context") return Array.isArray(block.config.contexts) ? block.config.contexts.length > 0 : !isEmpty(block.config.content);
   if (block.type === "prompt") return !isEmpty(block.config.contentSnapshot) || !isEmpty(value);
   if (block.type === "checklist") {
     const items = Array.isArray(block.config.items) ? (block.config.items as Array<Record<string, unknown>>) : [];

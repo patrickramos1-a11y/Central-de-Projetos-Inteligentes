@@ -2832,3 +2832,104 @@ button {
   background: rgba(245, 179, 61, 0.16);
   color: #7c5a12;
 }
+
+.context-library {
+  display: grid;
+  gap: 12px;
+}
+
+.context-library-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.context-compose {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.context-compose input,
+.context-compose textarea {
+  width: 100%;
+  border: 1px solid rgba(15, 118, 110, 0.13);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--ink);
+  padding: 10px 12px;
+  font: inherit;
+  outline: none;
+}
+
+.context-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.context-mini-card {
+  min-height: 124px;
+  display: grid;
+  align-content: space-between;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.42));
+  box-shadow: 0 14px 34px rgba(15, 54, 49, 0.09);
+  cursor: copy;
+  transition: transform var(--ease-standard), box-shadow var(--ease-standard), border-color var(--ease-standard);
+}
+
+.context-mini-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(var(--brand-green-rgb), 0.38);
+  box-shadow: var(--glow-green);
+}
+
+.context-mini-card strong {
+  color: var(--ink);
+  font-size: 0.95rem;
+  line-height: 1.2;
+}
+
+.context-mini-card > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.context-mini-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.context-preview {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.context-preview summary {
+  cursor: pointer;
+  font-weight: 800;
+  color: var(--deep-teal);
+}
+
+.context-preview p {
+  max-height: 160px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.6);
+  white-space: pre-wrap;
+}

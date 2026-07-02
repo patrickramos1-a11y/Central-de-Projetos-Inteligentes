@@ -3175,13 +3175,7 @@ function BlockBody({
   }
 
   if (block.type === "context") {
-    const content = String(block.config.content ?? "");
-    return (
-      <div className="context-block-compact">
-        <textarea value={content} placeholder="Cole o contexto reutilizavel" onChange={(event) => onUpdate({ config: { content: event.target.value } })} />
-        <button className="secondary-button" onClick={() => copyToClipboard(content)}><Copy size={15} /> Copiar contexto</button>
-      </div>
-    );
+    return <ContextBlock block={block} onUpdate={onUpdate} />;
   }
 
   if (block.type === "materials") {
@@ -3264,6 +3258,96 @@ function MaterialsBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate
   );
 }
 
+function ContextBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftContent, setDraftContent] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const rawContexts = Array.isArray(block.config.contexts) ? block.config.contexts as Array<{ id: string; title: string; content: string }> : [];
+  const legacyContent = String(block.config.content ?? "");
+  const contexts = rawContexts.length > 0
+    ? rawContexts
+    : legacyContent.trim()
+      ? [{ id: "legacy-context", title: block.title || "Contexto", content: legacyContent }]
+      : [];
+  const isWriting = editingId !== null;
+
+  function resetForm() {
+    setEditingId(null);
+    setDraftTitle("");
+    setDraftContent("");
+  }
+
+  function startNew() {
+    setEditingId("new");
+    setDraftTitle("");
+    setDraftContent("");
+  }
+
+  function startEdit(item: { id: string; title: string; content: string }) {
+    setEditingId(item.id);
+    setDraftTitle(item.title);
+    setDraftContent(item.content);
+  }
+
+  function saveContext() {
+    if (!draftTitle.trim() && !draftContent.trim()) return;
+    const normalizedContexts = contexts.map((item) => ({ ...item, id: item.id === "legacy-context" ? crypto.randomUUID() : item.id }));
+    const nextItem = {
+      id: editingId && editingId !== "new" && editingId !== "legacy-context" ? editingId : crypto.randomUUID(),
+      title: draftTitle.trim() || "Contexto sem titulo",
+      content: draftContent.trim(),
+    };
+    const next = editingId && editingId !== "new"
+      ? normalizedContexts.map((item) => item.id === editingId || (editingId === "legacy-context" && item.content === legacyContent) ? nextItem : item)
+      : [...normalizedContexts, nextItem];
+    onUpdate({ config: { contexts: next, content: "" } });
+    resetForm();
+  }
+
+  function removeContext(itemId: string) {
+    const next = contexts.filter((item) => item.id !== itemId);
+    onUpdate({ config: { contexts: next, content: "" } });
+    if (editingId === itemId) resetForm();
+  }
+
+  return (
+    <div className="context-library">
+      <div className="context-library-head">
+        <span>{contexts.length ? `${contexts.length} contexto(s) salvo(s)` : "Nenhum contexto salvo neste bloco"}</span>
+        <button className="secondary-button" type="button" onClick={startNew}><Plus size={15} /> Adicionar contexto</button>
+      </div>
+
+      {isWriting && (
+        <div className="context-compose">
+          <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Titulo do contexto" />
+          <textarea value={draftContent} onChange={(event) => setDraftContent(event.target.value)} placeholder="Cole aqui o contexto" rows={5} />
+          <div className="inline-actions">
+            <button className="primary-button" type="button" onClick={saveContext}><Save size={15} /> Salvar contexto</button>
+            <button className="secondary-button" type="button" onClick={resetForm}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      <div className="context-card-grid">
+        {contexts.map((item) => (
+          <article className="context-mini-card" key={item.id} onClick={() => copyToClipboard(item.content)} title="Clique para copiar">
+            <strong>{item.title}</strong>
+            <span>{item.content ? `${item.content.slice(0, 90)}${item.content.length > 90 ? "..." : ""}` : "Sem texto"}</span>
+            <div className="context-mini-actions" onClick={(event) => event.stopPropagation()}>
+              <button className="icon-button" type="button" title="Copiar contexto" onClick={() => copyToClipboard(item.content)}><Copy size={14} /></button>
+              <button className="icon-button" type="button" title="Editar contexto" onClick={() => startEdit(item)}><Pencil size={14} /></button>
+              <button className="icon-button danger" type="button" title="Excluir contexto" onClick={() => removeContext(item.id)}><Trash2 size={14} /></button>
+            </div>
+            <details className="context-preview" onClick={(event) => event.stopPropagation()}>
+              <summary>Ver texto</summary>
+              <p>{item.content || "Sem texto cadastrado."}</p>
+            </details>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
 function blockTypeText(type: string) {
   return blockCatalog.find((item) => item.type === type)?.label ?? type;
 }
@@ -4831,5 +4915,3 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </StrictMode>,
 );
-
-
