@@ -3199,15 +3199,36 @@ function BlockBody({
 
   if (block.type === "project_summary") {
     const summary = summaries.find((item) => item.id === block.config.summaryId) ?? summaries.find((item) => item.status === "active") ?? summaries[0];
-    const items = summary ? summaryItems.filter((item) => item.summary_id === summary.id) : [];
+    const items = summary ? summaryItems.filter((item) => item.summary_id === summary.id).sort(byOrder) : [];
     const selected = items.filter((item) => item.is_selected);
+    const consolidatedText = summary?.consolidated_text?.trim() ?? "";
+    const previewLines = consolidatedText
+      ? consolidatedText.split("\n").filter(Boolean).slice(0, 18)
+      : buildProjectSummaryText(items).split("\n").filter(Boolean).slice(0, 10);
     return (
-      <div className="summary-block-compact">
-        <div><strong>{summary ? `Versao ${summary.version_number} - ${summary.status === "active" ? "Ativo" : "Rascunho"}` : "Nenhum sumario vinculado"}</strong><span>{summary ? `${selected.length}/${items.length} topicos selecionados` : "Adicione ou vincule uma versao"}</span></div>
-        <div className="inline-actions">
-          <button className="secondary-button" disabled={!summary?.consolidated_text} onClick={() => copyToClipboard(summary?.consolidated_text ?? "")}><Copy size={15} /> Copiar consolidado</button>
-          <button className="primary-button" onClick={onOpenSummary}><GitBranch size={15} /> Abrir editor</button>
+      <div className="summary-block-inline">
+        <div className="summary-inline-head">
+          <div>
+            <strong>{summary ? `Versao ${summary.version_number} - ${summary.status === "active" ? "Ativo" : "Rascunho"}` : "Nenhum sumario vinculado"}</strong>
+            <span>{summary ? `${selected.length}/${items.length} topicos selecionados` : "Adicione ou vincule uma versao"}</span>
+          </div>
+          <div className="inline-actions">
+            <button className="secondary-button" disabled={!consolidatedText} onClick={() => copyToClipboard(consolidatedText)}><Copy size={15} /> Copiar consolidado</button>
+            <button className="primary-button" onClick={onOpenSummary}><GitBranch size={15} /> Editar sumario</button>
+          </div>
         </div>
+        {summary ? (
+          <div className="summary-inline-preview">
+            <div className="summary-inline-meta">
+              <span>{consolidatedText ? "Sumario consolidado" : "Previa da estrutura"}</span>
+              <span>{items.length} topico(s)</span>
+            </div>
+            <ol>
+              {previewLines.map((line, index) => <li key={`${line}-${index}`}>{line.trim()}</li>)}
+            </ol>
+            {previewLines.length === 0 && <span className="muted-block">Consolide o sumario para visualizar a estrutura aqui.</span>}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -3274,15 +3295,19 @@ function MaterialsBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate
 }
 
 function ContextBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
+  const contextColors = ["mint", "teal", "amber", "blue", "rose", "slate"];
   const [draftTitle, setDraftTitle] = useState("");
   const [draftContent, setDraftContent] = useState("");
+  const [draftColor, setDraftColor] = useState("mint");
+  const [draftPinned, setDraftPinned] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const rawContexts = Array.isArray(block.config.contexts) ? block.config.contexts as Array<{ id: string; title: string; content: string }> : [];
+  type ContextCard = { id: string; title: string; content: string; color?: string; pinned?: boolean };
+  const rawContexts = Array.isArray(block.config.contexts) ? block.config.contexts as ContextCard[] : [];
   const legacyContent = String(block.config.content ?? "");
   const contexts = rawContexts.length > 0
     ? rawContexts
     : legacyContent.trim()
-      ? [{ id: "legacy-context", title: block.title || "Contexto", content: legacyContent }]
+      ? [{ id: "legacy-context", title: block.title || "Contexto", content: legacyContent, color: "mint", pinned: false }]
       : [];
   const isWriting = editingId !== null;
 
@@ -3290,33 +3315,46 @@ function ContextBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: 
     setEditingId(null);
     setDraftTitle("");
     setDraftContent("");
+    setDraftColor("mint");
+    setDraftPinned(false);
   }
 
   function startNew() {
     setEditingId("new");
     setDraftTitle("");
     setDraftContent("");
+    setDraftColor(contextColors[contexts.length % contextColors.length]);
+    setDraftPinned(false);
   }
 
-  function startEdit(item: { id: string; title: string; content: string }) {
+  function startEdit(item: ContextCard) {
     setEditingId(item.id);
     setDraftTitle(item.title);
     setDraftContent(item.content);
+    setDraftColor(item.color || "mint");
+    setDraftPinned(Boolean(item.pinned));
   }
 
   function saveContext() {
     if (!draftTitle.trim() && !draftContent.trim()) return;
     const normalizedContexts = contexts.map((item) => ({ ...item, id: item.id === "legacy-context" ? crypto.randomUUID() : item.id }));
-    const nextItem = {
+    const nextItem: ContextCard = {
       id: editingId && editingId !== "new" && editingId !== "legacy-context" ? editingId : crypto.randomUUID(),
       title: draftTitle.trim() || "Contexto sem titulo",
       content: draftContent.trim(),
+      color: draftColor,
+      pinned: draftPinned,
     };
     const next = editingId && editingId !== "new"
       ? normalizedContexts.map((item) => item.id === editingId || (editingId === "legacy-context" && item.content === legacyContent) ? nextItem : item)
       : [...normalizedContexts, nextItem];
     onUpdate({ config: { contexts: next, content: "" } });
     resetForm();
+  }
+
+  function patchContext(itemId: string, patch: Partial<ContextCard>) {
+    const normalizedContexts = contexts.map((item) => ({ ...item, id: item.id === "legacy-context" ? crypto.randomUUID() : item.id }));
+    onUpdate({ config: { contexts: normalizedContexts.map((item) => item.id === itemId || (itemId === "legacy-context" && item.content === legacyContent) ? { ...item, ...patch } : item), content: "" } });
   }
 
   function removeContext(itemId: string) {
@@ -3326,16 +3364,22 @@ function ContextBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: 
   }
 
   return (
-    <div className="context-library">
+    <div className="context-library compact-context-library">
       <div className="context-library-head">
-        <span>{contexts.length ? `${contexts.length} contexto(s) salvo(s)` : "Nenhum contexto salvo neste bloco"}</span>
+        <span>{contexts.length ? `${contexts.length} contexto(s)` : "Nenhum contexto salvo neste bloco"}</span>
         <button className="secondary-button" type="button" onClick={startNew}><Plus size={15} /> Adicionar contexto</button>
       </div>
 
       {isWriting && (
-        <div className="context-compose">
+        <div className="context-compose compact-context-compose">
           <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Titulo do contexto" />
           <textarea value={draftContent} onChange={(event) => setDraftContent(event.target.value)} placeholder="Cole aqui o contexto" rows={5} />
+          <div className="context-form-row">
+            <div className="context-color-picker">
+              {contextColors.map((color) => <button key={color} type="button" className={`context-color-dot ${color} ${draftColor === color ? "active" : ""}`} onClick={() => setDraftColor(color)} />)}
+            </div>
+            <label className="checkline"><input type="checkbox" checked={draftPinned} onChange={(event) => setDraftPinned(event.target.checked)} /> Fixar no template</label>
+          </div>
           <div className="inline-actions">
             <button className="primary-button" type="button" onClick={saveContext}><Save size={15} /> Salvar contexto</button>
             <button className="secondary-button" type="button" onClick={resetForm}>Cancelar</button>
@@ -3343,12 +3387,13 @@ function ContextBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: 
         </div>
       )}
 
-      <div className="context-card-grid">
+      <div className="context-card-grid compact-context-grid">
         {contexts.map((item) => (
-          <article className="context-mini-card" key={item.id} onClick={() => copyToClipboard(item.content)} title="Clique para copiar">
+          <article className={`context-mini-card compact-context-card ${item.color || "mint"} ${item.pinned ? "pinned" : ""}`} key={item.id} onClick={() => copyToClipboard(item.content)} title="Clique para copiar">
             <strong>{item.title}</strong>
-            <span>{item.content ? `${item.content.slice(0, 90)}${item.content.length > 90 ? "..." : ""}` : "Sem texto"}</span>
+            {item.pinned && <span className="context-pin-label">Fixado no template</span>}
             <div className="context-mini-actions" onClick={(event) => event.stopPropagation()}>
+              <button className={`icon-button ${item.pinned ? "active" : ""}`} type="button" title="Fixar no template" onClick={() => patchContext(item.id, { pinned: !item.pinned })}><Save size={14} /></button>
               <button className="icon-button" type="button" title="Copiar contexto" onClick={() => copyToClipboard(item.content)}><Copy size={14} /></button>
               <button className="icon-button" type="button" title="Editar contexto" onClick={() => startEdit(item)}><Pencil size={14} /></button>
               <button className="icon-button danger" type="button" title="Excluir contexto" onClick={() => removeContext(item.id)}><Trash2 size={14} /></button>
@@ -3362,8 +3407,7 @@ function ContextBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: 
       </div>
     </div>
   );
-}
-function blockTypeText(type: string) {
+}function blockTypeText(type: string) {
   return blockCatalog.find((item) => item.type === type)?.label ?? type;
 }
 
