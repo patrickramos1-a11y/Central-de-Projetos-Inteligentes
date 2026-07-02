@@ -1543,16 +1543,6 @@ function App() {
     setNotice(`Template "${templateName}" salvo a partir da execucao real.`);
   }
 
-  async function duplicateProject(project: Project) {
-    await createProject({
-      name: `${project.name} - copia`,
-      company: project.company ?? "",
-      responsible: project.responsible ?? "",
-      project_type_id: project.project_type_id ?? "",
-      journey_template_id: project.journey_template_id ?? "",
-      notes: project.notes ?? "",
-    });
-  }
 
   async function createClientJourney(form: NewClientFormState) {
     if (!supabase || !form.name.trim()) {
@@ -2006,7 +1996,6 @@ function App() {
             onDeleteContext={deleteProjectStepContext}
             onAddNextStep={addNextStep}
             onSaveTemplate={saveProjectAsTemplate}
-            onDuplicate={duplicateProject}
             currentUser={currentUser}
             onImportSummary={importProjectSummary}
             onUpdateSummaryItem={updateProjectSummaryItem}
@@ -2791,7 +2780,6 @@ function JourneyView({
   onDeleteContext,
   onAddNextStep,
   onSaveTemplate,
-  onDuplicate,
   currentUser,
   onImportSummary,
   onUpdateSummaryItem,
@@ -2827,7 +2815,6 @@ function JourneyView({
   onDeleteContext: (contextId: string) => void;
   onAddNextStep: (projectId: string, name: string) => void;
   onSaveTemplate: (project: Project) => void;
-  onDuplicate: (project: Project) => void;
   currentUser: AppUser | null;
   onImportSummary: (project: Project, rawText: string) => void;
   onUpdateSummaryItem: (itemId: string, payload: Partial<ProjectSummaryItem>) => void;
@@ -2845,6 +2832,7 @@ function JourneyView({
   const [newStepName, setNewStepName] = useState("");
   const [summaryEditorOpen, setSummaryEditorOpen] = useState(false);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
+  const [collapsedBlockIds, setCollapsedBlockIds] = useState<Set<string>>(() => new Set());
   const summaries = tables.project_summaries.filter((summary) => summary.project_id === project.id);
   const summaryItems = tables.project_summary_items.filter((item) => item.project_id === project.id).sort(byOrder);
   const generatedPrompts = tables.generated_prompts.filter((prompt) => prompt.project_id === project.id);
@@ -2866,7 +2854,11 @@ function JourneyView({
   async function loadStepStructure() {
     setIsLoadingBlocks(true);
     try {
-      setPayload(await stepRequest("/structure"));
+      const next = await stepRequest("/structure");
+      setPayload(next);
+      if (next.completion.status !== selectedStep.status) {
+        void onUpdateStep(selectedStep.id, { status: next.completion.status });
+      }
     } finally {
       setIsLoadingBlocks(false);
     }
@@ -2885,6 +2877,39 @@ function JourneyView({
 
   async function deleteBlock(blockId: string) {
     setPayload(await stepRequest(`/blocks/${encodeURIComponent(blockId)}`, { method: "DELETE" }));
+  }
+
+  async function duplicateBlock(block: StepBuilderBlock) {
+    if (!payload) return;
+    const created = await stepRequest("/blocks", {
+      method: "POST",
+      body: JSON.stringify({ type: block.type, title: `${block.title} copia`, parentBlockId: block.config.parentBlockId ?? null }),
+    });
+    const createdBlock = created.document.blocks.find((item) => !payload.document.blocks.some((existing) => existing.id === item.id));
+    if (!createdBlock) {
+      setPayload(created);
+      return;
+    }
+    setPayload(await stepRequest(`/blocks/${encodeURIComponent(createdBlock.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        title: `${block.title} copia`,
+        required: block.required,
+        visible: block.visible,
+        editableInExecution: block.editableInExecution,
+        collapsedByDefault: block.collapsedByDefault,
+        config: block.config,
+      }),
+    }));
+  }
+
+  function toggleBlockCollapsed(blockId: string) {
+    setCollapsedBlockIds((current) => {
+      const next = new Set(current);
+      if (next.has(blockId)) next.delete(blockId);
+      else next.add(blockId);
+      return next;
+    });
   }
 
   async function moveBlock(blockId: string, direction: -1 | 1) {
@@ -2942,14 +2967,14 @@ function JourneyView({
             </div>
             <form className="quick-step-form" onSubmit={(event) => { event.preventDefault(); onAddNextStep(project.id, newStepName || "Nova etapa"); setNewStepName(""); }}>
               <input value={newStepName} onChange={(event) => setNewStepName(event.target.value)} placeholder="Nova etapa" />
-              <button className="secondary-button" type="submit"><Plus size={16} /> Etapa</button>
+              <button className="secondary-button" type="submit"><Plus size={16} /> Adicionar etapa</button>
             </form>
             <div className="block-add-wrap">
-              <button className="primary-button" type="button" onClick={() => setIsAddMenuOpen((value) => !value)}><Plus size={17} /> Bloco</button>
+              <button className="primary-button" type="button" onClick={() => setIsAddMenuOpen((value) => !value)}><Plus size={17} /> Adicionar bloco</button>
               {isAddMenuOpen && <BlockTypeMenu onSelect={addBlock} />}
             </div>
             <button className="secondary-button" type="button" disabled={!completion?.canComplete} onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}><CheckCircle2 size={17} /> Concluir</button>
-            <button className="secondary-button" type="button" onClick={() => onSaveTemplate(project)}><Save size={17} /> Template</button>
+            <button className="secondary-button" type="button" onClick={() => onSaveTemplate(project)}><Save size={17} /> Salvar template</button>
           </div>
           <div className="step-auto-status">
             <span className={`chip active ${completion?.status ?? selectedStep.status}`}>{formatStepStatus(completion?.status ?? selectedStep.status)}</span>
@@ -2980,7 +3005,17 @@ function JourneyView({
                 summaries={summaries}
                 summaryItems={summaryItems}
                 isEditing={editingBlockId === block.id}
-                onEdit={() => setEditingBlockId(editingBlockId === block.id ? null : block.id)}
+                isCollapsed={collapsedBlockIds.has(block.id)}
+                onToggleCollapse={() => toggleBlockCollapsed(block.id)}
+                onDuplicate={() => duplicateBlock(block)}
+                onEdit={() => {
+                  setEditingBlockId(editingBlockId === block.id ? null : block.id);
+                  setCollapsedBlockIds((current) => {
+                    const next = new Set(current);
+                    next.delete(block.id);
+                    return next;
+                  });
+                }}
                 onUpdate={(patch) => updateBlock(block.id, patch)}
                 onDelete={() => deleteBlock(block.id)}
                 onMove={moveBlock}
@@ -3043,6 +3078,9 @@ function StepBuilderBlockCard({
   summaries,
   summaryItems,
   isEditing,
+  isCollapsed,
+  onToggleCollapse,
+  onDuplicate,
   onEdit,
   onUpdate,
   onDelete,
@@ -3058,6 +3096,9 @@ function StepBuilderBlockCard({
   summaries: ProjectSummary[];
   summaryItems: ProjectSummaryItem[];
   isEditing: boolean;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
+  onDuplicate: () => void;
   onEdit: () => void;
   onUpdate: (patch: Partial<StepBuilderBlock>) => void;
   onDelete: () => void;
@@ -3072,15 +3113,17 @@ function StepBuilderBlockCard({
       <div className="block-card-heading">
         <div><Icon size={18} /><div><strong>{block.title}</strong><span>{blockTypeText(block.type)}{block.required ? " - obrigatorio" : ""}</span></div></div>
         <div className="block-card-actions">
-          <button className="icon-button" onClick={() => onMove(block.id, -1)} disabled={index === 0}>↑</button>
-          <button className="icon-button" onClick={() => onMove(block.id, 1)} disabled={index === total - 1}>↓</button>
-          <button className="icon-button" onClick={onEdit}><Pencil size={15} /></button>
-          <button className="icon-button danger" onClick={onDelete}><Trash2 size={15} /></button>
+          <button className="icon-button" type="button" title={isCollapsed ? "Expandir bloco" : "Recolher bloco"} onClick={onToggleCollapse}>{isCollapsed ? "+" : "-"}</button>
+          <button className="icon-button" type="button" title="Mover para cima" onClick={() => onMove(block.id, -1)} disabled={index === 0}>↑</button>
+          <button className="icon-button" type="button" title="Mover para baixo" onClick={() => onMove(block.id, 1)} disabled={index === total - 1}>↓</button>
+          <button className="icon-button" type="button" title="Duplicar bloco" onClick={onDuplicate}><Copy size={15} /></button>
+          <button className="icon-button" type="button" title="Editar bloco" onClick={onEdit}><Pencil size={15} /></button>
+          <button className="icon-button danger" type="button" title="Excluir bloco" onClick={onDelete}><Trash2 size={15} /></button>
         </div>
       </div>
 
-      {isEditing && <BlockSettings block={block} tables={tables} onUpdate={onUpdate} />}
-      <BlockBody block={block} value={value} summaries={summaries} summaryItems={summaryItems} onSaveValue={onSaveValue} onOpenSummary={onOpenSummary} onUpdate={onUpdate} />
+      {!isCollapsed && isEditing && <BlockSettings block={block} tables={tables} onUpdate={onUpdate} />}
+      {!isCollapsed && <BlockBody block={block} value={value} summaries={summaries} summaryItems={summaryItems} onSaveValue={onSaveValue} onOpenSummary={onOpenSummary} onUpdate={onUpdate} />}
     </article>
   );
 }
@@ -3342,26 +3385,32 @@ function ProjectSummaryPanel({
         )}
       </div>
 
-      <div className="summary-import-grid">
-        <label className="field">
-          <span>Colar sumario bruto</span>
-          <textarea rows={7} value={rawText} onChange={(event) => setRawText(event.target.value)} placeholder="Cole aqui uma estrutura numerada: 1, 1.1, 1.1.1..." />
-        </label>
-        <div className="summary-import-actions">
-          <button
-            className="primary-button"
-            disabled={!rawText.trim()}
-            onClick={() => {
-              onImport(project, rawText);
-              setRawText("");
-            }}
-          >
-            <Sparkles size={16} />
-            Analisar sumario
-          </button>
-          <p>O sistema separa os topicos numerados, marca tudo como pendente e deixa voce revisar antes de consolidar.</p>
+      <details className="summary-import-drawer glass-panel">
+        <summary>
+          <span>Importar ou analisar sumario bruto</span>
+          <small>Cole uma estrutura numerada somente quando precisar atualizar a arvore.</small>
+        </summary>
+        <div className="summary-import-grid">
+          <label className="field">
+            <span>Colar sumario bruto</span>
+            <textarea rows={7} value={rawText} onChange={(event) => setRawText(event.target.value)} placeholder="Cole aqui uma estrutura numerada: 1, 1.1, 1.1.1..." />
+          </label>
+          <div className="summary-import-actions">
+            <button
+              className="primary-button"
+              disabled={!rawText.trim()}
+              onClick={() => {
+                onImport(project, rawText);
+                setRawText("");
+              }}
+            >
+              <Sparkles size={16} />
+              Analisar sumario
+            </button>
+            <p>O sistema separa os topicos numerados, marca tudo como pendente e deixa voce revisar antes de consolidar.</p>
+          </div>
         </div>
-      </div>
+      </details>
 
       {activeSummary ? (
         <div className="summary-workspace">
@@ -3391,14 +3440,18 @@ function ProjectSummaryPanel({
                   <div className="summary-item-main">
                     <InlineText defaultValue={item.title} className="summary-title-input" onSave={(value) => onUpdateItem(item.id, { title: value })} />
                     <div className="summary-item-controls">
-                      <select value={item.status} onChange={(event) => onUpdateItem(item.id, { status: event.target.value as SummaryItemStatus })}>
-                        {(["pendente", "em_andamento", "desenvolvido", "em_revisao", "concluido", "bloqueado", "arquivado"] as SummaryItemStatus[]).map((status) => (
-                          <option value={status} key={status}>{formatStatus(status)}</option>
-                        ))}
-                      </select>
+                      {selectedItem?.id === item.id ? (
+                        <select value={item.status} onChange={(event) => onUpdateItem(item.id, { status: event.target.value as SummaryItemStatus })}>
+                          {(["pendente", "em_andamento", "desenvolvido", "em_revisao", "concluido", "bloqueado", "arquivado"] as SummaryItemStatus[]).map((status) => (
+                            <option value={status} key={status}>{formatStatus(status)}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className={`summary-status-chip ${item.status}`}>{formatStatus(item.status)}</span>
+                      )}
                       {item.parse_warning && <span className="summary-warning">{item.parse_warning}</span>}
                     </div>
-                    <TextArea label="Nota do topico" value={item.notes} rows={2} onChange={() => undefined} onBlur={(value) => onUpdateItem(item.id, { notes: value })} />
+                    <details className="topic-note"><summary>Nota</summary><TextArea label="Nota do topico" value={item.notes} rows={2} onChange={() => undefined} onBlur={(value) => onUpdateItem(item.id, { notes: value })} /></details>
                   </div>
                   <button className="icon-button subtle" onClick={() => onDeleteItem(activeSummary.id, item.id)}>
                     <Trash2 size={15} />
@@ -3425,11 +3478,11 @@ function ProjectSummaryPanel({
             </div>
           </div>
 
-          <aside className="summary-prompt-card">
-            <div className="prompt-card-title">
+          <details className="summary-prompt-card compact-prompt-card">
+            <summary>
               <strong>Prompt por topico</strong>
               <span>{selectedItem ? `${selectedItem.topic_number} selecionado` : "Sem topico"}</span>
-            </div>
+            </summary>
             <SelectField label="Prompt base" value={basePromptId} onChange={setBasePromptId} options={tables.prompts.filter((prompt) => prompt.status !== "arquivado").map((prompt) => ({ value: prompt.id, label: prompt.title }))} emptyLabel="Sem prompt base" />
             <div className="prompt-block-picker">
               <span>Complementos</span>
@@ -3441,25 +3494,17 @@ function ProjectSummaryPanel({
               ))}
               {relevantBlocks.length === 0 && <small>Nenhum complemento ativo para este tipo de projeto/etapa.</small>}
             </div>
-            <label className="field">
-              <span>Prompt final gerado</span>
-              <textarea className="prompt-preview" rows={12} value={finalPrompt} readOnly />
-            </label>
+            <details className="prompt-preview-drawer">
+              <summary>Ver prompt gerado</summary>
+              <textarea className="prompt-preview" rows={8} value={finalPrompt} readOnly />
+            </details>
             <div className="row-actions prompt-builder-actions">
-              <button disabled={!finalPrompt.trim()} onClick={() => void copyText(finalPrompt)}>
+              <button disabled={!finalPrompt.trim()} onClick={() => { void copyText(finalPrompt); savePromptHistory(); }}>
                 <Copy size={16} />
-                Copiar
-              </button>
-              <button disabled={!finalPrompt.trim()} onClick={() => downloadMarkdown(finalPrompt, `${project.name}-${selectedItem?.topic_number ?? "sumario"}-prompt.md`)}>
-                <FileText size={16} />
-                MD
-              </button>
-              <button disabled={!finalPrompt.trim() || !activeSummary} onClick={savePromptHistory}>
-                <Save size={16} />
-                Salvar historico
+                Copiar prompt
               </button>
             </div>
-          </aside>
+          </details>
         </div>
       ) : (
         <div className="empty-state compact">
@@ -4786,7 +4831,5 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </StrictMode>,
 );
-
-
 
 

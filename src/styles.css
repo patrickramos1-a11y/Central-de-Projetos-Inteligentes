@@ -2710,3 +2710,125 @@ button {
     flex-direction: column;
   }
 }
+
+.summary-import-drawer {
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.summary-import-drawer > summary,
+.compact-prompt-card > summary,
+.prompt-preview-drawer > summary,
+.topic-note > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.summary-import-drawer > summary::-webkit-details-marker,
+.compact-prompt-card > summary::-webkit-details-marker,
+.prompt-preview-drawer > summary::-webkit-details-marker,
+.topic-note > summary::-webkit-details-marker {
+  display: none;
+}
+
+.summary-import-drawer > summary,
+.compact-prompt-card > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.summary-import-drawer > summary small,
+.compact-prompt-card > summary span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.summary-import-drawer[open] > .summary-import-grid {
+  margin-top: 12px;
+}
+
+.topic-note {
+  margin-top: 6px;
+}
+
+.topic-note > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.56);
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.topic-note[open] > summary {
+  margin-bottom: 6px;
+  color: var(--deep-teal);
+}
+
+.compact-prompt-card {
+  gap: 12px;
+  max-height: none;
+  overflow: visible;
+}
+
+.compact-prompt-card[open] {
+  max-height: calc(100vh - 250px);
+  overflow: auto;
+}
+
+.prompt-preview-drawer {
+  border-top: 1px solid rgba(255, 255, 255, 0.55);
+  padding-top: 8px;
+}
+
+.prompt-preview-drawer > summary {
+  color: var(--deep-teal);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.prompt-preview-drawer .prompt-preview {
+  margin-top: 8px;
+  max-height: 260px;
+}
+
+.prompt-builder-actions button {
+  justify-content: center;
+}
+.summary-status-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.52);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.summary-status-chip.concluido,
+.summary-status-chip.desenvolvido {
+  background: rgba(var(--brand-green-rgb), 0.15);
+  color: var(--deep-teal);
+}
+
+.summary-status-chip.bloqueado {
+  background: rgba(165, 55, 55, 0.12);
+  color: #8a2f2f;
+}
+
+.summary-status-chip.em_andamento,
+.summary-status-chip.em_revisao {
+  background: rgba(245, 179, 61, 0.16);
+  color: #7c5a12;
+}
