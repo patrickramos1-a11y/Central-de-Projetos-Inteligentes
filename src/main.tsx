@@ -27,7 +27,7 @@ import {
   Users,
 } from "lucide-react";
 import { createCloudflareApi } from "./lib/cloudflareApi";
-import { buildConsolidatedSummaryText, parseProjectSummary } from "./lib/summaryParser";
+import { parseProjectSummary } from "./lib/summaryParser";
 import "./styles.css";
 
 type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
@@ -3395,6 +3395,8 @@ function ProjectSummaryPanel({
   const [newItemTitle, setNewItemTitle] = useState("");
   const [newParentId, setNewParentId] = useState("");
   const [selectedItemId, setSelectedItemId] = useState("");
+  const [promptScopeIds, setPromptScopeIds] = useState<string[]>([]);
+  const [collapsedTopicIds, setCollapsedTopicIds] = useState<string[]>([]);
   const [basePromptId, setBasePromptId] = useState("");
   const [selectedBlockIds, setSelectedBlockIds] = useState<string[]>([]);
 
@@ -3418,6 +3420,12 @@ function ProjectSummaryPanel({
   const summaryItems = activeSummary ? items.filter((item) => item.summary_id === activeSummary.id).sort(byOrder) : [];
   const selectedItems = summaryItems.filter((item) => item.is_selected);
   const selectedItem = summaryItems.find((item) => item.id === selectedItemId) ?? selectedItems[0] ?? summaryItems[0] ?? null;
+  const visibleSummaryItems = getVisibleSummaryItems(summaryItems, collapsedTopicIds);
+  const promptScopeItems = promptScopeIds.length
+    ? summaryItems.filter((item) => promptScopeIds.includes(item.id))
+    : selectedItem
+      ? [selectedItem]
+      : [];
   const basePrompt = tables.prompts.find((prompt) => prompt.id === basePromptId) ?? null;
   const relevantBlocks = promptBlocks.filter((block) => {
     if (block.status !== "ativo") return false;
@@ -3426,11 +3434,24 @@ function ProjectSummaryPanel({
     return true;
   });
   const selectedBlocks = relevantBlocks.filter((block) => selectedBlockIds.includes(block.id));
-  const finalPrompt = composeGeneratedPrompt({ project, step: selectedStep, summary: activeSummary, item: selectedItem, basePrompt, blocks: selectedBlocks });
+  const finalPrompt = composeGeneratedPrompt({ project, step: selectedStep, summary: activeSummary, item: selectedItem, items: promptScopeItems, basePrompt, blocks: selectedBlocks });
   const generatedCount = activeSummary ? generatedPrompts.filter((prompt) => prompt.summary_id === activeSummary.id).length : 0;
+  const branchIds = selectedItem ? collectSummaryBranchIds(summaryItems, selectedItem.id) : [];
+  const branchTopics = selectedItem ? summaryItems.filter((item) => branchIds.includes(item.id)) : [];
+  const collapsibleIds = summaryItems.filter((item) => summaryItems.some((child) => child.parent_id === item.id)).map((item) => item.id);
+  const allCollapsed = collapsibleIds.length > 0 && collapsibleIds.every((id) => collapsedTopicIds.includes(id));
 
   function toggleBlock(blockId: string) {
     setSelectedBlockIds((current) => (current.includes(blockId) ? current.filter((id) => id !== blockId) : [...current, blockId]));
+  }
+
+  function toggleCollapsedTopic(itemId: string) {
+    setCollapsedTopicIds((current) => (current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]));
+  }
+
+  function selectPromptScope(ids: string[]) {
+    setPromptScopeIds(ids);
+    setSelectedItemId(ids[0] ?? "");
   }
 
   function savePromptHistory() {
@@ -3441,19 +3462,19 @@ function ProjectSummaryPanel({
     onSaveGeneratedPrompt({
       project_id: project.id,
       summary_id: activeSummary.id,
-      summary_item_id: selectedItem?.id ?? null,
+      summary_item_id: promptScopeItems.length === 1 ? promptScopeItems[0].id : selectedItem?.id ?? null,
       base_prompt_id: basePrompt?.id ?? null,
       base_prompt_snapshot: basePrompt?.content ?? null,
       selected_blocks_json: JSON.stringify(selectedBlocks.map((block) => ({ id: block.id, title: block.title, content: block.content }))),
       final_prompt: finalPrompt,
-      notes: selectedItem ? `Topico ${selectedItem.topic_number} - ${selectedItem.title}` : "Prompt geral do sumario",
+      notes: promptScopeItems.length > 1 ? `${promptScopeItems.length} topicos selecionados` : selectedItem ? `Topico ${selectedItem.topic_number} - ${selectedItem.title}` : "Prompt geral do sumario",
       ai_tool_id: basePrompt?.ai_tool_id ?? selectedBlocks.find((block) => block.ai_tool_id)?.ai_tool_id ?? null,
       created_by: currentUser?.name ?? null,
     });
   }
 
   return (
-    <section className="work-block summary-panel">
+    <section className="work-block summary-panel compact-summary-panel">
       <div className="block-heading summary-heading">
         <div>
           <h2>Sumario inteligente</h2>
@@ -3464,7 +3485,7 @@ function ProjectSummaryPanel({
         {activeSummary && (
           <button className="secondary-button" onClick={() => onConsolidate(activeSummary.id)} disabled={selectedItems.length === 0}>
             <CheckCircle2 size={16} />
-            Consolidar sumario
+            Consolidar e renumerar
           </button>
         )}
       </div>
@@ -3472,7 +3493,7 @@ function ProjectSummaryPanel({
       <details className="summary-import-drawer glass-panel">
         <summary>
           <span>Importar ou analisar sumario bruto</span>
-          <small>Cole uma estrutura numerada somente quando precisar atualizar a arvore.</small>
+          <small>Abra apenas quando precisar colar uma nova estrutura numerada.</small>
         </summary>
         <div className="summary-import-grid">
           <label className="field">
@@ -3491,17 +3512,17 @@ function ProjectSummaryPanel({
               <Sparkles size={16} />
               Analisar sumario
             </button>
-            <p>O sistema separa os topicos numerados, marca tudo como pendente e deixa voce revisar antes de consolidar.</p>
+            <p>O sistema separa os topicos numerados, monta a arvore e permite consolidar sem os itens desmarcados.</p>
           </div>
         </div>
       </details>
 
       {activeSummary ? (
-        <div className="summary-workspace">
-          <div className="summary-review-card">
-            <div className="summary-toolbar">
+        <div className="summary-workspace summary-workspace-compact">
+          <div className="summary-review-card summary-tree-card">
+            <div className="summary-toolbar compact-tree-toolbar">
               <SelectField
-                label="Versao do sumario"
+                label="Versao"
                 value={activeSummary.id}
                 onChange={setSummaryId}
                 options={sortedSummaries.map((summary) => ({ value: summary.id, label: `Versao ${summary.version_number} - ${formatStatus(summary.status)}` }))}
@@ -3512,39 +3533,69 @@ function ProjectSummaryPanel({
               </div>
             </div>
 
-            <div className="summary-item-list">
-              {summaryItems.map((item) => (
-                <article className={`summary-item level-${Math.min(item.level, 4)} ${item.is_selected ? "selected" : ""}`} key={item.id}>
-                  <button className={`checkbox ${item.is_selected ? "checked" : ""}`} onClick={() => onSetSelection(activeSummary.id, item.id, !item.is_selected)}>
-                    {item.is_selected && <Check size={14} />}
-                  </button>
-                  <button className={`summary-topic-button ${selectedItem?.id === item.id ? "active" : ""}`} onClick={() => setSelectedItemId(item.id)}>
-                    <strong>{item.topic_number}</strong>
-                  </button>
-                  <div className="summary-item-main">
-                    <InlineText defaultValue={item.title} className="summary-title-input" onSave={(value) => onUpdateItem(item.id, { title: value })} />
-                    <div className="summary-item-controls">
-                      {selectedItem?.id === item.id ? (
-                        <select value={item.status} onChange={(event) => onUpdateItem(item.id, { status: event.target.value as SummaryItemStatus })}>
-                          {(["pendente", "em_andamento", "desenvolvido", "em_revisao", "concluido", "bloqueado", "arquivado"] as SummaryItemStatus[]).map((status) => (
-                            <option value={status} key={status}>{formatStatus(status)}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className={`summary-status-chip ${item.status}`}>{formatStatus(item.status)}</span>
-                      )}
-                      {item.parse_warning && <span className="summary-warning">{item.parse_warning}</span>}
-                    </div>
-                    <details className="topic-note"><summary>Nota</summary><TextArea label="Nota do topico" value={item.notes} rows={2} onChange={() => undefined} onBlur={(value) => onUpdateItem(item.id, { notes: value })} /></details>
-                  </div>
-                  <button className="icon-button subtle" onClick={() => onDeleteItem(activeSummary.id, item.id)}>
-                    <Trash2 size={15} />
-                  </button>
-                </article>
-              ))}
+            <div className="summary-compact-actions">
+              <button className="secondary-button" onClick={() => setCollapsedTopicIds(allCollapsed ? [] : collapsibleIds)}>
+                {allCollapsed ? "Expandir arvore" : "Recolher arvore"}
+              </button>
+              <button className="secondary-button" disabled={!selectedItem} onClick={() => selectPromptScope(branchIds)}>
+                Usar ramo no prompt
+              </button>
+              <button className="secondary-button" disabled={selectedItems.length === 0} onClick={() => selectPromptScope(selectedItems.map((item) => item.id))}>
+                Usar marcados
+              </button>
+              <button className="secondary-button" disabled={summaryItems.length === 0} onClick={() => selectPromptScope(summaryItems.map((item) => item.id))}>
+                Sumario inteiro
+              </button>
             </div>
 
-            <div className="summary-add-row">
+            <div className="summary-item-list compact-tree-list">
+              {visibleSummaryItems.map((item) => {
+                const childCount = summaryItems.filter((child) => child.parent_id === item.id).length;
+                const itemBranchIds = collectSummaryBranchIds(summaryItems, item.id);
+                const branchSelected = itemBranchIds.every((id) => summaryItems.find((candidate) => candidate.id === id)?.is_selected);
+                const isPromptScope = promptScopeIds.includes(item.id);
+                const generatedForItem = generatedPrompts.filter((prompt) => prompt.summary_item_id === item.id);
+
+                return (
+                  <article className={`summary-item tree-row level-${Math.min(item.level, 4)} ${item.is_selected ? "selected" : ""} ${selectedItem?.id === item.id ? "active-row" : ""} ${isPromptScope ? "prompt-scope" : ""}`} key={item.id} style={{ "--tree-level": Math.max(0, item.level - 1) } as CSSProperties}>
+                    <button className="summary-expand-button" disabled={childCount === 0} onClick={() => toggleCollapsedTopic(item.id)}>
+                      {childCount > 0 ? (collapsedTopicIds.includes(item.id) ? "+" : "-") : ""}
+                    </button>
+                    <button className={`checkbox ${item.is_selected ? "checked" : ""}`} onClick={() => onSetSelection(activeSummary.id, item.id, !item.is_selected)}>
+                      {item.is_selected && <Check size={14} />}
+                    </button>
+                    <button className={`summary-topic-button ${selectedItem?.id === item.id ? "active" : ""}`} onClick={() => setSelectedItemId(item.id)}>
+                      <strong>{item.topic_number}</strong>
+                    </button>
+                    <div className="summary-item-main">
+                      <InlineText defaultValue={item.title} className="summary-title-input" onSave={(value) => onUpdateItem(item.id, { title: value })} />
+                      <div className="summary-item-controls compact-topic-meta">
+                        <span className={`summary-status-chip ${item.status}`}>{formatStatus(item.status)}</span>
+                        {childCount > 0 && <span className="summary-mini-chip">{childCount} subtopico(s)</span>}
+                        {item.parse_warning && <span className="summary-warning">{item.parse_warning}</span>}
+                        {generatedForItem.map((prompt) => (
+                          <button className="summary-copy-chip" key={prompt.id} onClick={() => copyToClipboard(prompt.final_prompt)}>
+                            <Copy size={13} />
+                            Prompt
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <button className="icon-button subtle" title="Selecionar ramo" onClick={() => onSetSelection(activeSummary.id, item.id, !branchSelected)}>
+                      <GitBranch size={15} />
+                    </button>
+                    <button className="icon-button subtle" title="Usar este ramo para prompt" onClick={() => selectPromptScope(itemBranchIds)}>
+                      <Sparkles size={15} />
+                    </button>
+                    <button className="icon-button subtle" title="Excluir topico" onClick={() => onDeleteItem(activeSummary.id, item.id)}>
+                      <Trash2 size={15} />
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+
+            <div className="summary-add-row compact-add-row">
               <SelectField label="Dentro de" value={newParentId} onChange={setNewParentId} options={summaryItems.map((item) => ({ value: item.id, label: `${item.topic_number} ${item.title}` }))} emptyLabel="Topico raiz" />
               <Field label="Novo topico" value={newItemTitle} onChange={setNewItemTitle} />
               <button
@@ -3557,16 +3608,21 @@ function ProjectSummaryPanel({
                 }}
               >
                 <Plus size={16} />
-                Adicionar topico
+                Adicionar
               </button>
             </div>
           </div>
 
-          <details className="summary-prompt-card compact-prompt-card">
+          <details className="summary-prompt-card compact-prompt-card compact-composer">
             <summary>
-              <strong>Prompt por topico</strong>
-              <span>{selectedItem ? `${selectedItem.topic_number} selecionado` : "Sem topico"}</span>
+              <strong>Compor prompt</strong>
+              <span>{promptScopeItems.length ? `${promptScopeItems.length} item(ns) na selecao` : "Selecione topicos na arvore"}</span>
             </summary>
+            <div className="prompt-scope-strip">
+              {promptScopeItems.slice(0, 5).map((item) => <span key={item.id}>{item.topic_number}</span>)}
+              {promptScopeItems.length > 5 && <span>+{promptScopeItems.length - 5}</span>}
+              {promptScopeItems.length === 0 && <small>Nenhum topico separado para prompt.</small>}
+            </div>
             <SelectField label="Prompt base" value={basePromptId} onChange={setBasePromptId} options={tables.prompts.filter((prompt) => prompt.status !== "arquivado").map((prompt) => ({ value: prompt.id, label: prompt.title }))} emptyLabel="Sem prompt base" />
             <div className="prompt-block-picker">
               <span>Complementos</span>
@@ -3585,7 +3641,11 @@ function ProjectSummaryPanel({
             <div className="row-actions prompt-builder-actions">
               <button disabled={!finalPrompt.trim()} onClick={() => { void copyText(finalPrompt); savePromptHistory(); }}>
                 <Copy size={16} />
-                Copiar prompt
+                Copiar e salvar
+              </button>
+              <button disabled={branchTopics.length === 0} onClick={() => selectPromptScope(branchIds)}>
+                <GitBranch size={16} />
+                Ramo atual
               </button>
             </div>
           </details>
@@ -3599,6 +3659,39 @@ function ProjectSummaryPanel({
       )}
     </section>
   );
+}
+
+function getVisibleSummaryItems(items: ProjectSummaryItem[], collapsedIds: string[]) {
+  const collapsed = new Set(collapsedIds);
+  const byId = new Map(items.map((item) => [item.id, item]));
+
+  return items.filter((item) => {
+    let parentId = item.parent_id;
+
+    while (parentId) {
+      if (collapsed.has(parentId)) return false;
+      parentId = byId.get(parentId)?.parent_id ?? null;
+    }
+
+    return true;
+  });
+}
+
+function collectSummaryBranchIds(items: ProjectSummaryItem[], itemId: string) {
+  const ids = new Set<string>([itemId]);
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    items.forEach((item) => {
+      if (item.parent_id && ids.has(item.parent_id) && !ids.has(item.id)) {
+        ids.add(item.id);
+        changed = true;
+      }
+    });
+  }
+
+  return [...ids];
 }
 function FileUploadButton({ onUpload }: { onUpload: (file: File) => void }) {
   return (
@@ -4787,15 +4880,31 @@ function getBlockingPhase(phase: ProjectStepPhase | null | undefined, phases: Pr
 }
 
 function buildProjectSummaryText(items: ProjectSummaryItem[]) {
-  return buildConsolidatedSummaryText(
-    items.map((item) => ({
-      topicNumber: item.topic_number,
-      title: item.title,
-      level: item.level,
-      selected: item.is_selected,
-      sortOrder: item.sort_order,
-    })),
-  );
+  const selectedItems = [...items].filter((item) => item.is_selected).sort(byOrder);
+  const selectedIds = new Set(selectedItems.map((item) => item.id));
+  const childrenByParent = new Map<string, ProjectSummaryItem[]>();
+  const roots: ProjectSummaryItem[] = [];
+
+  selectedItems.forEach((item) => {
+    const parentKey = item.parent_id && selectedIds.has(item.parent_id) ? item.parent_id : "root";
+    if (parentKey === "root") {
+      roots.push(item);
+    } else {
+      childrenByParent.set(parentKey, [...(childrenByParent.get(parentKey) ?? []), item]);
+    }
+  });
+
+  const lines: string[] = [];
+  const walk = (nodes: ProjectSummaryItem[], prefix: string, level: number) => {
+    [...nodes].sort(byOrder).forEach((item, index) => {
+      const number = prefix ? `${prefix}.${index + 1}` : String(index + 1);
+      lines.push(`${"  ".repeat(Math.max(0, level - 1))}${number} ${item.title}`.trimEnd());
+      walk(childrenByParent.get(item.id) ?? [], number, level + 1);
+    });
+  };
+
+  walk(roots, "", 1);
+  return lines.join("\n");
 }
 
 function composeGeneratedPrompt({
@@ -4803,6 +4912,7 @@ function composeGeneratedPrompt({
   step,
   summary,
   item,
+  items,
   basePrompt,
   blocks,
 }: {
@@ -4810,6 +4920,7 @@ function composeGeneratedPrompt({
   step: ProjectStep;
   summary: ProjectSummary | null;
   item: ProjectSummaryItem | null;
+  items?: ProjectSummaryItem[];
   basePrompt: Prompt | null;
   blocks: PromptBlock[];
 }) {
@@ -4820,9 +4931,10 @@ function composeGeneratedPrompt({
     `Etapa atual: ${step.name}`,
     summary ? `Sumario: versao ${summary.version_number} (${formatStatus(summary.status)})` : "",
   ].filter(Boolean);
-  const topic = item
-    ? [`## Topico selecionado`, `${item.topic_number} ${item.title}`, item.notes ? `Notas internas: ${item.notes}` : ""]
-    : ["## Topico selecionado", "Use o sumario consolidado do projeto como referencia geral."];
+  const scopedItems = items?.length ? items : item ? [item] : [];
+  const topic = scopedItems.length
+    ? ["## Topicos selecionados", ...scopedItems.sort(byOrder).map((summaryItem) => `${summaryItem.topic_number} ${summaryItem.title}${summaryItem.notes ? `\nNotas internas: ${summaryItem.notes}` : ""}`)]
+    : ["## Topicos selecionados", "Use o sumario consolidado do projeto como referencia geral."];
   const base = basePrompt?.content?.trim() ? ["## Prompt base", basePrompt.content.trim()] : [];
   const complements = blocks.flatMap((block) => [
     `## Complemento - ${block.title}`,
@@ -4831,7 +4943,7 @@ function composeGeneratedPrompt({
   ]);
   const instruction = [
     "## Instrucao final",
-    "Desenvolva a resposta respeitando o topico selecionado, o contexto do projeto, os criterios tecnicos da Ramos Engenharia e os complementos marcados acima.",
+    "Desenvolva a resposta respeitando os topicos selecionados, o contexto do projeto, os criterios tecnicos da Ramos Engenharia e os complementos marcados acima.",
   ];
 
   return [...header, "", ...topic, "", ...base, "", ...complements, "", ...instruction]
