@@ -4085,3 +4085,319 @@ body::after {
     height: 34px;
   }
 }
+
+/* Final horizontal shell and compact inline blocks - Ramos Jornadas */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 100vh;
+  padding: 14px clamp(12px, 2vw, 28px) 28px;
+}
+
+.app-shell .sidebar,
+.app-shell .sidebar:hover,
+.app-shell .sidebar:focus-within {
+  position: sticky;
+  top: 12px;
+  z-index: 70;
+  width: min(1240px, 100%);
+  height: auto;
+  min-height: 66px;
+  max-height: none;
+  margin: 0 auto;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  overflow: visible;
+  border-radius: 18px;
+}
+
+.sidebar .brand {
+  margin: 0;
+  padding: 0;
+  min-width: max-content;
+}
+
+.sidebar .brand span:nth-child(2),
+.sidebar .nav-button span,
+.sidebar .nav-item span,
+.sidebar .user-card,
+.sidebar .sidebar-user,
+.sidebar:hover .brand span:nth-child(2),
+.sidebar:focus-within .brand span:nth-child(2),
+.sidebar:hover .nav-button span,
+.sidebar:focus-within .nav-button span,
+.sidebar:hover .user-card,
+.sidebar:focus-within .user-card {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.sidebar .nav-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+}
+
+.sidebar .nav-item,
+.sidebar .nav-button {
+  width: auto;
+  min-height: 42px;
+  padding: 9px 13px;
+  border-radius: 12px;
+}
+
+.sidebar .nav-item.active::before,
+.sidebar .subnav-item.active::before {
+  top: auto;
+  right: 12px;
+  bottom: 5px;
+  left: 12px;
+  width: auto;
+  height: 3px;
+  border-radius: 999px;
+}
+
+.sidebar .sidebar-user {
+  margin: 0;
+  min-width: 150px;
+  padding: 8px 12px;
+}
+
+.sidebar .subnav {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin: 0;
+  padding: 8px 0 0;
+}
+
+.workspace {
+  width: min(1240px, 100%);
+  margin: 0 auto;
+  padding: 0;
+}
+
+.block-journey-layout {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.block-journey-layout > .collapsible-rail,
+.block-journey-layout > .collapsible-rail:hover,
+.block-journey-layout > .collapsible-rail:focus-within,
+.step-rail.collapsible-rail,
+.step-rail.collapsible-rail:hover,
+.step-rail.collapsible-rail:focus-within {
+  position: sticky;
+  top: 92px;
+  z-index: 45;
+  width: 100%;
+  min-height: auto;
+  max-height: none;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  align-items: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.collapsible-rail .rail-heading {
+  flex: 0 0 auto;
+  min-width: 112px;
+  margin: 0;
+  padding: 2px 10px 2px 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.55);
+  border-bottom: 0;
+}
+
+.collapsible-rail .rail-heading strong,
+.collapsible-rail .rail-heading span,
+.collapsible-rail .step-item span:last-child,
+.collapsible-rail:hover .rail-heading strong,
+.collapsible-rail:hover .rail-heading span,
+.collapsible-rail:hover .step-item span:last-child,
+.collapsible-rail:focus-within .rail-heading strong,
+.collapsible-rail:focus-within .rail-heading span,
+.collapsible-rail:focus-within .step-item span:last-child {
+  opacity: 1;
+  transform: none;
+  white-space: nowrap;
+}
+
+.collapsible-rail .step-item {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 148px;
+  max-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 48px;
+  margin: 0;
+  padding: 8px 10px;
+}
+
+.collapsible-rail .step-item::before {
+  display: none;
+}
+
+.collapsible-rail .step-item::after {
+  position: absolute;
+  left: calc(100% + 2px);
+  top: 50%;
+  width: 16px;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.64);
+  content: "";
+}
+
+.collapsible-rail .step-item:last-child::after {
+  display: none;
+}
+
+.journey-command-bar {
+  top: 160px;
+}
+
+.context-mini-card.compact-context-card {
+  min-height: 76px;
+  padding: 10px;
+  align-content: space-between;
+}
+
+.context-mini-card.compact-context-card strong {
+  min-height: auto;
+  padding-right: 0;
+  font-size: 0.8rem;
+  line-height: 1.14;
+}
+
+.context-mini-card.compact-context-card .context-mini-actions {
+  justify-content: flex-start;
+  opacity: 0.76;
+}
+
+.context-mini-card.compact-context-card:hover .context-mini-actions,
+.context-mini-card.compact-context-card:focus-within .context-mini-actions {
+  opacity: 1;
+}
+
+.context-mini-card.compact-context-card .context-pin-label {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  padding: 2px 6px;
+}
+
+.context-mini-card.compact-context-card.pinned strong {
+  padding-right: 54px;
+}
+
+.summary-inline-preview {
+  max-height: 280px;
+  overflow: hidden;
+}
+
+.summary-inline-preview ol {
+  max-height: 220px;
+}
+
+.summary-inline-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border: 1px solid rgba(15, 118, 110, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.summary-inline-prompts > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.summary-inline-prompts > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.icon-text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  border-radius: 999px;
+  color: var(--deep-teal);
+  background: rgba(255, 255, 255, 0.52);
+  box-shadow: var(--shadow-control);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.icon-text-button:hover {
+  transform: translateY(-1px);
+  background: rgba(var(--brand-green-rgb), 0.16);
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    padding: 10px;
+  }
+
+  .app-shell .sidebar,
+  .app-shell .sidebar:hover,
+  .app-shell .sidebar:focus-within {
+    position: relative;
+    top: 0;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .sidebar .nav-list,
+  .sidebar .subnav {
+    justify-content: flex-start;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .sidebar .sidebar-user {
+    width: 100%;
+  }
+
+  .block-journey-layout > .collapsible-rail,
+  .step-rail.collapsible-rail,
+  .journey-command-bar {
+    position: relative;
+    top: 0;
+  }
+
+  .collapsible-rail .step-item {
+    min-width: 132px;
+  }
+
+  .summary-inline-head,
+  .summary-inline-prompts {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

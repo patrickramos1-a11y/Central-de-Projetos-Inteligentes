@@ -3019,6 +3019,7 @@ function JourneyView({
                 tables={tables}
                 summaries={summaries}
                 summaryItems={summaryItems}
+                generatedPrompts={generatedPrompts}
                 isEditing={editingBlockId === block.id}
                 isCollapsed={collapsedBlockIds.has(block.id)}
                 onToggleCollapse={() => toggleBlockCollapsed(block.id)}
@@ -3092,6 +3093,7 @@ function StepBuilderBlockCard({
   tables,
   summaries,
   summaryItems,
+  generatedPrompts,
   isEditing,
   isCollapsed,
   onToggleCollapse,
@@ -3110,6 +3112,7 @@ function StepBuilderBlockCard({
   tables: Tables;
   summaries: ProjectSummary[];
   summaryItems: ProjectSummaryItem[];
+  generatedPrompts: GeneratedPrompt[];
   isEditing: boolean;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
@@ -3138,7 +3141,7 @@ function StepBuilderBlockCard({
       </div>
 
       {!isCollapsed && isEditing && <BlockSettings block={block} tables={tables} onUpdate={onUpdate} />}
-      {!isCollapsed && <BlockBody block={block} value={value} summaries={summaries} summaryItems={summaryItems} onSaveValue={onSaveValue} onOpenSummary={onOpenSummary} onUpdate={onUpdate} />}
+      {!isCollapsed && <BlockBody block={block} value={value} summaries={summaries} summaryItems={summaryItems} generatedPrompts={generatedPrompts} onSaveValue={onSaveValue} onOpenSummary={onOpenSummary} onUpdate={onUpdate} />}
     </article>
   );
 }
@@ -3159,6 +3162,7 @@ function BlockBody({
   value,
   summaries,
   summaryItems,
+  generatedPrompts,
   onSaveValue,
   onOpenSummary,
   onUpdate,
@@ -3167,6 +3171,7 @@ function BlockBody({
   value: any;
   summaries: ProjectSummary[];
   summaryItems: ProjectSummaryItem[];
+  generatedPrompts: GeneratedPrompt[];
   onSaveValue: (value: unknown) => void;
   onOpenSummary: () => void;
   onUpdate: (patch: Partial<StepBuilderBlock>) => void;
@@ -3201,6 +3206,7 @@ function BlockBody({
     const summary = summaries.find((item) => item.id === block.config.summaryId) ?? summaries.find((item) => item.status === "active") ?? summaries[0];
     const items = summary ? summaryItems.filter((item) => item.summary_id === summary.id).sort(byOrder) : [];
     const selected = items.filter((item) => item.is_selected);
+    const summaryPrompts = summary ? generatedPrompts.filter((prompt) => prompt.summary_id === summary.id) : [];
     const consolidatedText = summary?.consolidated_text?.trim() ?? "";
     const previewLines = consolidatedText
       ? consolidatedText.split("\n").filter(Boolean).slice(0, 18)
@@ -3229,6 +3235,19 @@ function BlockBody({
             {previewLines.length === 0 && <span className="muted-block">Consolide o sumario para visualizar a estrutura aqui.</span>}
           </div>
         ) : null}
+        {summaryPrompts.length > 0 && (
+          <div className="summary-inline-prompts">
+            <span>{summaryPrompts.length} prompt(s) salvo(s)</span>
+            <div>
+              {summaryPrompts.slice(0, 6).map((prompt, index) => (
+                <button className="icon-text-button" type="button" key={prompt.id} onClick={() => copyToClipboard(prompt.final_prompt)} title="Copiar prompt gerado">
+                  <Copy size={14} />
+                  Prompt {index + 1}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -3378,7 +3397,7 @@ function ContextBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: 
             <div className="context-color-picker">
               {contextColors.map((color) => <button key={color} type="button" className={`context-color-dot ${color} ${draftColor === color ? "active" : ""}`} onClick={() => setDraftColor(color)} />)}
             </div>
-            <label className="checkline"><input type="checkbox" checked={draftPinned} onChange={(event) => setDraftPinned(event.target.checked)} /> Fixar no template</label>
+            <label className="checkline"><input type="checkbox" checked={draftPinned} onChange={(event) => setDraftPinned(event.target.checked)} /> Salvar este contexto no template</label>
           </div>
           <div className="inline-actions">
             <button className="primary-button" type="button" onClick={saveContext}><Save size={15} /> Salvar contexto</button>
@@ -3389,19 +3408,15 @@ function ContextBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: 
 
       <div className="context-card-grid compact-context-grid">
         {contexts.map((item) => (
-          <article className={`context-mini-card compact-context-card ${item.color || "mint"} ${item.pinned ? "pinned" : ""}`} key={item.id} onClick={() => copyToClipboard(item.content)} title="Clique para copiar">
+          <article className={`context-mini-card compact-context-card ${item.color || "mint"} ${item.pinned ? "pinned" : ""}`} key={item.id} onClick={() => copyToClipboard(item.content)} title="Clique para copiar o contexto">
             <strong>{item.title}</strong>
-            {item.pinned && <span className="context-pin-label">Fixado no template</span>}
+            {item.pinned && <span className="context-pin-label">Template</span>}
             <div className="context-mini-actions" onClick={(event) => event.stopPropagation()}>
-              <button className={`icon-button ${item.pinned ? "active" : ""}`} type="button" title="Fixar no template" onClick={() => patchContext(item.id, { pinned: !item.pinned })}><Save size={14} /></button>
+              <button className={`icon-button ${item.pinned ? "active" : ""}`} type="button" title="Salvar no template" onClick={() => patchContext(item.id, { pinned: !item.pinned })}><Save size={14} /></button>
               <button className="icon-button" type="button" title="Copiar contexto" onClick={() => copyToClipboard(item.content)}><Copy size={14} /></button>
               <button className="icon-button" type="button" title="Editar contexto" onClick={() => startEdit(item)}><Pencil size={14} /></button>
               <button className="icon-button danger" type="button" title="Excluir contexto" onClick={() => removeContext(item.id)}><Trash2 size={14} /></button>
             </div>
-            <details className="context-preview" onClick={(event) => event.stopPropagation()}>
-              <summary>Ver texto</summary>
-              <p>{item.content || "Sem texto cadastrado."}</p>
-            </details>
           </article>
         ))}
       </div>
