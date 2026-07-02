@@ -3209,8 +3209,8 @@ function BlockBody({
     const summaryPrompts = summary ? generatedPrompts.filter((prompt) => prompt.summary_id === summary.id) : [];
     const consolidatedText = summary?.consolidated_text?.trim() ?? "";
     const previewLines = consolidatedText
-      ? consolidatedText.split("\n").filter(Boolean).slice(0, 18)
-      : buildProjectSummaryText(items).split("\n").filter(Boolean).slice(0, 10);
+      ? consolidatedText.split("\n").filter(Boolean)
+      : buildProjectSummaryText(items).split("\n").filter(Boolean);
     return (
       <div className="summary-block-inline">
         <div className="summary-inline-head">
