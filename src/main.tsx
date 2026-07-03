@@ -3020,6 +3020,13 @@ function JourneyView({
                 summaries={summaries}
                 summaryItems={summaryItems}
                 generatedPrompts={generatedPrompts}
+                project={project}
+                selectedStep={selectedStep}
+                currentUser={currentUser}
+                onUpdateSummaryItem={onUpdateSummaryItem}
+                onSetSummaryItemSelection={onSetSummaryItemSelection}
+                onDeleteSummaryItem={onDeleteSummaryItem}
+                onSaveGeneratedPrompt={onSaveGeneratedPrompt}
                 isEditing={editingBlockId === block.id}
                 isCollapsed={collapsedBlockIds.has(block.id)}
                 onToggleCollapse={() => toggleBlockCollapsed(block.id)}
@@ -3094,6 +3101,13 @@ function StepBuilderBlockCard({
   summaries,
   summaryItems,
   generatedPrompts,
+  project,
+  selectedStep,
+  currentUser,
+  onUpdateSummaryItem,
+  onSetSummaryItemSelection,
+  onDeleteSummaryItem,
+  onSaveGeneratedPrompt,
   isEditing,
   isCollapsed,
   onToggleCollapse,
@@ -3113,6 +3127,13 @@ function StepBuilderBlockCard({
   summaries: ProjectSummary[];
   summaryItems: ProjectSummaryItem[];
   generatedPrompts: GeneratedPrompt[];
+  project: Project;
+  selectedStep: ProjectStep;
+  currentUser: AppUser | null;
+  onUpdateSummaryItem: (itemId: string, payload: Partial<ProjectSummaryItem>) => void;
+  onSetSummaryItemSelection: (summaryId: string, itemId: string, isSelected: boolean) => void;
+  onDeleteSummaryItem: (summaryId: string, itemId: string) => void;
+  onSaveGeneratedPrompt: (payload: Omit<GeneratedPrompt, "id" | "created_at">) => void;
   isEditing: boolean;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
@@ -3141,7 +3162,7 @@ function StepBuilderBlockCard({
       </div>
 
       {!isCollapsed && isEditing && <BlockSettings block={block} tables={tables} onUpdate={onUpdate} />}
-      {!isCollapsed && <BlockBody block={block} value={value} summaries={summaries} summaryItems={summaryItems} generatedPrompts={generatedPrompts} onSaveValue={onSaveValue} onOpenSummary={onOpenSummary} onUpdate={onUpdate} />}
+      {!isCollapsed && <BlockBody block={block} value={value} summaries={summaries} summaryItems={summaryItems} generatedPrompts={generatedPrompts} project={project} selectedStep={selectedStep} tables={tables} currentUser={currentUser} onUpdateSummaryItem={onUpdateSummaryItem} onSetSummaryItemSelection={onSetSummaryItemSelection} onDeleteSummaryItem={onDeleteSummaryItem} onSaveGeneratedPrompt={onSaveGeneratedPrompt} onSaveValue={onSaveValue} onOpenSummary={onOpenSummary} onUpdate={onUpdate} />}
     </article>
   );
 }
@@ -3163,6 +3184,14 @@ function BlockBody({
   summaries,
   summaryItems,
   generatedPrompts,
+  project,
+  selectedStep,
+  tables,
+  currentUser,
+  onUpdateSummaryItem,
+  onSetSummaryItemSelection,
+  onDeleteSummaryItem,
+  onSaveGeneratedPrompt,
   onSaveValue,
   onOpenSummary,
   onUpdate,
@@ -3172,6 +3201,14 @@ function BlockBody({
   summaries: ProjectSummary[];
   summaryItems: ProjectSummaryItem[];
   generatedPrompts: GeneratedPrompt[];
+  project: Project;
+  selectedStep: ProjectStep;
+  tables: Tables;
+  currentUser: AppUser | null;
+  onUpdateSummaryItem: (itemId: string, payload: Partial<ProjectSummaryItem>) => void;
+  onSetSummaryItemSelection: (summaryId: string, itemId: string, isSelected: boolean) => void;
+  onDeleteSummaryItem: (summaryId: string, itemId: string) => void;
+  onSaveGeneratedPrompt: (payload: Omit<GeneratedPrompt, "id" | "created_at">) => void;
   onSaveValue: (value: unknown) => void;
   onOpenSummary: () => void;
   onUpdate: (patch: Partial<StepBuilderBlock>) => void;
@@ -3203,52 +3240,22 @@ function BlockBody({
   }
 
   if (block.type === "project_summary") {
-    const summary = summaries.find((item) => item.id === block.config.summaryId) ?? summaries.find((item) => item.status === "active") ?? summaries[0];
-    const items = summary ? summaryItems.filter((item) => item.summary_id === summary.id).sort(byOrder) : [];
-    const selected = items.filter((item) => item.is_selected);
-    const summaryPrompts = summary ? generatedPrompts.filter((prompt) => prompt.summary_id === summary.id) : [];
-    const consolidatedText = summary?.consolidated_text?.trim() ?? "";
-    const previewLines = consolidatedText
-      ? consolidatedText.split("\n").filter(Boolean)
-      : buildProjectSummaryText(items).split("\n").filter(Boolean);
     return (
-      <div className="summary-block-inline">
-        <div className="summary-inline-head">
-          <div>
-            <strong>{summary ? `Versao ${summary.version_number} - ${summary.status === "active" ? "Ativo" : "Rascunho"}` : "Nenhum sumario vinculado"}</strong>
-            <span>{summary ? `${selected.length}/${items.length} topicos selecionados` : "Adicione ou vincule uma versao"}</span>
-          </div>
-          <div className="inline-actions">
-            <button className="secondary-button" disabled={!consolidatedText} onClick={() => copyToClipboard(consolidatedText)}><Copy size={15} /> Copiar consolidado</button>
-            <button className="primary-button" onClick={onOpenSummary}><GitBranch size={15} /> Editar sumario</button>
-          </div>
-        </div>
-        {summary ? (
-          <div className="summary-inline-preview">
-            <div className="summary-inline-meta">
-              <span>{consolidatedText ? "Sumario consolidado" : "Previa da estrutura"}</span>
-              <span>{items.length} topico(s)</span>
-            </div>
-            <ol>
-              {previewLines.map((line, index) => <li key={`${line}-${index}`}>{line.trim()}</li>)}
-            </ol>
-            {previewLines.length === 0 && <span className="muted-block">Consolide o sumario para visualizar a estrutura aqui.</span>}
-          </div>
-        ) : null}
-        {summaryPrompts.length > 0 && (
-          <div className="summary-inline-prompts">
-            <span>{summaryPrompts.length} prompt(s) salvo(s)</span>
-            <div>
-              {summaryPrompts.slice(0, 6).map((prompt, index) => (
-                <button className="icon-text-button" type="button" key={prompt.id} onClick={() => copyToClipboard(prompt.final_prompt)} title="Copiar prompt gerado">
-                  <Copy size={14} />
-                  Prompt {index + 1}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+      <SummaryOperationalBlock
+        block={block}
+        project={project}
+        selectedStep={selectedStep}
+        tables={tables}
+        summaries={summaries}
+        summaryItems={summaryItems}
+        generatedPrompts={generatedPrompts}
+        currentUser={currentUser}
+        onUpdateItem={onUpdateSummaryItem}
+        onSetSelection={onSetSummaryItemSelection}
+        onDeleteItem={onDeleteSummaryItem}
+        onSaveGeneratedPrompt={onSaveGeneratedPrompt}
+        onOpenSummary={onOpenSummary}
+      />
     );
   }
 
@@ -3264,6 +3271,178 @@ function BlockBody({
   return <textarea className="compact-textarea" value={content} placeholder="Digite o conteudo" onChange={(event) => onUpdate({ config: { content: event.target.value } })} onBlur={() => onSaveValue(content)} />;
 }
 
+function SummaryOperationalBlock({
+  block,
+  project,
+  selectedStep,
+  tables,
+  summaries,
+  summaryItems,
+  generatedPrompts,
+  currentUser,
+  onUpdateItem,
+  onSetSelection,
+  onDeleteItem,
+  onSaveGeneratedPrompt,
+  onOpenSummary,
+}: {
+  block: StepBuilderBlock;
+  project: Project;
+  selectedStep: ProjectStep;
+  tables: Tables;
+  summaries: ProjectSummary[];
+  summaryItems: ProjectSummaryItem[];
+  generatedPrompts: GeneratedPrompt[];
+  currentUser: AppUser | null;
+  onUpdateItem: (itemId: string, payload: Partial<ProjectSummaryItem>) => void;
+  onSetSelection: (summaryId: string, itemId: string, isSelected: boolean) => void;
+  onDeleteItem: (summaryId: string, itemId: string) => void;
+  onSaveGeneratedPrompt: (payload: Omit<GeneratedPrompt, "id" | "created_at">) => void;
+  onOpenSummary: () => void;
+}) {
+  const [summarySearch, setSummarySearch] = useState("");
+  const [collapsedTopicIds, setCollapsedTopicIds] = useState<string[]>([]);
+  const [promptScopeIds, setPromptScopeIds] = useState<string[]>([]);
+  const [basePromptId, setBasePromptId] = useState("");
+  const [selectedPromptOptions, setSelectedPromptOptions] = useState<string[]>(["Mais tecnico", "Formato Word"]);
+
+  const summary = summaries.find((item) => item.id === block.config.summaryId) ?? summaries.find((item) => item.status === "active") ?? summaries[0] ?? null;
+  const items = summary ? summaryItems.filter((item) => item.summary_id === summary.id).sort(byOrder) : [];
+  const selectedItems = items.filter((item) => item.is_selected);
+  const visibleItems = getVisibleSummaryItems(items, collapsedTopicIds, summarySearch);
+  const summaryPrompts = summary ? generatedPrompts.filter((prompt) => prompt.summary_id === summary.id) : [];
+  const promptCoveredItemIds = new Set(summaryPrompts.flatMap((prompt) => getGeneratedPromptItemIds(prompt)));
+  const coveredSelectedCount = selectedItems.filter((item) => promptCoveredItemIds.has(item.id)).length;
+  const selectedPromptItems = promptScopeIds.length ? items.filter((item) => promptScopeIds.includes(item.id)).sort(byOrder) : [];
+  const basePrompt = tables.prompts.find((prompt) => prompt.id === basePromptId) ?? null;
+  const finalPrompt = composeGeneratedPrompt({
+    project,
+    step: selectedStep,
+    summary,
+    item: selectedPromptItems[0] ?? selectedItems[0] ?? items[0] ?? null,
+    items: selectedPromptItems,
+    basePrompt,
+    blocks: [],
+    promptOptions: selectedPromptOptions,
+  });
+  const collapsibleIds = items.filter((item) => items.some((child) => child.parent_id === item.id)).map((item) => item.id);
+  const allCollapsed = collapsibleIds.length > 0 && collapsibleIds.every((id) => collapsedTopicIds.includes(id));
+
+  function toggleCollapsedTopic(itemId: string) {
+    setCollapsedTopicIds((current) => (current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]));
+  }
+
+  function togglePromptScopeItem(itemId: string) {
+    setPromptScopeIds((current) => (current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]));
+  }
+
+  function selectPromptScope(ids: string[]) {
+    setPromptScopeIds([...new Set(ids)]);
+  }
+
+  function togglePromptOption(option: string) {
+    setSelectedPromptOptions((current) => (current.includes(option) ? current.filter((item) => item !== option) : [...current, option]));
+  }
+
+  function copyAndSavePrompt() {
+    if (!summary || !finalPrompt.trim() || selectedPromptItems.length === 0) return;
+    const summaryItemIds = selectedPromptItems.map((item) => item.id);
+    void copyToClipboard(finalPrompt);
+    onSaveGeneratedPrompt({
+      project_id: project.id,
+      summary_id: summary.id,
+      summary_item_id: summaryItemIds[0] ?? null,
+      base_prompt_id: basePrompt?.id ?? null,
+      base_prompt_snapshot: basePrompt?.content ?? null,
+      selected_blocks_json: JSON.stringify({ schemaVersion: 1, summaryItemIds, promptOptions: selectedPromptOptions, promptBlocks: [] }),
+      final_prompt: finalPrompt,
+      notes: summaryItemIds.length > 1 ? `${summaryItemIds.length} topicos selecionados` : selectedPromptItems[0] ? `Topico ${selectedPromptItems[0].topic_number} - ${selectedPromptItems[0].title}` : "Prompt geral do sumario",
+      ai_tool_id: basePrompt?.ai_tool_id ?? null,
+      created_by: currentUser?.name ?? null,
+    });
+  }
+
+  if (!summary) {
+    return (
+      <div className="summary-operational-block empty-summary-operational">
+        <div className="empty-state compact">
+          <GitBranch size={28} />
+          <strong>Nenhum sumario vinculado</strong>
+          <span>Abra o editor para importar e selecionar a estrutura do sumario.</span>
+          <button className="primary-button" type="button" onClick={onOpenSummary}>Editar sumario</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="summary-operational-block">
+      <div className="summary-operational-head">
+        <div>
+          <strong>Versao {summary.version_number} - {summary.status === "active" ? "Ativo" : "Rascunho"}</strong>
+          <span>{selectedItems.length}/{items.length} topicos selecionados · {coveredSelectedCount}/{selectedItems.length || 0} cobertos por prompt</span>
+        </div>
+        <div className="inline-actions">
+          <button className="secondary-button" type="button" disabled={!summary.consolidated_text} onClick={() => copyToClipboard(summary.consolidated_text ?? "")}><Copy size={15} /> Copiar consolidado</button>
+          <button className="primary-button" type="button" onClick={onOpenSummary}><GitBranch size={15} /> Editar estrutura</button>
+        </div>
+      </div>
+
+      <div className="summary-operational-tools">
+        <label className="summary-search-field">
+          <Search size={15} />
+          <input value={summarySearch} onChange={(event) => setSummarySearch(event.target.value)} placeholder="Buscar topico" />
+        </label>
+        <button className="secondary-button" type="button" onClick={() => setCollapsedTopicIds(allCollapsed ? [] : collapsibleIds)}>{allCollapsed ? "Expandir tudo" : "Recolher tudo"}</button>
+        <button className="secondary-button" type="button" disabled={items.length === 0} onClick={() => selectPromptScope(items.map((item) => item.id))}>Sumario inteiro</button>
+        <button className="secondary-button" type="button" disabled={promptScopeIds.length === 0} onClick={() => setPromptScopeIds([])}>Limpar selecao</button>
+      </div>
+
+      {promptScopeIds.length > 0 && (
+        <div className="summary-floating-composer">
+          <div><strong>{promptScopeIds.length} topico(s) selecionado(s)</strong><span>Configure e copie um prompt para estes itens.</span></div>
+          <SelectField label="Prompt base" value={basePromptId} onChange={setBasePromptId} options={tables.prompts.filter((prompt) => prompt.status !== "arquivado").map((prompt) => ({ value: prompt.id, label: prompt.title }))} emptyLabel="Sem prompt base" />
+          <div className="prompt-option-grid mini-options">
+            {["Mais tecnico", "Mais direto", "Incluir tabelas", "Considerar legislacao", "Apontar pendencias", "Formato Word"].map((option) => (
+              <label key={option}><input type="checkbox" checked={selectedPromptOptions.includes(option)} onChange={() => togglePromptOption(option)} /><span>{option}</span></label>
+            ))}
+          </div>
+          <button className="primary-button" type="button" onClick={copyAndSavePrompt}><Copy size={15} /> Copiar e salvar prompt</button>
+        </div>
+      )}
+
+      <div className="summary-operational-tree">
+        {visibleItems.map((item) => {
+          const childCount = items.filter((child) => child.parent_id === item.id).length;
+          const branchIds = collectSummaryBranchIds(items, item.id);
+          const isPromptScope = promptScopeIds.includes(item.id);
+          const generatedForItem = summaryPrompts.filter((prompt) => getGeneratedPromptItemIds(prompt).includes(item.id));
+          const coveredInBranch = branchIds.filter((id) => promptCoveredItemIds.has(id)).length;
+
+          return (
+            <article className={`summary-item tree-row operational-row level-${Math.min(item.level, 4)} ${item.is_selected ? "selected" : "excluded"} ${isPromptScope ? "prompt-scope" : ""}`} key={item.id} style={{ "--tree-level": Math.max(0, item.level - 1) } as CSSProperties}>
+              <button className="summary-expand-button" disabled={childCount === 0} onClick={() => toggleCollapsedTopic(item.id)} title={collapsedTopicIds.includes(item.id) ? "Expandir topico" : "Recolher topico"}>{childCount > 0 ? (collapsedTopicIds.includes(item.id) ? "+" : "-") : ""}</button>
+              <button className={`checkbox ${item.is_selected ? "checked" : ""}`} onClick={() => onSetSelection(summary.id, item.id, !item.is_selected)} title="Entrar no sumario consolidado">{item.is_selected && <Check size={14} />}</button>
+              <span className="summary-topic-number">{item.topic_number}</span>
+              <div className="summary-item-main">
+                <InlineText defaultValue={item.title} className="summary-title-input" onSave={(value) => onUpdateItem(item.id, { title: value })} />
+                <div className="summary-item-controls compact-topic-meta">
+                  <span className={`summary-status-dot ${item.status}`} title={formatStatus(item.status)} />
+                  {childCount > 0 && <span className="summary-mini-chip">{childCount} sub</span>}
+                  {coveredInBranch > 0 && <span className="summary-mini-chip covered">{coveredInBranch}/{branchIds.length} prompt</span>}
+                  {generatedForItem.map((prompt) => <button className="summary-copy-chip" key={prompt.id} onClick={() => copyToClipboard(prompt.final_prompt)}><Copy size={13} /> Prompt</button>)}
+                </div>
+              </div>
+              <button className={`icon-button subtle prompt-pick-button ${isPromptScope ? "active" : ""}`} title="Marcar topico para prompt" onClick={() => togglePromptScopeItem(item.id)}><Sparkles size={15} /></button>
+              <button className="icon-button subtle" title="Usar ramo para prompt" onClick={() => selectPromptScope(branchIds)}><GitBranch size={15} /></button>
+              <button className="icon-button subtle" title="Excluir topico" onClick={() => onDeleteItem(summary.id, item.id)}><Trash2 size={15} /></button>
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 function PhaseBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
   return (
     <div className="phase-block-body">
