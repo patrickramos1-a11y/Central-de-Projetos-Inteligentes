@@ -280,8 +280,8 @@ async function getSummaryForStep(db: D1Database, step: Record<string, unknown>) 
 
 function createBlock(type: string, order: number, title?: string, parentBlockId?: string | null, extraConfig?: Record<string, unknown>): StepBlock {
   const config: Record<string, unknown> = { parentBlockId: parentBlockId ?? null };
-  if (type === "long_text") Object.assign(config, { mode: "input", content: "", rows: 4 });
-  if (type === "short_text") Object.assign(config, { placeholder: "" });
+  if (type === "long_text") Object.assign(config, { mode: "info", content: "", rows: 4 });
+  if (type === "short_text") Object.assign(config, { mode: "info", content: "", placeholder: "" });
   if (type === "checklist") Object.assign(config, { items: [], completionMode: "all_required" });
   if (type === "prompt") Object.assign(config, { contentSnapshot: "", expectedOutput: "", executionMode: "manual" });
   if (type === "context") Object.assign(config, { content: "", compact: true });

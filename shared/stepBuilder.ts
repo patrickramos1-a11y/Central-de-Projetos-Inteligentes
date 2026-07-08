@@ -264,11 +264,11 @@ export function createBlock(type: StepBlockType, order: number): StepBlock {
   }
 
   if (type === "long_text") {
-    return { ...base, config: { mode: "input", rows: 5, maxLength: null } };
+    return { ...base, config: { mode: "info", content: "", rows: 5, maxLength: null } };
   }
 
   if (type === "short_text") {
-    return { ...base, config: { placeholder: "", maxLength: 180 } };
+    return { ...base, config: { mode: "info", content: "", placeholder: "", maxLength: 180 } };
   }
 
   if (type === "checklist") {

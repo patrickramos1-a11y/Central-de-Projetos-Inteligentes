@@ -3172,6 +3172,17 @@ function BlockSettings({ block, tables, onUpdate }: { block: StepBuilderBlock; t
     <div className="block-settings">
       <Field label="Titulo do bloco" value={block.title} onChange={(value) => onUpdate({ title: value })} />
       <label className="checkline"><input type="checkbox" checked={block.required} onChange={(event) => onUpdate({ required: event.target.checked })} /> Obrigatorio para concluir</label>
+      {(block.type === "short_text" || block.type === "long_text") && (
+        <label className="field text-block-config">
+          <span>Texto informativo</span>
+          <textarea
+            value={String(block.config.content ?? block.config.placeholder ?? "")}
+            rows={block.type === "long_text" ? 5 : 2}
+            placeholder="Escreva a orientacao que deve aparecer na jornada"
+            onChange={(event) => onUpdate({ config: { content: event.target.value, mode: "info" } })}
+          />
+        </label>
+      )}
       {block.type === "prompt" && <SelectField label="Ferramenta" value={String(block.config.toolId ?? "")} onChange={(toolId) => onUpdate({ config: { toolId } })} options={tables.ai_tools.map((tool) => ({ value: tool.id, label: tool.name }))} emptyLabel="Nao vinculado" />}
       {block.type === "project_summary" && <SelectField label="Versao do sumario" value={String(block.config.summaryId ?? "")} onChange={(summaryId) => onUpdate({ config: { summaryId } })} options={tables.project_summaries.map((summary) => ({ value: summary.id, label: `Versao ${summary.version_number} - ${summary.status}` }))} emptyLabel="Nao vinculado" />}
     </div>
@@ -3267,6 +3278,15 @@ function BlockBody({
     return <textarea className="compact-textarea" value={String(block.config.content ?? "")} placeholder="Comentario pequeno" onChange={(event) => onUpdate({ config: { content: event.target.value } })} />;
   }
 
+  if (block.type === "short_text" || block.type === "long_text") {
+    const content = String(block.config.content ?? block.config.placeholder ?? "").trim();
+    return (
+      <div className={`informative-text-block ${block.type}`}>
+        {content ? <p>{content}</p> : <span>Edite este bloco para escrever a orientacao.</span>}
+      </div>
+    );
+  }
+
   const content = String(block.config.content ?? value ?? "");
   return <textarea className="compact-textarea" value={content} placeholder="Digite o conteudo" onChange={(event) => onUpdate({ config: { content: event.target.value } })} onBlur={() => onSaveValue(content)} />;
 }
@@ -3313,6 +3333,10 @@ function SummaryOperationalBlock({
   const summaryPrompts = summary ? generatedPrompts.filter((prompt) => prompt.summary_id === summary.id) : [];
   const promptCoveredItemIds = new Set(summaryPrompts.flatMap((prompt) => getGeneratedPromptItemIds(prompt)));
   const coveredSelectedCount = selectedItems.filter((item) => promptCoveredItemIds.has(item.id)).length;
+  const summaryStatusOptions: SummaryItemStatus[] = ["pendente", "em_andamento", "desenvolvido", "em_revisao", "concluido", "bloqueado", "arquivado"];
+  const completedSelectedCount = selectedItems.filter((item) => item.status === "concluido" || item.status === "desenvolvido").length;
+  const reviewSelectedCount = selectedItems.filter((item) => item.status === "em_revisao").length;
+  const blockedSelectedCount = selectedItems.filter((item) => item.status === "bloqueado").length;
   const selectedPromptItems = promptScopeIds.length ? items.filter((item) => promptScopeIds.includes(item.id)).sort(byOrder) : [];
   const basePrompt = tables.prompts.find((prompt) => prompt.id === basePromptId) ?? null;
   const finalPrompt = composeGeneratedPrompt({
@@ -3388,6 +3412,14 @@ function SummaryOperationalBlock({
         </div>
       </div>
 
+      <div className="summary-operational-metrics" aria-label="Resumo operacional do sumario">
+        <div><strong>{selectedItems.length}/{items.length}</strong><span>Selecionados</span></div>
+        <div><strong>{completedSelectedCount}</strong><span>Finalizados</span></div>
+        <div><strong>{reviewSelectedCount}</strong><span>Em revisao</span></div>
+        <div><strong>{blockedSelectedCount}</strong><span>Bloqueados</span></div>
+        <div><strong>{coveredSelectedCount}/{selectedItems.length || 0}</strong><span>Com prompt</span></div>
+      </div>
+
       <div className="summary-operational-tools">
         <label className="summary-search-field">
           <Search size={15} />
@@ -3428,6 +3460,9 @@ function SummaryOperationalBlock({
                 <InlineText defaultValue={item.title} className="summary-title-input" onSave={(value) => onUpdateItem(item.id, { title: value })} />
                 <div className="summary-item-controls compact-topic-meta">
                   <span className={`summary-status-dot ${item.status}`} title={formatStatus(item.status)} />
+                  <select className={`summary-status-select ${item.status}`} value={item.status} onChange={(event) => onUpdateItem(item.id, { status: event.target.value as SummaryItemStatus })} title="Status do topico">
+                    {summaryStatusOptions.map((status) => <option value={status} key={status}>{formatStatus(status)}</option>)}
+                  </select>
                   {childCount > 0 && <span className="summary-mini-chip">{childCount} sub</span>}
                   {coveredInBranch > 0 && <span className="summary-mini-chip covered">{coveredInBranch}/{branchIds.length} prompt</span>}
                   {generatedForItem.map((prompt) => <button className="summary-copy-chip" key={prompt.id} onClick={() => copyToClipboard(prompt.final_prompt)}><Copy size={13} /> Prompt</button>)}
@@ -3435,7 +3470,7 @@ function SummaryOperationalBlock({
               </div>
               <button className={`icon-button subtle prompt-pick-button ${isPromptScope ? "active" : ""}`} title="Marcar topico para prompt" onClick={() => togglePromptScopeItem(item.id)}><Sparkles size={15} /></button>
               <button className="icon-button subtle" title="Usar ramo para prompt" onClick={() => selectPromptScope(branchIds)}><GitBranch size={15} /></button>
-              <button className="icon-button subtle" title="Excluir topico" onClick={() => onDeleteItem(summary.id, item.id)}><Trash2 size={15} /></button>
+              <button className="icon-button subtle operational-danger-action" title="Excluir topico" onClick={() => onDeleteItem(summary.id, item.id)}><Trash2 size={15} /></button>
             </article>
           );
         })}
