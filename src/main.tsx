@@ -984,6 +984,38 @@ function App() {
     setTables((current) => ({ ...current, project_step_prompts: [...current.project_step_prompts, data as ProjectStepPrompt] }));
   }
 
+  async function createPromptFromBlock(payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }): Promise<Prompt | null> {
+    if (!supabase || !payload.title.trim() || !payload.content.trim()) {
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from<Prompt>("prompts")
+      .insert(
+        normalizePayload({
+          title: payload.title.trim(),
+          short_description: payload.short_description ?? "Criado a partir do construtor de jornada.",
+          content: payload.content.trim(),
+          ai_tool_id: payload.ai_tool_id ?? null,
+          category_id: null,
+          project_type_id: null,
+          variables: "",
+          version: "1.0",
+          status: "ativo",
+        }),
+      )
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      setNotice(`Erro ao salvar prompt na biblioteca: ${error?.message ?? "erro desconhecido"}`);
+      return null;
+    }
+
+    setTables((current) => ({ ...current, prompts: [...current.prompts, data as Prompt] }));
+    setNotice("Prompt salvo na biblioteca e vinculado ao bloco.");
+    return data as Prompt;
+  }
   async function addProjectStepPhase(stepId: string, title: string) {
     if (!supabase || !title.trim()) {
       return;
@@ -2019,6 +2051,7 @@ function App() {
             onDeleteSummaryItem={deleteProjectSummaryItem}
             onConsolidateSummary={consolidateProjectSummary}
             onSaveGeneratedPrompt={saveGeneratedPrompt}
+            onCreatePromptFromBlock={createPromptFromBlock}
           />
         )}
 
@@ -2803,6 +2836,7 @@ function JourneyView({
   onDeleteSummaryItem,
   onConsolidateSummary,
   onSaveGeneratedPrompt,
+  onCreatePromptFromBlock,
 }: {
   project: Project;
   steps: ProjectStep[];
@@ -2838,6 +2872,7 @@ function JourneyView({
   onDeleteSummaryItem: (summaryId: string, itemId: string) => void;
   onConsolidateSummary: (summaryId: string) => Promise<ProjectSummary | null>;
   onSaveGeneratedPrompt: (payload: Omit<GeneratedPrompt, "id" | "created_at">) => void;
+  onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
 }) {
   const doneSteps = steps.filter((step) => step.status === "concluido").length;
   const progress = steps.length ? Math.round((doneSteps / steps.length) * 100) : 0;
@@ -3027,6 +3062,7 @@ function JourneyView({
                 onSetSummaryItemSelection={onSetSummaryItemSelection}
                 onDeleteSummaryItem={onDeleteSummaryItem}
                 onSaveGeneratedPrompt={onSaveGeneratedPrompt}
+                onCreatePromptFromBlock={onCreatePromptFromBlock}
                 isEditing={editingBlockId === block.id}
                 isCollapsed={collapsedBlockIds.has(block.id)}
                 onToggleCollapse={() => toggleBlockCollapsed(block.id)}
@@ -3108,6 +3144,7 @@ function StepBuilderBlockCard({
   onSetSummaryItemSelection,
   onDeleteSummaryItem,
   onSaveGeneratedPrompt,
+  onCreatePromptFromBlock,
   isEditing,
   isCollapsed,
   onToggleCollapse,
@@ -3134,6 +3171,7 @@ function StepBuilderBlockCard({
   onSetSummaryItemSelection: (summaryId: string, itemId: string, isSelected: boolean) => void;
   onDeleteSummaryItem: (summaryId: string, itemId: string) => void;
   onSaveGeneratedPrompt: (payload: Omit<GeneratedPrompt, "id" | "created_at">) => void;
+  onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
   isEditing: boolean;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
@@ -3161,13 +3199,13 @@ function StepBuilderBlockCard({
         </div>
       </div>
 
-      {!isCollapsed && isEditing && <BlockSettings block={block} tables={tables} onUpdate={onUpdate} />}
+      {!isCollapsed && isEditing && <BlockSettings block={block} tables={tables} onUpdate={onUpdate} onCreatePromptFromBlock={onCreatePromptFromBlock} />}
       {!isCollapsed && <BlockBody block={block} value={value} summaries={summaries} summaryItems={summaryItems} generatedPrompts={generatedPrompts} project={project} selectedStep={selectedStep} tables={tables} currentUser={currentUser} onUpdateSummaryItem={onUpdateSummaryItem} onSetSummaryItemSelection={onSetSummaryItemSelection} onDeleteSummaryItem={onDeleteSummaryItem} onSaveGeneratedPrompt={onSaveGeneratedPrompt} onSaveValue={onSaveValue} onOpenSummary={onOpenSummary} onUpdate={onUpdate} />}
     </article>
   );
 }
 
-function BlockSettings({ block, tables, onUpdate }: { block: StepBuilderBlock; tables: Tables; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
+function BlockSettings({ block, tables, onUpdate, onCreatePromptFromBlock }: { block: StepBuilderBlock; tables: Tables; onUpdate: (patch: Partial<StepBuilderBlock>) => void; onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null> }) {
   return (
     <div className="block-settings">
       <Field label="Titulo do bloco" value={block.title} onChange={(value) => onUpdate({ title: value })} />
@@ -3183,7 +3221,7 @@ function BlockSettings({ block, tables, onUpdate }: { block: StepBuilderBlock; t
           />
         </label>
       )}
-      {block.type === "prompt" && <SelectField label="Ferramenta" value={String(block.config.toolId ?? "")} onChange={(toolId) => onUpdate({ config: { toolId } })} options={tables.ai_tools.map((tool) => ({ value: tool.id, label: tool.name }))} emptyLabel="Nao vinculado" />}
+      {block.type === "prompt" && <PromptBlockSettings block={block} tables={tables} onUpdate={onUpdate} onCreatePromptFromBlock={onCreatePromptFromBlock} />}
       {block.type === "project_summary" && <SelectField label="Versao do sumario" value={String(block.config.summaryId ?? "")} onChange={(summaryId) => onUpdate({ config: { summaryId } })} options={tables.project_summaries.map((summary) => ({ value: summary.id, label: `Versao ${summary.version_number} - ${summary.status}` }))} emptyLabel="Nao vinculado" />}
     </div>
   );
@@ -3233,13 +3271,7 @@ function BlockBody({
   }
 
   if (block.type === "prompt") {
-    const promptText = String(block.config.contentSnapshot ?? "");
-    return (
-      <div className="prompt-block-compact">
-        <textarea value={promptText} placeholder="Cole ou escreva o prompt" onChange={(event) => onUpdate({ config: { contentSnapshot: event.target.value } })} />
-        <div className="inline-actions"><button className="secondary-button" onClick={() => copyToClipboard(promptText)}><Copy size={15} /> Copiar prompt</button></div>
-      </div>
-    );
+    return <PromptExecutionBlock block={block} value={value} tables={tables} onSaveValue={onSaveValue} onUpdate={onUpdate} />;
   }
 
   if (block.type === "context") {
@@ -3291,6 +3323,146 @@ function BlockBody({
   return <textarea className="compact-textarea" value={content} placeholder="Digite o conteudo" onChange={(event) => onUpdate({ config: { content: event.target.value } })} onBlur={() => onSaveValue(content)} />;
 }
 
+type PromptBlockRuntimeValue = {
+  copyCount?: number;
+  lastCopiedAt?: string | null;
+  applied?: boolean;
+  appliedAt?: string | null;
+};
+
+function PromptBlockSettings({
+  block,
+  tables,
+  onUpdate,
+  onCreatePromptFromBlock,
+}: {
+  block: StepBuilderBlock;
+  tables: Tables;
+  onUpdate: (patch: Partial<StepBuilderBlock>) => void;
+  onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
+}) {
+  const selectedPrompt = tables.prompts.find((prompt) => prompt.id === block.config.promptId) ?? null;
+  const promptText = String(block.config.contentSnapshot ?? selectedPrompt?.content ?? "");
+  const toolId = String(block.config.toolId ?? selectedPrompt?.ai_tool_id ?? "");
+  const canSaveToLibrary = Boolean(promptText.trim()) && !selectedPrompt;
+
+  function linkPrompt(promptId: string) {
+    const prompt = tables.prompts.find((item) => item.id === promptId) ?? null;
+
+    if (!prompt) {
+      onUpdate({ config: { promptId: null, contentSnapshot: promptText, toolId } });
+      return;
+    }
+
+    onUpdate({
+      title: prompt.title,
+      config: {
+        promptId: prompt.id,
+        contentSnapshot: prompt.content,
+        toolId: prompt.ai_tool_id ?? "",
+        expectedOutput: block.config.expectedOutput ?? "",
+      },
+    });
+  }
+
+  async function saveToLibrary() {
+    const created = await onCreatePromptFromBlock({
+      title: block.title || "Prompt da etapa",
+      content: promptText,
+      ai_tool_id: toolId || null,
+      short_description: `Criado no bloco ${block.title || "Prompt"}`,
+    });
+
+    if (!created) return;
+    onUpdate({
+      title: created.title,
+      config: {
+        promptId: created.id,
+        contentSnapshot: created.content,
+        toolId: created.ai_tool_id ?? "",
+      },
+    });
+  }
+
+  return (
+    <div className="prompt-block-settings">
+      <SelectField
+        label="Prompt da biblioteca"
+        value={String(block.config.promptId ?? "")}
+        onChange={linkPrompt}
+        options={tables.prompts.filter((prompt) => prompt.status !== "arquivado").map((prompt) => ({ value: prompt.id, label: prompt.title }))}
+        emptyLabel="Prompt avulso / nao vinculado"
+      />
+      <SelectField label="Ferramenta" value={toolId} onChange={(nextToolId) => onUpdate({ config: { toolId: nextToolId } })} options={tables.ai_tools.map((tool) => ({ value: tool.id, label: tool.name }))} emptyLabel="Nao vinculado" />
+      <label className="field prompt-content-config">
+        <span>Texto do prompt</span>
+        <textarea value={promptText} rows={6} placeholder="Cole o prompt ou selecione um da biblioteca" onChange={(event) => onUpdate({ config: { contentSnapshot: event.target.value, promptId: block.config.promptId ?? null } })} />
+      </label>
+      <label className="field prompt-content-config">
+        <span>Resultado esperado</span>
+        <input value={String(block.config.expectedOutput ?? "")} placeholder="Ex.: apresentacao por topicos gerada no NotebookLM" onChange={(event) => onUpdate({ config: { expectedOutput: event.target.value } })} />
+      </label>
+      <div className="inline-actions prompt-settings-actions">
+        <button className="secondary-button" type="button" disabled={!canSaveToLibrary} onClick={() => void saveToLibrary()}><Save size={15} /> Salvar na biblioteca e vincular</button>
+      </div>
+    </div>
+  );
+}
+
+function PromptExecutionBlock({ block, value, tables, onSaveValue, onUpdate }: { block: StepBuilderBlock; value: any; tables: Tables; onSaveValue: (value: unknown) => void; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
+  const runtimeValue = value && typeof value === "object" && !Array.isArray(value) ? value as PromptBlockRuntimeValue : {};
+  const linkedPrompt = tables.prompts.find((prompt) => prompt.id === block.config.promptId) ?? null;
+  const tool = tables.ai_tools.find((item) => item.id === (block.config.toolId ?? linkedPrompt?.ai_tool_id)) ?? null;
+  const promptText = String(block.config.contentSnapshot ?? linkedPrompt?.content ?? "").trim();
+  const expectedOutput = String(block.config.expectedOutput ?? "").trim();
+  const copyCount = Number(runtimeValue.copyCount ?? 0);
+  const isApplied = Boolean(runtimeValue.applied);
+
+  function persist(next: PromptBlockRuntimeValue) {
+    onSaveValue({ ...runtimeValue, ...next });
+  }
+
+  function copyPrompt() {
+    if (!promptText) return;
+    void copyToClipboard(promptText);
+    persist({ copyCount: copyCount + 1, lastCopiedAt: new Date().toISOString() });
+  }
+
+  function toggleApplied() {
+    persist({ applied: !isApplied, appliedAt: !isApplied ? new Date().toISOString() : null });
+  }
+
+  if (!promptText) {
+    return (
+      <div className="prompt-execution-card empty">
+        <div>
+          <strong>Prompt ainda nao configurado</strong>
+          <span>Abra o lapis do bloco para escolher um prompt da biblioteca ou colar um prompt avulso.</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`prompt-execution-card ${isApplied ? "applied" : "pending"}`}>
+      <div className="prompt-execution-main">
+        <div>
+          <strong>{linkedPrompt?.title ?? block.title}</strong>
+          <span>{tool?.name ?? "Ferramenta nao vinculada"}{expectedOutput ? ` - ${expectedOutput}` : ""}</span>
+        </div>
+        <div className="prompt-execution-stats">
+          <span>{copyCount} copia(s)</span>
+          <span>{isApplied ? "Aplicado" : "Pendente"}</span>
+        </div>
+      </div>
+      <div className="prompt-execution-actions">
+        <button className="primary-button" type="button" onClick={copyPrompt}><Copy size={15} /> Copiar prompt</button>
+        <button className={`secondary-button ${isApplied ? "is-applied" : ""}`} type="button" onClick={toggleApplied}><CheckCircle2 size={15} /> {isApplied ? "Aplicado" : "Confirmar aplicado"}</button>
+        <button className="icon-button subtle" type="button" title="Atualizar titulo pelo prompt vinculado" disabled={!linkedPrompt} onClick={() => linkedPrompt && onUpdate({ title: linkedPrompt.title })}><RefreshCw size={14} /></button>
+      </div>
+    </div>
+  );
+}
 function SummaryOperationalBlock({
   block,
   project,
@@ -3636,7 +3808,9 @@ function ContextBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: 
       </div>
     </div>
   );
-}function blockTypeText(type: string) {
+}
+
+function blockTypeText(type: string) {
   return blockCatalog.find((item) => item.type === type)?.label ?? type;
 }
 
