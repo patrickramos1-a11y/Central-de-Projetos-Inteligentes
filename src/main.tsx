@@ -3567,6 +3567,8 @@ function SummaryOperationalBlock({
   });
   const collapsibleIds = items.filter((item) => items.some((child) => child.parent_id === item.id)).map((item) => item.id);
   const allCollapsed = collapsibleIds.length > 0 && collapsibleIds.every((id) => collapsedTopicIds.includes(id));
+  const versionStateLabel = summary?.status === "active" ? "Versao em uso" : "Versao em edicao";
+  const versionStateHelp = summary?.status === "active" ? "Esta e a versao aplicada na jornada." : "Rascunho para revisar antes de ativar.";
 
   function toggleCollapsedTopic(itemId: string) {
     setCollapsedTopicIds((current) => (current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]));
@@ -3617,14 +3619,15 @@ function SummaryOperationalBlock({
 
   return (
     <div className="summary-operational-block">
-      <div className="summary-operational-head">
+      <div className="summary-operational-head slim-summary-head">
         <div>
-          <strong>Versao {summary.version_number} - {summary.status === "active" ? "Ativo" : "Rascunho"}</strong>
-          <span>{selectedItems.length}/{items.length} topicos selecionados · {coveredSelectedCount}/{selectedItems.length || 0} cobertos por prompt</span>
+          <span className={`summary-version-state ${summary.status === "active" ? "active" : "draft"}`}>{versionStateLabel}</span>
+          <strong>Versao {summary.version_number}</strong>
+          <span>{versionStateHelp} {selectedItems.length}/{items.length} topicos no sumario · {coveredSelectedCount}/{selectedItems.length || 0} com prompt.</span>
         </div>
         <div className="inline-actions">
-          <button className="secondary-button" type="button" disabled={!summary.consolidated_text} onClick={() => copyToClipboard(summary.consolidated_text ?? "")}><Copy size={15} /> Copiar consolidado</button>
-          <button className="primary-button" type="button" onClick={onOpenSummary}><GitBranch size={15} /> Editar estrutura</button>
+          <button className="secondary-button" type="button" disabled={!summary.consolidated_text} onClick={() => copyToClipboard(summary.consolidated_text ?? "")}><Copy size={15} /> Copiar sumario</button>
+          <button className="primary-button" type="button" onClick={onOpenSummary}><GitBranch size={15} /> Editar sumario</button>
         </div>
       </div>
 
@@ -3641,14 +3644,15 @@ function SummaryOperationalBlock({
           <Search size={15} />
           <input value={summarySearch} onChange={(event) => setSummarySearch(event.target.value)} placeholder="Buscar topico" />
         </label>
-        <button className="secondary-button" type="button" onClick={() => setCollapsedTopicIds(allCollapsed ? [] : collapsibleIds)}>{allCollapsed ? "Expandir tudo" : "Recolher tudo"}</button>
-        <button className="secondary-button" type="button" disabled={items.length === 0} onClick={() => selectPromptScope(items.map((item) => item.id))}>Sumario inteiro</button>
-        <button className="secondary-button" type="button" disabled={promptScopeIds.length === 0} onClick={() => setPromptScopeIds([])}>Limpar selecao</button>
+        <button className="secondary-button" type="button" disabled={!allCollapsed && collapsedTopicIds.length === 0} onClick={() => setCollapsedTopicIds([])}>Ver tudo</button>
+        <button className="secondary-button" type="button" disabled={allCollapsed} onClick={() => setCollapsedTopicIds(collapsibleIds)}>So capitulos</button>
+        <button className="secondary-button" type="button" disabled={items.length === 0} onClick={() => selectPromptScope(items.map((item) => item.id))}>Prompt do sumario inteiro</button>
+        <button className="secondary-button" type="button" disabled={promptScopeIds.length === 0} onClick={() => setPromptScopeIds([])}>Limpar prompt</button>
       </div>
 
       {promptScopeIds.length > 0 && (
         <div className="summary-floating-composer">
-          <div><strong>{promptScopeIds.length} topico(s) selecionado(s)</strong><span>Configure e copie um prompt para estes itens.</span></div>
+          <div><strong>{promptScopeIds.length} topico(s) selecionado(s)</strong><span>Estes itens vao compor o prompt. Escolha um prompt base se quiser e copie a composicao.</span></div>
           <SelectField label="Prompt base" value={basePromptId} onChange={setBasePromptId} options={tables.prompts.filter((prompt) => prompt.status !== "arquivado").map((prompt) => ({ value: prompt.id, label: prompt.title }))} emptyLabel="Sem prompt base" />
           <div className="prompt-option-grid mini-options">
             {["Mais tecnico", "Mais direto", "Incluir tabelas", "Considerar legislacao", "Apontar pendencias", "Formato Word"].map((option) => (
@@ -3684,8 +3688,8 @@ function SummaryOperationalBlock({
                   {generatedForItem.map((prompt) => <button className="summary-copy-chip" key={prompt.id} onClick={() => copyToClipboard(prompt.final_prompt)}><Copy size={13} /> Prompt</button>)}
                 </div>
               </div>
-              <button className={`icon-button subtle prompt-pick-button ${isPromptScope ? "active" : ""}`} title="Marcar topico para prompt" onClick={() => togglePromptScopeItem(item.id)}><Sparkles size={15} /></button>
-              <button className="icon-button subtle" title="Usar ramo para prompt" onClick={() => selectPromptScope(branchIds)}><GitBranch size={15} /></button>
+              <button className={`icon-button subtle prompt-pick-button ${isPromptScope ? "active" : ""}`} title="Incluir este topico na composicao do prompt" onClick={() => togglePromptScopeItem(item.id)}><Sparkles size={15} /></button>
+              <button className="icon-button subtle" title="Incluir este topico e todos os subtitulos no prompt" onClick={() => selectPromptScope(branchIds)}><GitBranch size={15} /></button>
               <button className="icon-button subtle operational-danger-action" title="Excluir topico" onClick={() => onDeleteItem(summary.id, item.id)}><Trash2 size={15} /></button>
             </article>
           );
@@ -4163,7 +4167,7 @@ function ProjectSummaryPanel({
                         ))}
                       </div>
                     </div>
-                    <button className={`icon-button subtle prompt-pick-button ${isPromptScope ? "active" : ""}`} title="Marcar topico para prompt" onClick={() => togglePromptScopeItem(item.id)}>
+                    <button className={`icon-button subtle prompt-pick-button ${isPromptScope ? "active" : ""}`} title="Incluir este topico na composicao do prompt" onClick={() => togglePromptScopeItem(item.id)}>
                       <Sparkles size={15} />
                     </button>
                     <button className="icon-button subtle" title="Usar este ramo para prompt" onClick={() => selectPromptScope(itemBranchIds)}>
