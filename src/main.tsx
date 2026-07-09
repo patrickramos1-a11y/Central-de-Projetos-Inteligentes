@@ -3206,18 +3206,41 @@ function StepBuilderBlockCard({
 }
 
 function BlockSettings({ block, tables, onUpdate, onCreatePromptFromBlock }: { block: StepBuilderBlock; tables: Tables; onUpdate: (patch: Partial<StepBuilderBlock>) => void; onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null> }) {
+  const [draftTitle, setDraftTitle] = useState(block.title);
+  const [draftInfoText, setDraftInfoText] = useState(String(block.config.content ?? block.config.placeholder ?? ""));
+
+  useEffect(() => {
+    setDraftTitle(block.title);
+    setDraftInfoText(String(block.config.content ?? block.config.placeholder ?? ""));
+  }, [block.id, block.title, block.config.content, block.config.placeholder]);
+
+  function saveTitle() {
+    const nextTitle = draftTitle.trim() || block.title;
+    if (nextTitle !== block.title) onUpdate({ title: nextTitle });
+  }
+
+  function saveInfoText() {
+    if (draftInfoText !== String(block.config.content ?? block.config.placeholder ?? "")) {
+      onUpdate({ config: { content: draftInfoText, mode: "info" } });
+    }
+  }
+
   return (
     <div className="block-settings">
-      <Field label="Titulo do bloco" value={block.title} onChange={(value) => onUpdate({ title: value })} />
+      <label className="field">
+        <span>Titulo do bloco</span>
+        <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} onBlur={saveTitle} />
+      </label>
       <label className="checkline"><input type="checkbox" checked={block.required} onChange={(event) => onUpdate({ required: event.target.checked })} /> Obrigatorio para concluir</label>
       {(block.type === "short_text" || block.type === "long_text") && (
         <label className="field text-block-config">
           <span>Texto informativo</span>
           <textarea
-            value={String(block.config.content ?? block.config.placeholder ?? "")}
+            value={draftInfoText}
             rows={block.type === "long_text" ? 5 : 2}
             placeholder="Escreva a orientacao que deve aparecer na jornada"
-            onChange={(event) => onUpdate({ config: { content: event.target.value, mode: "info" } })}
+            onChange={(event) => setDraftInfoText(event.target.value)}
+            onBlur={saveInfoText}
           />
         </label>
       )}
@@ -3226,7 +3249,6 @@ function BlockSettings({ block, tables, onUpdate, onCreatePromptFromBlock }: { b
     </div>
   );
 }
-
 function BlockBody({
   block,
   value,
@@ -3342,44 +3364,62 @@ function PromptBlockSettings({
   onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
 }) {
   const selectedPrompt = tables.prompts.find((prompt) => prompt.id === block.config.promptId) ?? null;
-  const promptText = String(block.config.contentSnapshot ?? selectedPrompt?.content ?? "");
+  const [draftPromptText, setDraftPromptText] = useState(String(block.config.contentSnapshot ?? selectedPrompt?.content ?? ""));
+  const [draftExpectedOutput, setDraftExpectedOutput] = useState(String(block.config.expectedOutput ?? ""));
   const toolId = String(block.config.toolId ?? selectedPrompt?.ai_tool_id ?? "");
-  const canSaveToLibrary = Boolean(promptText.trim()) && !selectedPrompt;
+  const canSaveToLibrary = Boolean(draftPromptText.trim()) && !selectedPrompt;
+
+  useEffect(() => {
+    const nextSelectedPrompt = tables.prompts.find((prompt) => prompt.id === block.config.promptId) ?? null;
+    setDraftPromptText(String(block.config.contentSnapshot ?? nextSelectedPrompt?.content ?? ""));
+    setDraftExpectedOutput(String(block.config.expectedOutput ?? ""));
+  }, [block.id, block.config.promptId, block.config.contentSnapshot, block.config.expectedOutput, tables.prompts]);
 
   function linkPrompt(promptId: string) {
     const prompt = tables.prompts.find((item) => item.id === promptId) ?? null;
 
     if (!prompt) {
-      onUpdate({ config: { promptId: null, contentSnapshot: promptText, toolId } });
+      onUpdate({ config: { promptId: null, contentSnapshot: draftPromptText, toolId } });
       return;
     }
 
+    setDraftPromptText(prompt.content ?? "");
     onUpdate({
       title: prompt.title,
       config: {
         promptId: prompt.id,
         contentSnapshot: prompt.content,
         toolId: prompt.ai_tool_id ?? "",
-        expectedOutput: block.config.expectedOutput ?? "",
+        expectedOutput: draftExpectedOutput,
       },
     });
+  }
+
+  function savePromptDraft() {
+    const currentPromptText = String(block.config.contentSnapshot ?? selectedPrompt?.content ?? "");
+    const currentExpectedOutput = String(block.config.expectedOutput ?? "");
+    if (draftPromptText !== currentPromptText || draftExpectedOutput !== currentExpectedOutput) {
+      onUpdate({ config: { contentSnapshot: draftPromptText, expectedOutput: draftExpectedOutput, promptId: block.config.promptId ?? null, toolId } });
+    }
   }
 
   async function saveToLibrary() {
     const created = await onCreatePromptFromBlock({
       title: block.title || "Prompt da etapa",
-      content: promptText,
+      content: draftPromptText,
       ai_tool_id: toolId || null,
       short_description: `Criado no bloco ${block.title || "Prompt"}`,
     });
 
     if (!created) return;
+    setDraftPromptText(created.content ?? "");
     onUpdate({
       title: created.title,
       config: {
         promptId: created.id,
         contentSnapshot: created.content,
         toolId: created.ai_tool_id ?? "",
+        expectedOutput: draftExpectedOutput,
       },
     });
   }
@@ -3393,16 +3433,17 @@ function PromptBlockSettings({
         options={tables.prompts.filter((prompt) => prompt.status !== "arquivado").map((prompt) => ({ value: prompt.id, label: prompt.title }))}
         emptyLabel="Prompt avulso / nao vinculado"
       />
-      <SelectField label="Ferramenta" value={toolId} onChange={(nextToolId) => onUpdate({ config: { toolId: nextToolId } })} options={tables.ai_tools.map((tool) => ({ value: tool.id, label: tool.name }))} emptyLabel="Nao vinculado" />
+      <SelectField label="Ferramenta" value={toolId} onChange={(nextToolId) => onUpdate({ config: { toolId: nextToolId, contentSnapshot: draftPromptText, expectedOutput: draftExpectedOutput, promptId: block.config.promptId ?? null } })} options={tables.ai_tools.map((tool) => ({ value: tool.id, label: tool.name }))} emptyLabel="Nao vinculado" />
       <label className="field prompt-content-config">
         <span>Texto do prompt</span>
-        <textarea value={promptText} rows={6} placeholder="Cole o prompt ou selecione um da biblioteca" onChange={(event) => onUpdate({ config: { contentSnapshot: event.target.value, promptId: block.config.promptId ?? null } })} />
+        <textarea value={draftPromptText} rows={6} placeholder="Cole o prompt ou selecione um da biblioteca" onChange={(event) => setDraftPromptText(event.target.value)} onBlur={savePromptDraft} />
       </label>
       <label className="field prompt-content-config">
         <span>Resultado esperado</span>
-        <input value={String(block.config.expectedOutput ?? "")} placeholder="Ex.: apresentacao por topicos gerada no NotebookLM" onChange={(event) => onUpdate({ config: { expectedOutput: event.target.value } })} />
+        <input value={draftExpectedOutput} placeholder="Ex.: apresentacao por topicos gerada no NotebookLM" onChange={(event) => setDraftExpectedOutput(event.target.value)} onBlur={savePromptDraft} />
       </label>
       <div className="inline-actions prompt-settings-actions">
+        <button className="secondary-button" type="button" onClick={savePromptDraft}><Save size={15} /> Salvar alteracoes</button>
         <button className="secondary-button" type="button" disabled={!canSaveToLibrary} onClick={() => void saveToLibrary()}><Save size={15} /> Salvar na biblioteca e vincular</button>
       </div>
     </div>
@@ -3417,6 +3458,7 @@ function PromptExecutionBlock({ block, value, tables, onSaveValue, onUpdate }: {
   const expectedOutput = String(block.config.expectedOutput ?? "").trim();
   const copyCount = Number(runtimeValue.copyCount ?? 0);
   const isApplied = Boolean(runtimeValue.applied);
+  const [copyFeedback, setCopyFeedback] = useState(false);
 
   function persist(next: PromptBlockRuntimeValue) {
     onSaveValue({ ...runtimeValue, ...next });
@@ -3425,6 +3467,8 @@ function PromptExecutionBlock({ block, value, tables, onSaveValue, onUpdate }: {
   function copyPrompt() {
     if (!promptText) return;
     void copyToClipboard(promptText);
+    setCopyFeedback(true);
+    window.setTimeout(() => setCopyFeedback(false), 1400);
     persist({ copyCount: copyCount + 1, lastCopiedAt: new Date().toISOString() });
   }
 
@@ -3456,7 +3500,7 @@ function PromptExecutionBlock({ block, value, tables, onSaveValue, onUpdate }: {
         </div>
       </div>
       <div className="prompt-execution-actions">
-        <button className="primary-button" type="button" onClick={copyPrompt}><Copy size={15} /> Copiar prompt</button>
+        <button className={`primary-button copy-feedback-button ${copyFeedback ? "copied" : ""}`} type="button" onClick={copyPrompt}><Copy size={15} /> {copyFeedback ? "Copiado!" : "Copiar prompt"}</button>
         <button className={`secondary-button ${isApplied ? "is-applied" : ""}`} type="button" onClick={toggleApplied}><CheckCircle2 size={15} /> {isApplied ? "Aplicado" : "Confirmar aplicado"}</button>
         <button className="icon-button subtle" type="button" title="Atualizar titulo pelo prompt vinculado" disabled={!linkedPrompt} onClick={() => linkedPrompt && onUpdate({ title: linkedPrompt.title })}><RefreshCw size={14} /></button>
       </div>
@@ -4997,16 +5041,27 @@ function ConfigForm({
 
   if (moduleKey === "prompts") {
     return (
-      <div className="form-grid">
-        <Field label="Titulo" value={value.title} onChange={(next) => onChange("title", next)} />
-        <Field label="Descricao curta" value={value.short_description} onChange={(next) => onChange("short_description", next)} />
-        <TextArea label="Conteudo do prompt" value={value.content} onChange={(next) => onChange("content", next)} rows={7} />
-        <Field label="Variaveis" value={value.variables} onChange={(next) => onChange("variables", next)} />
-        <Field label="Versao" value={value.version} onChange={(next) => onChange("version", next)} />
-        <SelectField label="Categoria" value={value.category_id} onChange={(next) => onChange("category_id", next)} options={tables.prompt_categories.map(toOption)} />
-        <SelectField label="Ferramenta" value={value.ai_tool_id} onChange={(next) => onChange("ai_tool_id", next)} options={tables.ai_tools.map(toOption)} />
-        <SelectField label="Tipo de projeto" value={value.project_type_id} onChange={(next) => onChange("project_type_id", next)} options={tables.project_types.map(toOption)} />
-        <ConfigStatusField value={value.status} onChange={(next) => onChange("status", next)} includeDraft />
+      <div className="form-grid prompt-config-form">
+        <div className="prompt-config-section main">
+          <span className="section-kicker">Identificacao</span>
+          <Field label="Titulo do prompt" value={value.title} onChange={(next) => onChange("title", next)} />
+          <Field label="Descricao curta" value={value.short_description} onChange={(next) => onChange("short_description", next)} />
+        </div>
+
+        <div className="prompt-config-section prompt-editor-section">
+          <span className="section-kicker">Conteudo reutilizavel</span>
+          <TextArea label="Conteudo do prompt" value={value.content} onChange={(next) => onChange("content", next)} rows={10} />
+          <PromptVariablesEditor value={String(value.variables ?? "")} onChange={(next) => onChange("variables", next)} />
+        </div>
+
+        <div className="prompt-config-section side">
+          <span className="section-kicker">Organizacao</span>
+          <SelectField label="Categoria" value={value.category_id} onChange={(next) => onChange("category_id", next)} options={tables.prompt_categories.map(toOption)} />
+          <SelectField label="Ferramenta" value={value.ai_tool_id} onChange={(next) => onChange("ai_tool_id", next)} options={tables.ai_tools.map(toOption)} />
+          <SelectField label="Tipo de projeto" value={value.project_type_id} onChange={(next) => onChange("project_type_id", next)} options={tables.project_types.map(toOption)} />
+          <Field label="Versao" value={value.version} onChange={(next) => onChange("version", next)} />
+          <ConfigStatusField value={value.status} onChange={(next) => onChange("status", next)} includeDraft />
+        </div>
       </div>
     );
   }
@@ -5076,6 +5131,36 @@ function ConfigForm({
   );
 }
 
+function PromptVariablesEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const suggestions = ["{{empresa}}", "{{projeto}}", "{{tipo_projeto}}", "{{etapa_atual}}", "{{responsavel}}", "{{data}}", "{{sumario}}", "{{contexto}}"];
+  const variables = value.split(",").map((item) => item.trim()).filter(Boolean);
+
+  function addVariable(variableName: string) {
+    const next = [...new Set([...variables, variableName])];
+    onChange(next.join(", "));
+  }
+
+  function removeVariable(variableName: string) {
+    onChange(variables.filter((item) => item !== variableName).join(", "));
+  }
+
+  return (
+    <div className="prompt-variable-editor">
+      <label className="field">
+        <span>Variaveis usadas no prompt</span>
+        <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="{{empresa}}, {{projeto}}, {{contexto}}" />
+      </label>
+      <div className="variable-chip-row">
+        {suggestions.map((item) => <button className="variable-chip" type="button" key={item} onClick={() => addVariable(item)}>{item}</button>)}
+      </div>
+      {variables.length > 0 && (
+        <div className="variable-selected-row" aria-label="Variaveis cadastradas">
+          {variables.map((item) => <button type="button" key={item} onClick={() => removeVariable(item)}>{item} x</button>)}
+        </div>
+      )}
+    </div>
+  );
+}
 function EmptyProjectJourney({ onBack }: { onBack: () => void }) {
   return (
     <div className="empty-state tall">
