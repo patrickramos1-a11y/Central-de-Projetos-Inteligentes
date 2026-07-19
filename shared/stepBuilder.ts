@@ -5,6 +5,8 @@ export const STEP_BLOCK_TYPES = [
   "phase",
   "short_text",
   "long_text",
+  "short_answer",
+  "long_answer",
   "checklist",
   "file_upload",
   "prompt",
@@ -199,6 +201,33 @@ export type StepValueRecord = {
   updatedAt?: string | null;
 };
 
+/** Values created while a journey is being executed. They never belong to a template by default. */
+export type ContextRuntimeValue = {
+  id: string;
+  title: string;
+  content: string;
+  color: "mint" | "teal" | "amber" | "blue" | "rose" | "slate";
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type ChecklistRuntimeValue = {
+  checked: Record<string, boolean>;
+  updatedAt?: string;
+};
+
+export type PromptRuntimeValue = {
+  applied: boolean;
+  copyCount: number;
+  lastCopiedAt?: string;
+  appliedAt?: string | null;
+};
+
+export type SummarySelectionState = {
+  mode: "none" | "compose_prompt";
+  itemIds: string[];
+};
+
 export type StepFileRecord = {
   id: string;
   blockKey: string;
@@ -265,6 +294,14 @@ export function createBlock(type: StepBlockType, order: number): StepBlock {
 
   if (type === "long_text") {
     return { ...base, config: { mode: "info", content: "", rows: 5, maxLength: null } };
+  }
+
+  if (type === "short_answer") {
+    return { ...base, config: { mode: "input", placeholder: "Digite a resposta", maxLength: 180 } };
+  }
+
+  if (type === "long_answer") {
+    return { ...base, config: { mode: "input", placeholder: "Digite a resposta", rows: 5, maxLength: null } };
   }
 
   if (type === "short_text") {
@@ -354,6 +391,8 @@ export function blockTypeLabel(type: StepBlockType) {
     phase: "Fase",
     short_text: "Texto curto",
     long_text: "Texto longo",
+    short_answer: "Resposta curta",
+    long_answer: "Resposta longa",
     checklist: "Checklist",
     file_upload: "Arquivos",
     prompt: "Prompt de IA",
@@ -530,7 +569,8 @@ export function calculateCompletion(
     if (block.type === "checklist") {
       const items = block.config.items ?? [];
       const state = asObject(values[block.id]);
-      const itemState = asObject(state.items);
+      // `checked` is canonical; `items` keeps pre-migration records readable.
+      const itemState = asObject(state.checked ?? state.items);
 
       for (const item of items.filter((entry) => entry.required || entry.impactsProgress !== false)) {
         total += 1;
@@ -625,11 +665,9 @@ function evaluateClause(clause: ConditionClause, actual: unknown) {
 }
 
 function isProgressBlock(block: StepBlock) {
-  if (!block.required && ["section", "condition", "action_button", "calculated", "progress"].includes(block.type)) {
-    return false;
-  }
-
-  return !["section", "condition", "action_button", "calculated", "progress"].includes(block.type);
+  // Informative text never asks the executor for a value, even when a legacy
+  // document accidentally left it marked as required.
+  return !["section", "short_text", "long_text", "condition", "action_button", "calculated", "progress"].includes(block.type);
 }
 
 function isBlockComplete(block: StepBlock, value: unknown, files: StepFileRecord[]) {
@@ -638,7 +676,8 @@ function isBlockComplete(block: StepBlock, value: unknown, files: StepFileRecord
   }
 
   if (block.type === "prompt") {
-    return Boolean(asObject(value).completed);
+    const runtime = asObject(value);
+    return Boolean(runtime.applied ?? runtime.completed);
   }
 
   if (block.type === "approval") {

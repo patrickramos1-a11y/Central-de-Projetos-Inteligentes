@@ -2,7 +2,9 @@ type Env = { DB: D1Database };
 
 type StructureRow = {
   id: string;
-  project_step_id: string | null;
+  owner_type: "project" | "client" | "template";
+  owner_id: string;
+  step_id: string;
   version_number: number;
   revision: number;
   state: "draft" | "published" | "archived";
@@ -47,13 +49,19 @@ const jsonHeaders = {
 };
 
 export async function handleProjectStepRequest(request: Request, env: Env, stepId: string, parts: string[]) {
+  if (request.method === "POST" && parts[0] === "initialize") {
+    const body = await request.json().catch(() => ({})) as { templateStepId?: string };
+    const structure = await ensureDraftStructure(env.DB, stepId, body.templateStepId ?? null);
+    return json({ data: await buildPayload(env.DB, stepId, structure) }, 201);
+  }
+
   if (request.method === "GET" && parts[0] === "structure") {
-    const structure = await ensureDraftStructure(env.DB, stepId);
+    const structure = await getCurrentStructure(env.DB, stepId);
     return json({ data: await buildPayload(env.DB, stepId, structure) });
   }
 
   if (request.method === "GET" && parts[0] === "completion") {
-    const structure = await ensureDraftStructure(env.DB, stepId);
+    const structure = await getCurrentStructure(env.DB, stepId);
     const payload = await buildPayload(env.DB, stepId, structure);
     return json({ data: payload.completion });
   }
@@ -102,7 +110,7 @@ export async function handleProjectStepRequest(request: Request, env: Env, stepI
     const structure = await ensureDraftStructure(env.DB, stepId);
     const document = parseDocument(structure);
     document.blocks = normalizeBlocks(document.blocks.filter((block) => block.id !== blockId && block.config.parentBlockId !== blockId));
-    await env.DB.prepare("delete from project_step_block_values where project_step_id = ? and block_id = ?").bind(stepId, blockId).run();
+    await env.DB.prepare("delete from journey_step_values where owner_type = 'project' and owner_step_id = ? and block_id = ?").bind(stepId, blockId).run();
     await saveDocument(env.DB, structure, document, "block_deleted", blockId, {});
     return json({ data: await buildPayload(env.DB, stepId, await getStructureById(env.DB, structure.id)) });
   }
@@ -125,19 +133,19 @@ export async function handleProjectStepRequest(request: Request, env: Env, stepI
   if (request.method === "POST" && parts[0] === "publish-structure") {
     const structure = await ensureDraftStructure(env.DB, stepId);
     const now = new Date().toISOString();
-    await env.DB.prepare("update project_step_structures set state = 'archived', archived_at = ?, updated_at = ? where project_step_id = ? and state = 'published'").bind(now, now, stepId).run();
-    await env.DB.prepare("update project_step_structures set state = 'published', published_at = ?, updated_at = ? where id = ?").bind(now, now, structure.id).run();
+    await env.DB.prepare("update journey_step_documents set state = 'archived', archived_at = ?, updated_at = ? where owner_type = 'project' and step_id = ? and state = 'published'").bind(now, now, stepId).run();
+    await env.DB.prepare("update journey_step_documents set state = 'published', published_at = ?, updated_at = ? where id = ?").bind(now, now, structure.id).run();
     await logEvent(env.DB, stepId, structure.id, null, "structure_published", {}, null);
     return json({ data: await buildPayload(env.DB, stepId, await getStructureById(env.DB, structure.id)) });
   }
 
   return jsonError("Metodo nao permitido.", 405);
 }
-async function ensureDraftStructure(db: D1Database, stepId: string): Promise<StructureRow> {
-  const draft = await db.prepare("select * from project_step_structures where project_step_id = ? and state = 'draft' order by version_number desc limit 1").bind(stepId).first<StructureRow>();
+async function ensureDraftStructure(db: D1Database, stepId: string, templateStepId: string | null = null): Promise<StructureRow> {
+  const draft = await db.prepare("select * from journey_step_documents where owner_type = 'project' and step_id = ? and state = 'draft' order by version_number desc limit 1").bind(stepId).first<StructureRow>();
   if (draft) return draft;
 
-  const published = await db.prepare("select * from project_step_structures where project_step_id = ? and state = 'published' order by version_number desc limit 1").bind(stepId).first<StructureRow>();
+  const published = await db.prepare("select * from journey_step_documents where owner_type = 'project' and step_id = ? and state = 'published' order by version_number desc limit 1").bind(stepId).first<StructureRow>();
   if (published) {
     const document = parseDocument(published);
     const id = crypto.randomUUID();
@@ -151,15 +159,28 @@ async function ensureDraftStructure(db: D1Database, stepId: string): Promise<Str
   if (!step) throw new Error("Etapa nao encontrada.");
 
   const id = crypto.randomUUID();
-  const document = await buildLegacyDocument(db, step, id);
+  const template = templateStepId
+    ? await db.prepare("select * from journey_step_documents where owner_type = 'template' and step_id = ? and state in ('draft', 'published') order by case state when 'published' then 0 else 1 end, version_number desc limit 1").bind(templateStepId).first<StructureRow>()
+    : null;
+  const templateDocument = template ? parseDocument(template) : null;
+  const document = templateDocument
+    ? { ...templateDocument, ownerType: "project" as const, projectId: String(step.project_id ?? ""), stepId, structureId: id, title: String(step.name ?? templateDocument.title), state: "draft" as const, versionNumber: 1, revision: 1 }
+    : await buildLegacyDocument(db, step, id);
   await insertStructure(db, id, stepId, document.title, document, 1, 1, "draft");
-  await logEvent(db, stepId, id, null, "structure_created_from_legacy", { blockCount: document.blocks.length }, null);
+  await logEvent(db, stepId, id, null, templateDocument ? "structure_created_from_template" : "structure_created_from_legacy", { blockCount: document.blocks.length, templateStepId }, null);
   return getStructureById(db, id);
 }
 
+async function getCurrentStructure(db: D1Database, stepId: string): Promise<StructureRow> {
+  const row = await db.prepare("select * from journey_step_documents where owner_type = 'project' and step_id = ? and state in ('draft', 'published') order by case state when 'draft' then 0 else 1 end, version_number desc limit 1")
+    .bind(stepId).first<StructureRow>();
+  if (!row) throw new Error("Estrutura da etapa ainda nao foi inicializada. Reabra a jornada ou inicialize a etapa no modo de edicao.");
+  return row;
+}
+
 async function insertStructure(db: D1Database, id: string, stepId: string, title: string, document: StepDocument, version: number, revision: number, state: string) {
-  await db.prepare("insert into project_step_structures (id, owner_type, project_step_id, schema_version, version_number, revision, state, title, document_json, created_at, updated_at) values (?, 'project', ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(id, stepId, STEP_SCHEMA_VERSION, version, revision, state, title, JSON.stringify(document), new Date().toISOString(), new Date().toISOString())
+  await db.prepare("insert into journey_step_documents (id, owner_type, owner_id, step_id, schema_version, version_number, revision, state, title, document_json, created_at, updated_at) values (?, 'project', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(id, document.projectId ?? "", stepId, STEP_SCHEMA_VERSION, version, revision, state, title, JSON.stringify(document), new Date().toISOString(), new Date().toISOString())
     .run();
 }
 
@@ -282,6 +303,8 @@ function createBlock(type: string, order: number, title?: string, parentBlockId?
   const config: Record<string, unknown> = { parentBlockId: parentBlockId ?? null };
   if (type === "long_text") Object.assign(config, { mode: "info", content: "", rows: 4 });
   if (type === "short_text") Object.assign(config, { mode: "info", content: "", placeholder: "" });
+  if (type === "short_answer") Object.assign(config, { mode: "input", placeholder: "Digite a resposta", maxLength: 180 });
+  if (type === "long_answer") Object.assign(config, { mode: "input", placeholder: "Digite a resposta", rows: 5 });
   if (type === "checklist") Object.assign(config, { items: [], completionMode: "all_required" });
   if (type === "prompt") Object.assign(config, { contentSnapshot: "", expectedOutput: "", executionMode: "manual" });
   if (type === "context") Object.assign(config, { content: "", compact: true });
@@ -311,6 +334,8 @@ function blockTypeLabel(type: string) {
     section: "Secao",
     short_text: "Texto curto",
     long_text: "Texto longo",
+    short_answer: "Resposta curta",
+    long_answer: "Resposta longa",
     checklist: "Checklist",
     prompt: "Prompt",
     context: "Contexto",
@@ -344,43 +369,43 @@ function normalizeBlocks(blocks: StepBlock[]) {
 async function saveDocument(db: D1Database, structure: StructureRow, document: StepDocument, eventType: string, blockId: string | null, payload: Record<string, unknown>) {
   const nextRevision = Number(structure.revision || 1) + 1;
   const nextDocument = { ...document, revision: nextRevision, blocks: normalizeBlocks(document.blocks) };
-  await db.prepare("update project_step_structures set document_json = ?, revision = ?, title = ?, updated_at = ? where id = ?").bind(JSON.stringify(nextDocument), nextRevision, nextDocument.title, new Date().toISOString(), structure.id).run();
-  await logEvent(db, String(structure.project_step_id), structure.id, blockId, eventType, payload, null);
+  await db.prepare("update journey_step_documents set document_json = ?, revision = ?, title = ?, updated_at = ? where id = ?").bind(JSON.stringify(nextDocument), nextRevision, nextDocument.title, new Date().toISOString(), structure.id).run();
+  await logEvent(db, String(structure.step_id), structure.id, blockId, eventType, payload, null);
 }
 
 async function getStructureById(db: D1Database, id: string) {
-  const row = await db.prepare("select * from project_step_structures where id = ?").bind(id).first<StructureRow>();
+  const row = await db.prepare("select * from journey_step_documents where id = ?").bind(id).first<StructureRow>();
   if (!row) throw new Error("Estrutura nao encontrada.");
   return row;
 }
 
 async function buildPayload(db: D1Database, stepId: string, structure: StructureRow) {
   const document = parseDocument(structure);
-  const values = await db.prepare("select * from project_step_block_values where project_step_id = ?").bind(stepId).all<Record<string, unknown>>();
-  const files = await db.prepare("select * from project_step_block_files where project_step_id = ?").bind(stepId).all<Record<string, unknown>>();
+  const values = await db.prepare("select * from journey_step_values where owner_type = 'project' and owner_step_id = ?").bind(stepId).all<Record<string, unknown>>();
+  const files = await db.prepare("select *, r2_key as url from journey_step_files where owner_type = 'project' and owner_step_id = ?").bind(stepId).all<Record<string, unknown>>();
   const parsedValues = (values.results ?? []).map((row) => ({ ...row, value: safeJson(String(row.value_json ?? "null")) }));
   const completion = calculateCompletion(document, parsedValues, files.results ?? []);
   return { structure, document, values: parsedValues, files: files.results ?? [], completion };
 }
 
 async function upsertBlockValue(db: D1Database, stepId: string, structureId: string, blockId: string, value: unknown, completionState: string, updatedBy: string | null) {
-  const existing = await db.prepare("select id from project_step_block_values where project_step_id = ? and block_id = ?").bind(stepId, blockId).first<{ id: string }>();
+  const existing = await db.prepare("select id from journey_step_values where owner_type = 'project' and owner_step_id = ? and block_id = ?").bind(stepId, blockId).first<{ id: string }>();
   const now = new Date().toISOString();
   const valueJson = JSON.stringify(value ?? null);
   if (existing) {
-    await db.prepare("update project_step_block_values set structure_id = ?, value_json = ?, completion_state = ?, updated_by = ?, updated_at = ? where id = ?").bind(structureId, valueJson, completionState, updatedBy, now, existing.id).run();
+    await db.prepare("update journey_step_values set document_id = ?, value_json = ?, completion_state = ?, updated_by = ?, updated_at = ? where id = ?").bind(structureId, valueJson, completionState, updatedBy, now, existing.id).run();
     return;
   }
-  await db.prepare("insert into project_step_block_values (id, project_step_id, structure_id, block_id, value_json, completion_state, updated_by, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), stepId, structureId, blockId, valueJson, completionState, updatedBy, now, now).run();
+  await db.prepare("insert into journey_step_values (id, owner_type, owner_step_id, document_id, block_id, value_json, completion_state, updated_by, created_at, updated_at) values (?, 'project', ?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), stepId, structureId, blockId, valueJson, completionState, updatedBy, now, now).run();
 }
 
 async function logEvent(db: D1Database, stepId: string, structureId: string, blockId: string | null, eventType: string, payload: Record<string, unknown>, createdBy: string | null) {
-  await db.prepare("insert into project_step_block_events (id, project_step_id, structure_id, block_id, event_type, event_payload_json, created_by, created_at) values (?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), stepId, structureId, blockId, eventType, JSON.stringify(payload), createdBy, new Date().toISOString()).run();
+  await db.prepare("insert into journey_step_events (id, owner_type, owner_step_id, document_id, block_id, event_type, event_payload_json, created_by, created_at) values (?, 'project', ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), stepId, structureId, blockId, eventType, JSON.stringify(payload), createdBy, new Date().toISOString()).run();
 }
 
 function calculateCompletion(document: StepDocument, valueRows: Array<Record<string, unknown>>, fileRows: Array<Record<string, unknown>>) {
   const valueMap = new Map(valueRows.map((row) => [String(row.block_id), row.value]));
-  const progressBlocks = document.blocks.filter((block) => block.visible && !["section", "phase", "comment"].includes(block.type));
+  const progressBlocks = document.blocks.filter((block) => block.visible && !["section", "short_text", "long_text", "phase", "comment"].includes(block.type));
   const requiredBlocks = progressBlocks.filter((block) => block.required);
   const measuredBlocks = requiredBlocks.length ? requiredBlocks : progressBlocks;
   const completed = measuredBlocks.filter((block) => isBlockComplete(block, valueMap.get(block.id), fileRows));
@@ -397,7 +422,10 @@ function isBlockComplete(block: StepBlock, value: unknown, fileRows: Array<Recor
   if (block.type === "project_summary") return Boolean(block.config.summaryId);
   if (block.type === "materials") return Array.isArray(block.config.links) && block.config.links.length > 0;
   if (block.type === "context") return Array.isArray(block.config.contexts) ? block.config.contexts.length > 0 : !isEmpty(block.config.content);
-  if (block.type === "prompt") return !isEmpty(block.config.contentSnapshot) || !isEmpty(value);
+  if (block.type === "prompt") {
+    const runtime = typeof value === "object" && value ? value as { applied?: boolean; completed?: boolean } : {};
+    return Boolean(runtime.applied ?? runtime.completed);
+  }
   if (block.type === "checklist") {
     const items = Array.isArray(block.config.items) ? (block.config.items as Array<Record<string, unknown>>) : [];
     if (!items.length) return false;

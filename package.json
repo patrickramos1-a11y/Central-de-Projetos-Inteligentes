@@ -6,13 +6,15 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
+    "build:worker": "esbuild worker/index.ts --bundle --format=esm --platform=browser --target=es2022 --sourcemap --outfile=worker-dist-new/index.js",
     "preview": "vite preview --host 127.0.0.1",
     "cf:dev": "wrangler dev --local --port 8787",
     "cf:deploy": "wrangler deploy",
     "cf:deploy:api": "wrangler deploy",
     "cf:d1:migrate:local": "wrangler d1 migrations apply central-projetos-ia --local",
     "cf:d1:migrate:remote": "wrangler d1 migrations apply central-projetos-ia --remote",
-    "cf:d1:backup": "bun scripts/backup-d1.mjs",
+    "cf:d1:backup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/backup-d1.ps1",
+    "cf:deploy:assets": "bun run build && bun run build:worker && bun tmp/deploy-cloudflare-assets-mime.mjs",
     "cf:pages:deploy": "bun run build && wrangler pages deploy dist --project-name central-de-projetos-inteligentes",
     "cf:export:supabase": "bun scripts/export-supabase-to-d1.mjs",
     "test": "bun test src"

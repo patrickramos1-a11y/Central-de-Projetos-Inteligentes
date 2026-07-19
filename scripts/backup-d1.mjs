@@ -1,26 +1,29 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const database = process.env.D1_DATABASE_NAME || "central-projetos-ia";
 const outputDirectory = path.resolve("cloudflare/backups");
-const command = process.execPath;
-const execFileAsync = promisify(execFile);
+// Calling `bun x wrangler` through execFile drops stdout on Windows. Use the
+// local Wrangler binary directly so a backup can be verified before a migration.
+const command = path.resolve(
+  process.platform === "win32" ? "node_modules/.bin/wrangler.exe" : "node_modules/.bin/wrangler",
+);
 
 async function execute(commandText) {
   let lastError = "";
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      const { stdout, stderr } = await execFileAsync(command, ["x", "wrangler", "d1", "execute", database, "--remote", "--command", commandText, "--json"], {
-        encoding: "utf8",
-        maxBuffer: 32 * 1024 * 1024,
-      });
-      const output = stdout.trim();
-      if (output) return JSON.parse(output)[0]?.results ?? [];
-      if (!stderr.trim()) return [];
-      lastError = stderr.trim();
+      const result = Bun.spawnSync(
+        [command, "d1", "execute", database, "--remote", "--command", commandText, "--json"],
+        { stdout: "pipe", stderr: "pipe" },
+      );
+      const output = result.stdout.toString().trim();
+      const errors = result.stderr.toString().trim();
+      if (result.exitCode === 0 && output) return JSON.parse(output)[0]?.results ?? [];
+      // Wrangler occasionally omits JSON for a successful empty result set.
+      if (result.exitCode === 0 && !output && !errors) return [];
+      lastError = errors || `Wrangler finalizou com codigo ${result.exitCode}.`;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
@@ -45,6 +48,14 @@ const snapshot = {
   database,
   tables: Object.fromEntries(rows),
 };
+
+const requiredTables = ["app_users", "projects", "project_steps", "project_step_structures"];
+const missingRequiredTables = requiredTables.filter((table) => !(table in snapshot.tables));
+if (tables.length < requiredTables.length || missingRequiredTables.length > 0) {
+  throw new Error(
+    `Snapshot invalido: ${tables.length} tabelas encontradas. Faltando: ${missingRequiredTables.join(", ") || "nenhuma"}.`,
+  );
+}
 
 mkdirSync(outputDirectory, { recursive: true });
 const filename = `d1-snapshot-${snapshot.generatedAt.replace(/[:.]/g, "-")}.json`;

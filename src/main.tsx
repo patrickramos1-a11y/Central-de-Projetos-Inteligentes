@@ -27,7 +27,9 @@ import {
   Users,
 } from "lucide-react";
 import { createCloudflareApi } from "./lib/cloudflareApi";
+import { createJourneyApi, type JourneyFile } from "./api/journey";
 import { parseProjectSummary } from "./lib/summaryParser";
+import { copyText as copyToClipboard } from "./components/ui/clipboard";
 import "./styles.css";
 
 type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
@@ -374,6 +376,7 @@ const configuredApiUrl = (import.meta.env.VITE_API_BASE_URL as string | undefine
 const cloudflareApiUrl = import.meta.env.PROD ? "" : configuredApiUrl;
 const hasCloudflareApi = true;
 const supabase = createCloudflareApi(cloudflareApiUrl);
+const journeyApi = createJourneyApi(cloudflareApiUrl);
 
 type UploadedFile = {
   key: string;
@@ -509,6 +512,15 @@ function App() {
 
   useEffect(() => {
     void loadAll();
+  }, []);
+
+  useEffect(() => {
+    const showToast = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      setNotice(detail?.message || "Acao concluida.");
+    };
+    window.addEventListener("ramos:toast", showToast);
+    return () => window.removeEventListener("ramos:toast", showToast);
   }, []);
 
   useEffect(() => {
@@ -716,6 +728,8 @@ function App() {
         continue;
       }
 
+      await initializeProjectStep(String(step.id), templateStep.id);
+
       const checklistRows = splitChecklist(templateStep.checklist).map((label, index) => ({
         project_step_id: step.id,
         label,
@@ -780,12 +794,25 @@ function App() {
       .select("*")
       .single();
 
-    if (error) {
-      setNotice(`Erro ao criar etapa: ${error.message}`);
+    if (error || !data) {
+      setNotice(`Erro ao criar etapa: ${error?.message ?? "resposta vazia"}`);
       return null;
     }
 
+    await initializeProjectStep(String(data.id));
     return data as ProjectStep;
+  }
+
+  async function initializeProjectStep(stepId: string, templateStepId?: string) {
+    try {
+      await fetch(`${cloudflareApiUrl}/api/project-steps/${encodeURIComponent(stepId)}/initialize`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(templateStepId ? { templateStepId } : {}),
+      });
+    } catch {
+      // The canonical migration is additive. A later sync can retry initialization.
+    }
   }
 
   async function updateStep(stepId: string, payload: Partial<ProjectStep>) {
@@ -1379,6 +1406,25 @@ function App() {
       return null;
     }
 
+    // The Worker consolidation is atomic: version activation and dense
+    // renumbering either both succeed or the previous version stays intact.
+    try {
+      const response = await fetch(`${cloudflareApiUrl}/api/summaries/${encodeURIComponent(summaryId)}/consolidate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ createdBy: currentUser?.name ?? null }),
+      });
+      const body = await response.json() as { data?: ProjectSummary; error?: string };
+      if (response.ok && body.data) {
+        await loadAll();
+        setNotice(`Sumario consolidado como versao ${body.data.version_number}, com numeracao atualizada.`);
+        return body.data;
+      }
+      if (body.error) setNotice(`Erro ao consolidar sumario: ${body.error}`);
+    } catch {
+      // Older deployments keep the legacy fallback below until the Worker is updated.
+    }
+
     const sourceSummary = tables.project_summaries.find((item) => item.id === summaryId);
     const sourceItems = tables.project_summary_items.filter((item) => item.summary_id === summaryId).sort(byOrder);
     const selectedItems = sourceItems.filter((item) => item.is_selected);
@@ -1514,6 +1560,22 @@ function App() {
   async function saveProjectAsTemplate(project: Project) {
     if (!supabase) {
       return;
+    }
+
+    try {
+      const response = await fetch(`${cloudflareApiUrl}/api/projects/${encodeURIComponent(project.id)}/templates`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ createdBy: currentUser?.name ?? null }),
+      });
+      const body = await response.json() as { data?: { name: string }; error?: string };
+      if (response.ok && body.data) {
+        await loadAll();
+        setNotice(`Template "${body.data.name}" salvo com a estrutura de blocos.`);
+        return;
+      }
+    } catch {
+      // Keep the legacy export only as a compatibility fallback during rollout.
     }
 
     const templateName = `${project.name} - template`;
@@ -1678,6 +1740,16 @@ function App() {
         continue;
       }
 
+      try {
+        await fetch(`${cloudflareApiUrl}/api/journey-steps/client/${encodeURIComponent(String(step.id))}/initialize`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ templateStepId: templateStep.id }),
+        });
+      } catch {
+        // Opening the client journey retries this explicit initialization.
+      }
+
       const checklistRows = splitChecklist(templateStep.checklist).map((label, index) => ({
         client_step_id: step.id,
         label,
@@ -1717,11 +1789,16 @@ function App() {
       .select("*")
       .single();
 
-    if (error) {
-      setNotice(`Erro ao criar etapa do cliente: ${error.message}`);
+    if (error || !data) {
+      setNotice(`Erro ao criar etapa do cliente: ${error?.message ?? "resposta vazia"}`);
       return null;
     }
 
+    try {
+      await fetch(`${cloudflareApiUrl}/api/journey-steps/client/${encodeURIComponent(String(data.id))}/initialize`, { method: "POST" });
+    } catch {
+      // A retry on opening the journey initializes the canonical document.
+    }
     return data as ClientStep;
   }
 
@@ -1874,6 +1951,22 @@ function App() {
       return;
     }
 
+    try {
+      const response = await fetch(`${cloudflareApiUrl}/api/clients/${encodeURIComponent(client.id)}/templates`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ createdBy: currentUser?.name ?? null }),
+      });
+      const body = await response.json() as { data?: { name: string }; error?: string };
+      if (response.ok && body.data) {
+        await loadAll();
+        setNotice(`Template "${body.data.name}" salvo com a estrutura de blocos.`);
+        return;
+      }
+    } catch {
+      // Compatibility fallback below supports deployments still in transition.
+    }
+
     const templateName = `${client.name} - template cliente`;
     const { data: template, error } = await supabase
       .from<JourneyTemplate>("journey_templates")
@@ -1996,6 +2089,7 @@ function App() {
             Sincronizar
           </button>
         </div>
+        <div className="global-toast" aria-live="polite" role="status">{notice}</div>
 
         {view === "projects" && (
           <ProjectsView
@@ -2061,23 +2155,18 @@ function App() {
         )}
 
         {view === "clientJourney" && selectedClient && selectedClientStep && (
-          <ClientJourneyView
+          <ClientBlockJourneyView
             client={selectedClient}
             steps={clientSteps}
             selectedStep={selectedClientStep}
             tables={tables}
+            currentUser={currentUser}
             onSelectStep={setSelectedClientStepId}
             onBack={() => setView("clients")}
-            onUpdateClient={updateClient}
             onUpdateStep={updateClientStep}
-            onAddChecklist={addClientChecklistItem}
-            onToggleChecklist={toggleClientChecklistItem}
-            onDeleteChecklist={(id) => deleteRecord("client_step_checklist_items", id)}
-            onAddLink={addClientStepLink}
-            onUploadFile={uploadClientStepFile}
-            onDeleteLink={(id) => deleteRecord("client_step_links", id)}
             onAddNextStep={addNextClientStep}
             onSaveTemplate={saveClientAsTemplate}
+            onCreatePromptFromBlock={createPromptFromBlock}
           />
         )}
 
@@ -2657,6 +2746,119 @@ function ClientJourneyView({
   );
 }
 
+function ClientBlockJourneyView({
+  client,
+  steps,
+  selectedStep,
+  tables,
+  currentUser,
+  onSelectStep,
+  onBack,
+  onUpdateStep,
+  onAddNextStep,
+  onSaveTemplate,
+  onCreatePromptFromBlock,
+}: {
+  client: Client;
+  steps: ClientStep[];
+  selectedStep: ClientStep;
+  tables: Tables;
+  currentUser: AppUser | null;
+  onSelectStep: (id: string) => void;
+  onBack: () => void;
+  onUpdateStep: (id: string, patch: Partial<ClientStep>) => void;
+  onAddNextStep: (clientId: string, name: string) => void;
+  onSaveTemplate: (client: Client) => void;
+  onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
+}) {
+  const [payload, setPayload] = useState<StepBuilderPayload | null>(null);
+  const [mode, setMode] = useState<JourneyMode>("execute");
+  const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
+  const [isAdding, setIsAdding] = useState(false);
+  const [newStepName, setNewStepName] = useState("");
+  const [collapsedBlockIds, setCollapsedBlockIds] = useState<Set<string>>(() => new Set());
+  const done = steps.filter((step) => step.status === "concluido").length;
+  const progress = steps.length ? Math.round((done / steps.length) * 100) : 0;
+  const base = `${cloudflareApiUrl}/api/journey-steps/client/${encodeURIComponent(selectedStep.id)}`;
+
+  useEffect(() => { void loadStructure(); }, [selectedStep.id]);
+
+  async function request(path: string, init?: RequestInit) {
+    const response = await fetch(`${base}${path}`, { ...init, headers: { "content-type": "application/json", ...(init?.headers ?? {}) } });
+    const body = await response.json() as { data?: StepBuilderPayload; error?: string };
+    if (!response.ok || !body.data) throw new Error(body.error ?? "Nao foi possivel atualizar a etapa do cliente.");
+    return body.data;
+  }
+
+  async function loadStructure() {
+    try {
+      let response = await fetch(`${base}/structure`);
+      if (response.status === 404 || response.status === 500) response = await fetch(`${base}/initialize`, { method: "POST" });
+      const body = await response.json() as { data?: StepBuilderPayload; error?: string };
+      if (!response.ok || !body.data) throw new Error(body.error ?? "Nao foi possivel carregar a jornada.");
+      setPayload(body.data);
+    } catch (error) {
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Falha ao carregar a jornada do cliente." } }));
+    }
+  }
+
+  async function addBlock(type: string) {
+    const next = await request("/blocks", { method: "POST", body: JSON.stringify({ type, updatedBy: currentUser?.name ?? null }) });
+    setPayload(next);
+    setEditingBlockId(next.document.blocks[next.document.blocks.length - 1]?.id ?? null);
+    setIsAdding(false);
+  }
+
+  async function updateBlock(blockId: string, patch: Partial<StepBuilderBlock>) {
+    setPayload(await request(`/blocks/${encodeURIComponent(blockId)}`, { method: "PATCH", body: JSON.stringify({ ...patch, updatedBy: currentUser?.name ?? null }) }));
+  }
+
+  async function saveValue(blockId: string, value: unknown) {
+    const next = await request(`/block-values/${encodeURIComponent(blockId)}`, { method: "PATCH", body: JSON.stringify({ value, updatedBy: currentUser?.name ?? null }) });
+    setPayload(next);
+    if (next.completion.status !== selectedStep.status) onUpdateStep(selectedStep.id, { status: next.completion.status });
+  }
+
+  function move(blockId: string, direction: -1 | 1) {
+    if (!payload) return;
+    const blockIds = payload.document.blocks.map((block) => block.id);
+    const index = blockIds.indexOf(blockId);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= blockIds.length) return;
+    [blockIds[index], blockIds[nextIndex]] = [blockIds[nextIndex], blockIds[index]];
+    void request("/blocks/reorder", { method: "POST", body: JSON.stringify({ blockIds, updatedBy: currentUser?.name ?? null }) }).then(setPayload);
+  }
+
+  const projectLike: Project = { id: client.id, name: client.name, company: client.company, responsible: client.responsible, project_type_id: client.project_type_id, journey_template_id: client.journey_template_id, status: "em_andamento", notes: client.notes, created_at: client.created_at, updated_at: client.updated_at };
+  const stepLike: ProjectStep = { id: selectedStep.id, project_id: client.id, source_journey_step_id: selectedStep.source_journey_step_id, name: selectedStep.name, description: selectedStep.description, step_order: selectedStep.step_order, objective: selectedStep.objective, ai_tool_id: null, expected_output: selectedStep.required_evidence_label, execution_instructions: null, status: selectedStep.status, notes: selectedStep.notes };
+  const blocks = payload?.document.blocks ?? [];
+
+  return (
+    <>
+      <section className="journey-hero journey-context-bar">
+        <button className="ghost-button" onClick={onBack}><PanelLeft size={17} /> Clientes</button>
+        <div className="journey-context-copy"><span className="eyebrow">Ramos Jornadas</span><h1>{client.name}</h1><p>{client.company || "Jornada do cliente"}</p></div>
+        <div className="journey-progress"><strong>{progress}%</strong><div className="progress-bar"><span style={{ width: `${progress}%` }} /></div></div>
+      </section>
+      <section className="journey-layout block-journey-layout">
+        <aside className="step-rail collapsible-rail"><div className="rail-heading"><strong>Etapas</strong><span>{done} concluidas</span></div>{steps.map((step) => <button key={step.id} className={`step-item ${step.id === selectedStep.id ? "active" : ""}`} onClick={() => onSelectStep(step.id)}><span className={`step-dot ${step.status}`}>{step.status === "concluido" ? <Check size={13} /> : step.step_order}</span><span><strong>{step.name}</strong><small>{formatStepStatus(step.status)}</small></span></button>)}</aside>
+        <section className="work-surface block-work-surface">
+          <div className={`journey-command-bar mode-${mode}`}>
+            <div className="journey-step-identity"><span className="eyebrow">Etapa do cliente</span>{mode === "edit" ? <InlineText defaultValue={selectedStep.name} className="inline-title" onSave={(name) => onUpdateStep(selectedStep.id, { name })} /> : <strong className="journey-step-title">{selectedStep.name}</strong>}</div>
+            <div className="journey-mode-switch"><button className={mode === "execute" ? "active" : ""} onClick={() => setMode("execute")}><CheckCircle2 size={15} /> Executar</button><button className={mode === "edit" ? "active" : ""} onClick={() => setMode("edit")}><Pencil size={15} /> Editar estrutura</button></div>
+            <button className="secondary-button" disabled={!payload?.completion.canComplete} onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}><CheckCircle2 size={16} /> Concluir</button>
+            {mode === "edit" && <><form className="quick-step-form" onSubmit={(event) => { event.preventDefault(); onAddNextStep(client.id, newStepName || "Nova etapa"); setNewStepName(""); }}><input value={newStepName} onChange={(event) => setNewStepName(event.target.value)} placeholder="Nova etapa" /><button className="secondary-button"><Plus size={16} /> Adicionar etapa</button></form><div className="block-add-wrap"><button className="primary-button" onClick={() => setIsAdding((open) => !open)}><Plus size={17} /> Adicionar bloco</button>{isAdding && <BlockTypeMenu onSelect={addBlock} />}</div><button className="secondary-button" onClick={() => onSaveTemplate(client)}><Save size={16} /> Salvar template</button></>}
+          </div>
+          <div className="step-auto-status"><span className={`chip active ${payload?.completion.status ?? selectedStep.status}`}>{formatStepStatus(payload?.completion.status ?? selectedStep.status)}</span><span>{payload ? `${payload.completion.completedBlocks}/${payload.completion.totalBlocks} blocos completos` : "Carregando blocos"}</span><div className="progress-bar"><span style={{ width: `${payload?.completion.progress ?? 0}%` }} /></div></div>
+          {!payload && <div className="empty-state compact"><Loader2 className="spin" size={23} /> Carregando jornada...</div>}
+          {payload && !blocks.length && <div className="empty-block-canvas"><Sparkles size={30} /><strong>Etapa limpa</strong><span>{mode === "edit" ? "Adicione apenas os blocos necessarios." : "Esta etapa ainda nao possui conteudo para executar."}</span>{mode === "edit" && <button className="primary-button" onClick={() => setIsAdding(true)}><Plus size={16} /> Adicionar primeiro bloco</button>}</div>}
+          <div className="block-canvas">{blocks.map((block, index) => <StepBuilderBlockCard key={block.id} block={block} index={index} total={blocks.length} value={payload?.values.find((value) => value.block_id === block.id)?.value} tables={tables} summaries={[]} summaryItems={[]} generatedPrompts={[]} project={projectLike} selectedStep={stepLike} currentUser={currentUser} onUpdateSummaryItem={() => undefined} onSetSummaryItemSelection={() => undefined} onDeleteSummaryItem={() => undefined} onSaveGeneratedPrompt={() => undefined} onCreatePromptFromBlock={onCreatePromptFromBlock} mode={mode} isEditing={mode === "edit" && editingBlockId === block.id} isCollapsed={collapsedBlockIds.has(block.id)} onToggleCollapse={() => setCollapsedBlockIds((current) => { const next = new Set(current); next.has(block.id) ? next.delete(block.id) : next.add(block.id); return next; })} onDuplicate={() => void addBlock(block.type)} onEdit={() => setEditingBlockId((current) => current === block.id ? null : block.id)} onUpdate={(patch) => void updateBlock(block.id, patch)} onDelete={() => void request(`/blocks/${encodeURIComponent(block.id)}`, { method: "DELETE" }).then(setPayload)} onMove={move} onSaveValue={(value) => void saveValue(block.id, value)} onOpenSummary={() => undefined} ownerType="client" />)}</div>
+        </section>
+      </section>
+    </>
+  );
+}
+
 function ClientChecklistPanel({
   items,
   onAdd,
@@ -2791,6 +2993,8 @@ const blockCatalog = [
   { type: "phase", label: "Fase", icon: Layers3 },
   { type: "short_text", label: "Texto simples", icon: Pencil },
   { type: "long_text", label: "Texto longo", icon: FileText },
+  { type: "short_answer", label: "Resposta curta", icon: Pencil },
+  { type: "long_answer", label: "Resposta longa", icon: FileText },
   { type: "checklist", label: "Checklist", icon: ListChecks },
   { type: "prompt", label: "Prompt", icon: Clipboard },
   { type: "context", label: "Contexto", icon: Copy },
@@ -3178,6 +3382,7 @@ function StepBuilderBlockCard({
   onMove,
   onSaveValue,
   onOpenSummary,
+  ownerType = "project",
 }: {
   block: StepBuilderBlock;
   index: number;
@@ -3206,6 +3411,7 @@ function StepBuilderBlockCard({
   onMove: (blockId: string, direction: -1 | 1) => void;
   onSaveValue: (value: unknown) => void;
   onOpenSummary: () => void;
+  ownerType?: "project" | "client";
 }) {
   const Icon = blockCatalog.find((item) => item.type === block.type)?.icon ?? Layers3;
   const parentClass = block.config.parentBlockId ? " nested-block" : "";
@@ -3228,7 +3434,7 @@ function StepBuilderBlockCard({
       </div>
 
       {!isCollapsed && isEditing && <BlockSettings block={block} tables={tables} onUpdate={onUpdate} onCreatePromptFromBlock={onCreatePromptFromBlock} />}
-      {!isCollapsed && <BlockBody block={block} value={value} mode={mode} summaries={summaries} summaryItems={summaryItems} generatedPrompts={generatedPrompts} project={project} selectedStep={selectedStep} tables={tables} currentUser={currentUser} onUpdateSummaryItem={onUpdateSummaryItem} onSetSummaryItemSelection={onSetSummaryItemSelection} onDeleteSummaryItem={onDeleteSummaryItem} onSaveGeneratedPrompt={onSaveGeneratedPrompt} onSaveValue={onSaveValue} onOpenSummary={onOpenSummary} onUpdate={onUpdate} />}
+      {!isCollapsed && <BlockBody block={block} value={value} mode={mode} summaries={summaries} summaryItems={summaryItems} generatedPrompts={generatedPrompts} project={project} selectedStep={selectedStep} tables={tables} currentUser={currentUser} onUpdateSummaryItem={onUpdateSummaryItem} onSetSummaryItemSelection={onSetSummaryItemSelection} onDeleteSummaryItem={onDeleteSummaryItem} onSaveGeneratedPrompt={onSaveGeneratedPrompt} onSaveValue={onSaveValue} onOpenSummary={onOpenSummary} onUpdate={onUpdate} ownerType={ownerType} />}
     </article>
   );
 }
@@ -3295,6 +3501,7 @@ function BlockBody({
   onSaveValue,
   onOpenSummary,
   onUpdate,
+  ownerType = "project",
 }: {
   block: StepBuilderBlock;
   value: any;
@@ -3313,6 +3520,7 @@ function BlockBody({
   onSaveValue: (value: unknown) => void;
   onOpenSummary: () => void;
   onUpdate: (patch: Partial<StepBuilderBlock>) => void;
+  ownerType?: "project" | "client";
 }) {
   if (block.type === "phase") {
     return <PhaseBlock block={block} isStructureEditing={mode === "edit"} onUpdate={onUpdate} />;
@@ -3327,7 +3535,7 @@ function BlockBody({
   }
 
   if (block.type === "context") {
-    return <ContextBlock block={block} isStructureEditing={mode === "edit"} onUpdate={onUpdate} />;
+    return <ContextBlock block={block} value={value} isStructureEditing={mode === "edit"} onUpdate={onUpdate} onSaveValue={onSaveValue} />;
   }
 
   if (block.type === "materials") {
@@ -3356,7 +3564,7 @@ function BlockBody({
   }
 
   if (block.type === "file_upload") {
-    return <div className="muted-block">Upload R2 sera conectado neste bloco. Por enquanto use Materiais e links.</div>;
+    return <FileRuntimeBlock block={block} stepId={selectedStep.id} currentUser={currentUser} ownerType={ownerType} />;
   }
 
   if (block.type === "comment") {
@@ -3375,10 +3583,87 @@ function BlockBody({
     );
   }
 
+  if (block.type === "short_answer" || block.type === "long_answer") {
+    return <AnswerBlock block={block} value={value} onSaveValue={onSaveValue} />;
+  }
+
   const content = String(block.config.content ?? value ?? "");
   return mode === "edit"
     ? <textarea className="compact-textarea" value={content} placeholder="Digite o conteudo" onChange={(event) => onUpdate({ config: { content: event.target.value } })} onBlur={() => onSaveValue(content)} />
     : <div className="informative-text-block"><p>{content || "Bloco ainda nao configurado."}</p></div>;
+}
+
+function AnswerBlock({ block, value, onSaveValue }: { block: StepBuilderBlock; value: unknown; onSaveValue: (value: unknown) => void }) {
+  const [draft, setDraft] = useState(String(value ?? ""));
+  useEffect(() => setDraft(String(value ?? "")), [value]);
+  const long = block.type === "long_answer";
+  const save = () => {
+    if (draft !== String(value ?? "")) onSaveValue(draft);
+  };
+  return (
+    <label className="answer-block">
+      <span>{String(block.config.placeholder ?? (long ? "Escreva a resposta" : "Digite a resposta"))}</span>
+      {long
+        ? <textarea rows={Number(block.config.rows ?? 5)} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={save} />
+        : <input value={draft} maxLength={Number(block.config.maxLength ?? 180)} onChange={(event) => setDraft(event.target.value)} onBlur={save} />}
+    </label>
+  );
+}
+
+type JourneyRuntimeFile = JourneyFile;
+
+function FileRuntimeBlock({ block, stepId, currentUser, ownerType }: { block: StepBuilderBlock; stepId: string; currentUser: AppUser | null; ownerType: "project" | "client" }) {
+  const [files, setFiles] = useState<JourneyRuntimeFile[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const refresh = async () => {
+    try {
+      setFiles(await journeyApi.listFiles(ownerType, stepId, block.id));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Nao foi possivel carregar os arquivos.");
+    }
+  };
+
+  useEffect(() => { void refresh(); }, [stepId, block.id]);
+
+  async function upload(file: File | null) {
+    if (!file) return;
+    setIsLoading(true);
+    setMessage("");
+    try {
+      const uploaded = await journeyApi.uploadFile(ownerType, stepId, block.id, file, currentUser?.name);
+      setFiles((current) => [uploaded, ...current]);
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: `${file.name} anexado com sucesso.` } }));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Upload nao concluido.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function remove(fileId: string) {
+    try {
+      await journeyApi.deleteFile(ownerType, stepId, block.id, fileId);
+      setFiles((current) => current.filter((file) => file.id !== fileId));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Nao foi possivel remover o arquivo.");
+    }
+  }
+
+  return (
+    <div className="file-runtime-block">
+      <label className="secondary-button upload-runtime-button">
+        <Upload size={15} /> {isLoading ? "Enviando..." : "Anexar evidencia"}
+        <input type="file" disabled={isLoading} onChange={(event) => { void upload(event.currentTarget.files?.[0] ?? null); event.currentTarget.value = ""; }} />
+      </label>
+      {message && <span className="field-error">{message}</span>}
+      <div className="runtime-file-list">
+        {files.map((file) => <div key={file.id} className="runtime-file-row"><a href={file.url ?? `/api/files/${encodeURIComponent(file.r2_key ?? "")}`} target="_blank" rel="noreferrer"><FileText size={15} /> {file.name}</a><span>{Math.max(1, Math.ceil(file.size_bytes / 1024))} KB</span><button className="icon-button danger" type="button" onClick={() => void remove(file.id)} title="Remover arquivo"><Trash2 size={14} /></button></div>)}
+        {!files.length && <span className="muted">Nenhuma evidencia anexada.</span>}
+      </div>
+    </div>
+  );
 }
 
 type PromptBlockRuntimeValue = {
@@ -3500,9 +3785,10 @@ function PromptExecutionBlock({ block, value, tables, isStructureEditing, onSave
     onSaveValue({ ...runtimeValue, ...next });
   }
 
-  function copyPrompt() {
+  async function copyPrompt() {
     if (!promptText) return;
-    void copyToClipboard(promptText);
+    const copied = await copyToClipboard(promptText, "Prompt");
+    if (!copied) return;
     setCopyFeedback(true);
     window.setTimeout(() => setCopyFeedback(false), 1400);
     persist({ copyCount: copyCount + 1, lastCopiedAt: new Date().toISOString() });
@@ -3624,10 +3910,11 @@ function SummaryOperationalBlock({
     setSelectedPromptOptions((current) => (current.includes(option) ? current.filter((item) => item !== option) : [...current, option]));
   }
 
-  function copyAndSavePrompt() {
+  async function copyAndSavePrompt() {
     if (!summary || !finalPrompt.trim() || selectedPromptItems.length === 0) return;
     const summaryItemIds = selectedPromptItems.map((item) => item.id);
-    void copyToClipboard(finalPrompt);
+    const copied = await copyToClipboard(finalPrompt, "Composicao de prompt");
+    if (!copied) return;
     onSaveGeneratedPrompt({
       project_id: project.id,
       summary_id: summary.id,
@@ -3649,7 +3936,7 @@ function SummaryOperationalBlock({
           <GitBranch size={28} />
           <strong>Nenhum sumario vinculado</strong>
           <span>Abra o editor para importar e selecionar a estrutura do sumario.</span>
-          {isStructureEditing && <button className="primary-button" type="button" onClick={onOpenSummary}>Editar sumario</button>}
+          <button className="primary-button" type="button" onClick={onOpenSummary}>Editar estrutura do sumario</button>
         </div>
       </div>
     );
@@ -3664,8 +3951,8 @@ function SummaryOperationalBlock({
           <span>{versionStateHelp} {selectedItems.length}/{items.length} topicos no sumario · {coveredSelectedCount}/{selectedItems.length || 0} com prompt.</span>
         </div>
         <div className="inline-actions">
-          <button className="secondary-button" type="button" disabled={!summary.consolidated_text} onClick={() => copyToClipboard(summary.consolidated_text ?? "")}><Copy size={15} /> Copiar sumario</button>
-          {isStructureEditing && <button className="primary-button" type="button" onClick={onOpenSummary}><GitBranch size={15} /> Editar sumario</button>}
+          <button className="secondary-button" type="button" disabled={!summary.consolidated_text} onClick={() => void copyToClipboard(summary.consolidated_text ?? "", "Sumario consolidado")}><Copy size={15} /> Copiar sumario</button>
+          <button className="primary-button" type="button" onClick={onOpenSummary}><GitBranch size={15} /> Editar estrutura do sumario</button>
         </div>
       </div>
 
@@ -3727,7 +4014,7 @@ function SummaryOperationalBlock({
                   </select>
                   {childCount > 0 && <span className="summary-mini-chip">{childCount} sub</span>}
                   {coveredInBranch > 0 && <span className="summary-mini-chip covered">{coveredInBranch}/{branchIds.length} prompt</span>}
-                  {generatedForItem.map((prompt) => <button className="summary-copy-chip" key={prompt.id} onClick={() => copyToClipboard(prompt.final_prompt)}><Copy size={13} /> Prompt</button>)}
+                  {generatedForItem.map((prompt) => <button className="summary-copy-chip" key={prompt.id} onClick={() => void copyToClipboard(prompt.final_prompt, "Prompt") }><Copy size={13} /> Prompt</button>)}
                 </div>
               </div>
               <button className={`icon-button subtle prompt-pick-button ${isPromptScope ? "active" : ""}`} title="Incluir este topico na composicao do prompt" onClick={() => togglePromptScopeItem(item.id)}><Sparkles size={15} /></button>
@@ -3758,8 +4045,21 @@ function PhaseBlock({ block, isStructureEditing, onUpdate }: { block: StepBuilde
 function ChecklistBlock({ block, value, isStructureEditing, onSaveValue, onUpdate }: { block: StepBuilderBlock; value: any; isStructureEditing: boolean; onSaveValue: (value: unknown) => void; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
   const [newItem, setNewItem] = useState("");
   const items = Array.isArray(block.config.items) ? block.config.items as Array<any> : [];
-  const checked = value?.checked ?? Object.fromEntries(items.map((item) => [item.id, Boolean(item.done)]));
-  const setChecked = (itemId: string, done: boolean) => onSaveValue({ checked: { ...checked, [itemId]: done } });
+  const persistedChecked = value?.checked ?? Object.fromEntries(items.map((item) => [item.id, Boolean(item.done)]));
+  const [optimisticChecked, setOptimisticChecked] = useState<Record<string, boolean>>(persistedChecked);
+
+  useEffect(() => {
+    setOptimisticChecked(persistedChecked);
+  }, [JSON.stringify(persistedChecked)]);
+
+  const requiredItems = items.filter((item) => item.required !== false);
+  const doneCount = requiredItems.filter((item) => optimisticChecked[item.id]).length;
+  const progress = requiredItems.length ? Math.round((doneCount / requiredItems.length) * 100) : 0;
+  const setChecked = (itemId: string, done: boolean) => {
+    const next = { ...optimisticChecked, [itemId]: done };
+    setOptimisticChecked(next);
+    onSaveValue({ checked: next });
+  };
   const addItem = () => {
     if (!newItem.trim()) return;
     onUpdate({ config: { items: [...items, { id: crypto.randomUUID(), label: newItem.trim(), order: items.length + 1, required: true, requiresFile: false, acceptedFileTypes: [] }] } });
@@ -3768,8 +4068,13 @@ function ChecklistBlock({ block, value, isStructureEditing, onSaveValue, onUpdat
   const removeItem = (itemId: string) => onUpdate({ config: { items: items.filter((item) => item.id !== itemId) } });
   return (
     <div className="checklist-block-body">
+      <div className="checklist-progress" aria-label={`Checklist: ${doneCount} de ${requiredItems.length} itens concluidos`}>
+        <span>{doneCount}/{requiredItems.length || 0} concluidos</span>
+        <div className="progress-bar"><span style={{ width: `${progress}%` }} /></div>
+        <strong>{progress}%</strong>
+      </div>
       {items.map((item) => (
-        <label key={item.id} className="check-item-row"><input type="checkbox" checked={Boolean(checked[item.id])} onChange={(event) => setChecked(item.id, event.target.checked)} /><span>{item.label}</span>{isStructureEditing && <button className="icon-button danger" type="button" onClick={() => removeItem(item.id)}><Trash2 size={13} /></button>}</label>
+        <label key={item.id} className={`check-item-row ${optimisticChecked[item.id] ? "done" : ""}`}><input type="checkbox" checked={Boolean(optimisticChecked[item.id])} onChange={(event) => setChecked(item.id, event.target.checked)} /><span className="check-item-control">{optimisticChecked[item.id] && <Check size={18} />}</span><span>{item.label}</span>{isStructureEditing && <button className="icon-button danger" type="button" onClick={() => removeItem(item.id)}><Trash2 size={13} /></button>}</label>
       ))}
       {isStructureEditing && <div className="inline-form"><input value={newItem} onChange={(event) => setNewItem(event.target.value)} placeholder="Novo item" /><button className="secondary-button" type="button" onClick={addItem}><Plus size={15} /> Item</button></div>}
     </div>
@@ -3794,7 +4099,7 @@ function MaterialsBlock({ block, isStructureEditing, onUpdate }: { block: StepBu
   );
 }
 
-function ContextBlock({ block, isStructureEditing, onUpdate }: { block: StepBuilderBlock; isStructureEditing: boolean; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
+function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue }: { block: StepBuilderBlock; value: any; isStructureEditing: boolean; onUpdate: (patch: Partial<StepBuilderBlock>) => void; onSaveValue: (value: unknown) => void }) {
   const contextColors = ["mint", "teal", "amber", "blue", "rose", "slate"];
   const [draftTitle, setDraftTitle] = useState("");
   const [draftContent, setDraftContent] = useState("");
@@ -3802,13 +4107,16 @@ function ContextBlock({ block, isStructureEditing, onUpdate }: { block: StepBuil
   const [draftPinned, setDraftPinned] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   type ContextCard = { id: string; title: string; content: string; color?: string; pinned?: boolean };
-  const rawContexts = Array.isArray(block.config.contexts) ? block.config.contexts as ContextCard[] : [];
+  const templateContexts = Array.isArray(block.config.contexts) ? block.config.contexts as ContextCard[] : [];
+  const runtimeContexts = Array.isArray(value?.contexts) ? value.contexts as ContextCard[] : [];
   const legacyContent = String(block.config.content ?? "");
-  const contexts = rawContexts.length > 0
-    ? rawContexts
-    : legacyContent.trim()
-      ? [{ id: "legacy-context", title: block.title || "Contexto", content: legacyContent, color: "mint", pinned: false }]
-      : [];
+  const legacyContexts = legacyContent.trim()
+    ? [{ id: "legacy-context", title: block.title || "Contexto", content: legacyContent, color: "mint", pinned: true }]
+    : [];
+  // Execution owns its cards. Only cards explicitly pinned in Edit structure are inherited from a template.
+  const contexts = isStructureEditing
+    ? (templateContexts.length > 0 ? templateContexts : legacyContexts)
+    : [...(templateContexts.length > 0 ? templateContexts.filter((item) => item.pinned) : legacyContexts), ...runtimeContexts];
   const isWriting = editingId !== null;
 
   function resetForm() {
@@ -3837,7 +4145,8 @@ function ContextBlock({ block, isStructureEditing, onUpdate }: { block: StepBuil
 
   function saveContext() {
     if (!draftTitle.trim() && !draftContent.trim()) return;
-    const normalizedContexts = contexts.map((item) => ({ ...item, id: item.id === "legacy-context" ? crypto.randomUUID() : item.id }));
+    const editableContexts = isStructureEditing ? contexts : runtimeContexts;
+    const normalizedContexts = editableContexts.map((item) => ({ ...item, id: item.id === "legacy-context" ? crypto.randomUUID() : item.id }));
     const nextItem: ContextCard = {
       id: editingId && editingId !== "new" && editingId !== "legacy-context" ? editingId : crypto.randomUUID(),
       title: draftTitle.trim() || "Contexto sem titulo",
@@ -3848,7 +4157,11 @@ function ContextBlock({ block, isStructureEditing, onUpdate }: { block: StepBuil
     const next = editingId && editingId !== "new"
       ? normalizedContexts.map((item) => item.id === editingId || (editingId === "legacy-context" && item.content === legacyContent) ? nextItem : item)
       : [...normalizedContexts, nextItem];
-    onUpdate({ config: { contexts: next, content: "" } });
+    if (isStructureEditing) {
+      onUpdate({ config: { contexts: next, content: "" } });
+    } else {
+      onSaveValue({ contexts: next.map((item) => ({ ...item, pinned: false })) });
+    }
     resetForm();
   }
 
@@ -3859,7 +4172,8 @@ function ContextBlock({ block, isStructureEditing, onUpdate }: { block: StepBuil
 
   function removeContext(itemId: string) {
     const next = contexts.filter((item) => item.id !== itemId);
-    onUpdate({ config: { contexts: next, content: "" } });
+    if (isStructureEditing) onUpdate({ config: { contexts: next, content: "" } });
+    else onSaveValue({ contexts: next.filter((item) => !item.pinned) });
     if (editingId === itemId) resetForm();
   }
 
@@ -3867,10 +4181,10 @@ function ContextBlock({ block, isStructureEditing, onUpdate }: { block: StepBuil
     <div className="context-library compact-context-library">
       <div className="context-library-head">
         <span>{contexts.length ? `${contexts.length} contexto(s)` : "Nenhum contexto salvo neste bloco"}</span>
-        {isStructureEditing && <button className="secondary-button" type="button" onClick={startNew}><Plus size={15} /> Adicionar contexto</button>}
+        <button className="secondary-button" type="button" onClick={startNew}><Plus size={15} /> Adicionar contexto</button>
       </div>
 
-      {isStructureEditing && isWriting && (
+      {isWriting && (
         <div className="context-compose compact-context-compose">
           <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Titulo do contexto" />
           <textarea value={draftContent} onChange={(event) => setDraftContent(event.target.value)} placeholder="Cole aqui o contexto" rows={5} />
@@ -3878,7 +4192,7 @@ function ContextBlock({ block, isStructureEditing, onUpdate }: { block: StepBuil
             <div className="context-color-picker">
               {contextColors.map((color) => <button key={color} type="button" className={`context-color-dot ${color} ${draftColor === color ? "active" : ""}`} onClick={() => setDraftColor(color)} />)}
             </div>
-            <label className="checkline"><input type="checkbox" checked={draftPinned} onChange={(event) => setDraftPinned(event.target.checked)} /> Salvar este contexto no template</label>
+            {isStructureEditing && <label className="checkline"><input type="checkbox" checked={draftPinned} onChange={(event) => setDraftPinned(event.target.checked)} /> Fixar no template</label>}
           </div>
           <div className="inline-actions">
             <button className="primary-button" type="button" onClick={saveContext}><Save size={15} /> Salvar contexto</button>
@@ -3889,15 +4203,16 @@ function ContextBlock({ block, isStructureEditing, onUpdate }: { block: StepBuil
 
       <div className="context-card-grid compact-context-grid">
         {contexts.map((item) => (
-          <article className={`context-mini-card compact-context-card ${item.color || "mint"} ${item.pinned ? "pinned" : ""}`} key={item.id} onClick={() => copyToClipboard(item.content)} title="Clique para copiar o contexto">
+          <article className={`context-mini-card compact-context-card ${item.color || "mint"} ${item.pinned ? "pinned" : ""}`} key={item.id} onClick={() => void copyToClipboard(item.content, "Contexto")} title="Clique para copiar o contexto">
             <strong>{item.title}</strong>
             {item.pinned && <span className="context-pin-label">Template</span>}
             {isStructureEditing && <div className="context-mini-actions" onClick={(event) => event.stopPropagation()}>
               <button className={`icon-button ${item.pinned ? "active" : ""}`} type="button" title="Salvar no template" onClick={() => patchContext(item.id, { pinned: !item.pinned })}><Save size={14} /></button>
-              <button className="icon-button" type="button" title="Copiar contexto" onClick={() => copyToClipboard(item.content)}><Copy size={14} /></button>
+              <button className="icon-button" type="button" title="Copiar contexto" onClick={(event) => { event.stopPropagation(); void copyToClipboard(item.content, "Contexto"); }}><Copy size={14} /></button>
               <button className="icon-button" type="button" title="Editar contexto" onClick={() => startEdit(item)}><Pencil size={14} /></button>
               <button className="icon-button danger" type="button" title="Excluir contexto" onClick={() => removeContext(item.id)}><Trash2 size={14} /></button>
             </div>}
+            {!isStructureEditing && !item.pinned && <button className="icon-button context-runtime-delete" type="button" title="Excluir contexto deste projeto" onClick={(event) => { event.stopPropagation(); removeContext(item.id); }}><Trash2 size={14} /></button>}
           </article>
         ))}
       </div>
@@ -3907,11 +4222,6 @@ function ContextBlock({ block, isStructureEditing, onUpdate }: { block: StepBuil
 
 function blockTypeText(type: string) {
   return blockCatalog.find((item) => item.type === type)?.label ?? type;
-}
-
-async function copyToClipboard(value: string) {
-  if (!value.trim()) return;
-  await navigator.clipboard.writeText(value);
 }
 
 function ProjectSummaryPanel({
@@ -4092,7 +4402,7 @@ function ProjectSummaryPanel({
         </div>
         {activeSummary && (
           <div className="summary-heading-actions">
-            <button className="secondary-button" disabled={!activeSummary.consolidated_text} onClick={() => copyToClipboard(activeSummary.consolidated_text ?? "")}>
+            <button className="secondary-button" disabled={!activeSummary.consolidated_text} onClick={() => void copyToClipboard(activeSummary.consolidated_text ?? "", "Sumario consolidado")}>
               <Copy size={16} />
               Copiar consolidado
             </button>
@@ -4207,7 +4517,7 @@ function ProjectSummaryPanel({
                         {item.notes && <span className="summary-note-indicator" title={item.notes}>nota</span>}
                         {item.parse_warning && <span className="summary-warning">{item.parse_warning}</span>}
                         {generatedForItem.map((prompt) => (
-                          <button className="summary-copy-chip" key={prompt.id} onClick={() => copyToClipboard(prompt.final_prompt)} title={prompt.notes ?? "Copiar prompt salvo"}>
+                          <button className="summary-copy-chip" key={prompt.id} onClick={() => void copyToClipboard(prompt.final_prompt, "Prompt")} title={prompt.notes ?? "Copiar prompt salvo"}>
                             <Copy size={13} />
                             Prompt
                           </button>

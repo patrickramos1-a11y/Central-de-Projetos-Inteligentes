@@ -74,18 +74,17 @@ npm run cf:d1:backup
 Para o Worker atual, use o fluxo de deploy de assets com MIME correto:
 
 ```bash
-npm run build
-bun tmp/deploy-cloudflare-assets-mime.mjs
+bun run cf:deploy:assets
 ```
 
-O comando `wrangler deploy` continua util para desenvolvimento, mas o script acima e o caminho de publicacao validado para esta aplicacao.
+Esse comando recompila o frontend e o Worker antes do envio. O comando `wrangler deploy` continua util para desenvolvimento, mas nao deve substituir esse fluxo de publicacao, pois ele nao aplica o ajuste de MIME dos assets.
 
 Antes do deploy remoto, substitua `replace-with-d1-database-id` no `wrangler.jsonc` pelo ID real do banco D1 criado na Cloudflare.
 O D1 remoto atual criado para este projeto e `central-projetos-ia`, ID `8b150f2d-db0d-433e-8f88-98b5f83b3ef8`.
 
 Observacao Cloudflare: o subdominio `workers.dev` da conta e `patrickramos1-a11y`, e o app esta publicado em `central-projetos-ia-api.patrickramos1-a11y.workers.dev`. O bucket R2 `central-projetos-ia-files` ja foi criado e esta vinculado ao Worker pelo binding `FILES`.
 
-Anexos e materiais das etapas usam a API `/api/files`. O arquivo e salvo no R2 e o link gerado e registrado na etapa como material/evidencia.
+Anexos de blocos usam a API `/api/journey-files/{project|client}/{stepId}/{blockId}`. O arquivo e salvo no R2 e seu registro fica vinculado ao bloco no D1.
 
 Para exportar os dados atuais do Supabase e gerar SQL de importacao para D1:
 
@@ -140,7 +139,29 @@ Clientes:
 - Vinculos entre etapas e prompts
 - Procedimentos internos
 
-## Tabelas principais
+## Dados canonicos de jornada
+
+As tabelas legadas permanecem para compatibilidade. Toda nova estrutura e toda nova execucao de blocos usam o modelo canonico abaixo:
+
+- `journey_step_documents`: estrutura versionada de uma etapa de projeto, cliente ou template.
+- `journey_step_values`: valores de execucao, como checklist, contexto e prompt aplicado.
+- `journey_step_files`: evidencias armazenadas no R2.
+- `journey_step_events`: historico operacional basico.
+
+Antes de aplicar uma migration remota, execute:
+
+```bash
+bun run cf:d1:backup
+bun run cf:d1:migrate:remote
+```
+
+Depois de publicar uma migration nova, a conversao de registros legados e explicita e idempotente:
+
+```bash
+curl -X POST https://central-projetos-ia-api.patrickramos1-a11y.workers.dev/api/admin/migrate-canonical
+```
+
+## Tabelas legadas
 
 Configuracoes:
 

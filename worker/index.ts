@@ -1,4 +1,5 @@
 import { handleProjectStepRequest } from "./blockBuilder";
+import { handleJourneyDomainRequest } from "./journeyDomain";
 
 type Env = {
   DB: D1Database;
@@ -60,6 +61,11 @@ export default {
 
       if (url.pathname === "/api/health") {
         return json({ ok: true, storage: "cloudflare-d1" });
+      }
+
+      const domainResponse = await handleJourneyDomainRequest(request, env, parts, url);
+      if (domainResponse) {
+        return domainResponse;
       }
 
       if (parts[0] === "api" && parts[1] === "project-steps" && parts[2]) {
