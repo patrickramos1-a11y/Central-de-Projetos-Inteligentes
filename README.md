@@ -52,6 +52,7 @@ Recursos sugeridos:
 npm install
 npm run dev
 npm run build
+npm run test
 npm run cf:d1:migrate:local
 npm run cf:dev
 ```
@@ -63,6 +64,21 @@ npm run build
 npm run cf:d1:migrate:remote
 npm run cf:deploy
 ```
+
+Antes de qualquer migration ou refatoracao que altere dados, crie um snapshot local ignorado pelo Git:
+
+```bash
+npm run cf:d1:backup
+```
+
+Para o Worker atual, use o fluxo de deploy de assets com MIME correto:
+
+```bash
+npm run build
+bun tmp/deploy-cloudflare-assets-mime.mjs
+```
+
+O comando `wrangler deploy` continua util para desenvolvimento, mas o script acima e o caminho de publicacao validado para esta aplicacao.
 
 Antes do deploy remoto, substitua `replace-with-d1-database-id` no `wrangler.jsonc` pelo ID real do banco D1 criado na Cloudflare.
 O D1 remoto atual criado para este projeto e `central-projetos-ia`, ID `8b150f2d-db0d-433e-8f88-98b5f83b3ef8`.

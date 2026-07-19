@@ -35,6 +35,7 @@ type ProjectStatus = "planejado" | "em_andamento" | "concluido" | "bloqueado" | 
 type ClientStatus = "em_implantacao" | "ativo" | "concluido" | "bloqueado" | "arquivado";
 type StepStatus = "pendente" | "em_andamento" | "concluido" | "bloqueado";
 type ViewMode = "projects" | "journey" | "projectTemplates" | "clients" | "clientJourney" | "settings";
+type JourneyMode = "execute" | "edit";
 
 type AppUser = {
   id: string;
@@ -2795,10 +2796,7 @@ const blockCatalog = [
   { type: "context", label: "Contexto", icon: Copy },
   { type: "project_summary", label: "Sumario", icon: GitBranch },
   { type: "materials", label: "Materiais", icon: Link2 },
-  { type: "file_upload", label: "Upload", icon: Upload },
   { type: "comment", label: "Comentario", icon: FileText },
-  { type: "status", label: "Status", icon: CheckCircle2 },
-  { type: "date", label: "Data", icon: Route },
 ];
 
 function JourneyView({
@@ -2883,6 +2881,7 @@ function JourneyView({
   const [summaryEditorOpen, setSummaryEditorOpen] = useState(false);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [collapsedBlockIds, setCollapsedBlockIds] = useState<Set<string>>(() => new Set());
+  const [journeyMode, setJourneyMode] = useState<JourneyMode>("execute");
   const summaries = tables.project_summaries.filter((summary) => summary.project_id === project.id);
   const summaryItems = tables.project_summary_items.filter((item) => item.project_id === project.id).sort(byOrder);
   const generatedPrompts = tables.generated_prompts.filter((prompt) => prompt.project_id === project.id);
@@ -2981,13 +2980,19 @@ function JourneyView({
   const blocks = payload?.document.blocks ?? [];
   const completion = payload?.completion;
 
+  function switchJourneyMode(nextMode: JourneyMode) {
+    setJourneyMode(nextMode);
+    setIsAddMenuOpen(false);
+    if (nextMode === "execute") setEditingBlockId(null);
+  }
+
   return (
     <>
-      <section className="journey-hero">
+      <section className="journey-hero journey-context-bar">
         <button className="ghost-button" onClick={onBack}>
           <PanelLeft size={17} /> Projetos
         </button>
-        <div>
+        <div className="journey-context-copy">
           <span className="eyebrow">Ramos Jornadas</span>
           <h1>{project.name}</h1>
           <p>{project.company || "Projeto sem empresa definida"}</p>
@@ -3010,21 +3015,33 @@ function JourneyView({
         </aside>
 
         <section className="work-surface block-work-surface">
-          <div className="journey-command-bar">
-            <div>
+          <div className={`journey-command-bar mode-${journeyMode}`}>
+            <div className="journey-step-identity">
               <span className="eyebrow">Etapa selecionada</span>
-              <InlineText defaultValue={selectedStep.name} className="inline-title" onSave={(value) => onUpdateStep(selectedStep.id, { name: value })} />
+              {journeyMode === "edit" ? (
+                <InlineText defaultValue={selectedStep.name} className="inline-title" onSave={(value) => onUpdateStep(selectedStep.id, { name: value })} />
+              ) : (
+                <strong className="journey-step-title">{selectedStep.name}</strong>
+              )}
             </div>
-            <form className="quick-step-form" onSubmit={(event) => { event.preventDefault(); onAddNextStep(project.id, newStepName || "Nova etapa"); setNewStepName(""); }}>
-              <input value={newStepName} onChange={(event) => setNewStepName(event.target.value)} placeholder="Nova etapa" />
-              <button className="secondary-button" type="submit"><Plus size={16} /> Adicionar etapa</button>
-            </form>
-            <div className="block-add-wrap">
-              <button className="primary-button" type="button" onClick={() => setIsAddMenuOpen((value) => !value)}><Plus size={17} /> Adicionar bloco</button>
-              {isAddMenuOpen && <BlockTypeMenu onSelect={addBlock} />}
+            <div className="journey-mode-switch" role="group" aria-label="Modo da jornada">
+              <button className={journeyMode === "execute" ? "active" : ""} type="button" onClick={() => switchJourneyMode("execute")}><CheckCircle2 size={15} /> Executar</button>
+              <button className={journeyMode === "edit" ? "active" : ""} type="button" onClick={() => switchJourneyMode("edit")}><Pencil size={15} /> Editar estrutura</button>
             </div>
             <button className="secondary-button" type="button" disabled={!completion?.canComplete} onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}><CheckCircle2 size={17} /> Concluir</button>
-            <button className="secondary-button" type="button" onClick={() => onSaveTemplate(project)}><Save size={17} /> Salvar template</button>
+            {journeyMode === "edit" && (
+              <>
+                <form className="quick-step-form" onSubmit={(event) => { event.preventDefault(); onAddNextStep(project.id, newStepName || "Nova etapa"); setNewStepName(""); }}>
+                  <input value={newStepName} onChange={(event) => setNewStepName(event.target.value)} placeholder="Nova etapa" />
+                  <button className="secondary-button" type="submit"><Plus size={16} /> Adicionar etapa</button>
+                </form>
+                <div className="block-add-wrap">
+                  <button className="primary-button" type="button" onClick={() => setIsAddMenuOpen((value) => !value)}><Plus size={17} /> Adicionar bloco</button>
+                  {isAddMenuOpen && <BlockTypeMenu onSelect={addBlock} />}
+                </div>
+                <button className="secondary-button" type="button" onClick={() => onSaveTemplate(project)}><Save size={17} /> Salvar template</button>
+              </>
+            )}
           </div>
           <div className="step-auto-status">
             <span className={`chip active ${completion?.status ?? selectedStep.status}`}>{formatStepStatus(completion?.status ?? selectedStep.status)}</span>
@@ -3038,8 +3055,12 @@ function JourneyView({
             <div className="empty-block-canvas">
               <Sparkles size={34} />
               <strong>Etapa limpa</strong>
-              <span>Adicione apenas os blocos que fazem sentido para esta etapa.</span>
-              <button className="primary-button" onClick={() => setIsAddMenuOpen(true)}><Plus size={17} /> Adicionar primeiro bloco</button>
+              <span>{journeyMode === "edit" ? "Adicione apenas os blocos que fazem sentido para esta etapa." : "Esta etapa ainda nao possui conteudo para executar."}</span>
+              {journeyMode === "edit" ? (
+                <button className="primary-button" onClick={() => setIsAddMenuOpen(true)}><Plus size={17} /> Adicionar primeiro bloco</button>
+              ) : (
+                <button className="secondary-button" onClick={() => switchJourneyMode("edit")}><Pencil size={17} /> Editar estrutura</button>
+              )}
             </div>
           )}
 
@@ -3063,7 +3084,8 @@ function JourneyView({
                 onDeleteSummaryItem={onDeleteSummaryItem}
                 onSaveGeneratedPrompt={onSaveGeneratedPrompt}
                 onCreatePromptFromBlock={onCreatePromptFromBlock}
-                isEditing={editingBlockId === block.id}
+                mode={journeyMode}
+                isEditing={journeyMode === "edit" && editingBlockId === block.id}
                 isCollapsed={collapsedBlockIds.has(block.id)}
                 onToggleCollapse={() => toggleBlockCollapsed(block.id)}
                 onDuplicate={() => duplicateBlock(block)}
@@ -3145,6 +3167,7 @@ function StepBuilderBlockCard({
   onDeleteSummaryItem,
   onSaveGeneratedPrompt,
   onCreatePromptFromBlock,
+  mode,
   isEditing,
   isCollapsed,
   onToggleCollapse,
@@ -3172,6 +3195,7 @@ function StepBuilderBlockCard({
   onDeleteSummaryItem: (summaryId: string, itemId: string) => void;
   onSaveGeneratedPrompt: (payload: Omit<GeneratedPrompt, "id" | "created_at">) => void;
   onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
+  mode: JourneyMode;
   isEditing: boolean;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
@@ -3191,16 +3215,20 @@ function StepBuilderBlockCard({
         <div><Icon size={18} /><div><strong>{block.title}</strong><span>{blockTypeText(block.type)}{block.required ? " - obrigatorio" : ""}</span></div></div>
         <div className="block-card-actions">
           <button className="icon-button" type="button" title={isCollapsed ? "Expandir bloco" : "Recolher bloco"} onClick={onToggleCollapse}>{isCollapsed ? "+" : "-"}</button>
-          <button className="icon-button" type="button" title="Mover para cima" onClick={() => onMove(block.id, -1)} disabled={index === 0}>↑</button>
-          <button className="icon-button" type="button" title="Mover para baixo" onClick={() => onMove(block.id, 1)} disabled={index === total - 1}>↓</button>
-          <button className="icon-button" type="button" title="Duplicar bloco" onClick={onDuplicate}><Copy size={15} /></button>
-          <button className="icon-button" type="button" title="Editar bloco" onClick={onEdit}><Pencil size={15} /></button>
-          <button className="icon-button danger" type="button" title="Excluir bloco" onClick={onDelete}><Trash2 size={15} /></button>
+          {mode === "edit" && (
+            <>
+              <button className="icon-button" type="button" title="Mover para cima" onClick={() => onMove(block.id, -1)} disabled={index === 0}>↑</button>
+              <button className="icon-button" type="button" title="Mover para baixo" onClick={() => onMove(block.id, 1)} disabled={index === total - 1}>↓</button>
+              <button className="icon-button" type="button" title="Duplicar bloco" onClick={onDuplicate}><Copy size={15} /></button>
+              <button className="icon-button" type="button" title="Editar bloco" onClick={onEdit}><Pencil size={15} /></button>
+              <button className="icon-button danger" type="button" title="Excluir bloco" onClick={onDelete}><Trash2 size={15} /></button>
+            </>
+          )}
         </div>
       </div>
 
       {!isCollapsed && isEditing && <BlockSettings block={block} tables={tables} onUpdate={onUpdate} onCreatePromptFromBlock={onCreatePromptFromBlock} />}
-      {!isCollapsed && <BlockBody block={block} value={value} summaries={summaries} summaryItems={summaryItems} generatedPrompts={generatedPrompts} project={project} selectedStep={selectedStep} tables={tables} currentUser={currentUser} onUpdateSummaryItem={onUpdateSummaryItem} onSetSummaryItemSelection={onSetSummaryItemSelection} onDeleteSummaryItem={onDeleteSummaryItem} onSaveGeneratedPrompt={onSaveGeneratedPrompt} onSaveValue={onSaveValue} onOpenSummary={onOpenSummary} onUpdate={onUpdate} />}
+      {!isCollapsed && <BlockBody block={block} value={value} mode={mode} summaries={summaries} summaryItems={summaryItems} generatedPrompts={generatedPrompts} project={project} selectedStep={selectedStep} tables={tables} currentUser={currentUser} onUpdateSummaryItem={onUpdateSummaryItem} onSetSummaryItemSelection={onSetSummaryItemSelection} onDeleteSummaryItem={onDeleteSummaryItem} onSaveGeneratedPrompt={onSaveGeneratedPrompt} onSaveValue={onSaveValue} onOpenSummary={onOpenSummary} onUpdate={onUpdate} />}
     </article>
   );
 }
@@ -3252,6 +3280,7 @@ function BlockSettings({ block, tables, onUpdate, onCreatePromptFromBlock }: { b
 function BlockBody({
   block,
   value,
+  mode,
   summaries,
   summaryItems,
   generatedPrompts,
@@ -3269,6 +3298,7 @@ function BlockBody({
 }: {
   block: StepBuilderBlock;
   value: any;
+  mode: JourneyMode;
   summaries: ProjectSummary[];
   summaryItems: ProjectSummaryItem[];
   generatedPrompts: GeneratedPrompt[];
@@ -3285,23 +3315,23 @@ function BlockBody({
   onUpdate: (patch: Partial<StepBuilderBlock>) => void;
 }) {
   if (block.type === "phase") {
-    return <PhaseBlock block={block} onUpdate={onUpdate} />;
+    return <PhaseBlock block={block} isStructureEditing={mode === "edit"} onUpdate={onUpdate} />;
   }
 
   if (block.type === "checklist") {
-    return <ChecklistBlock block={block} value={value} onSaveValue={onSaveValue} onUpdate={onUpdate} />;
+    return <ChecklistBlock block={block} value={value} isStructureEditing={mode === "edit"} onSaveValue={onSaveValue} onUpdate={onUpdate} />;
   }
 
   if (block.type === "prompt") {
-    return <PromptExecutionBlock block={block} value={value} tables={tables} onSaveValue={onSaveValue} onUpdate={onUpdate} />;
+    return <PromptExecutionBlock block={block} value={value} tables={tables} isStructureEditing={mode === "edit"} onSaveValue={onSaveValue} onUpdate={onUpdate} />;
   }
 
   if (block.type === "context") {
-    return <ContextBlock block={block} onUpdate={onUpdate} />;
+    return <ContextBlock block={block} isStructureEditing={mode === "edit"} onUpdate={onUpdate} />;
   }
 
   if (block.type === "materials") {
-    return <MaterialsBlock block={block} onUpdate={onUpdate} />;
+    return <MaterialsBlock block={block} isStructureEditing={mode === "edit"} onUpdate={onUpdate} />;
   }
 
   if (block.type === "project_summary") {
@@ -3320,6 +3350,7 @@ function BlockBody({
         onDeleteItem={onDeleteSummaryItem}
         onSaveGeneratedPrompt={onSaveGeneratedPrompt}
         onOpenSummary={onOpenSummary}
+        isStructureEditing={mode === "edit"}
       />
     );
   }
@@ -3329,7 +3360,10 @@ function BlockBody({
   }
 
   if (block.type === "comment") {
-    return <textarea className="compact-textarea" value={String(block.config.content ?? "")} placeholder="Comentario pequeno" onChange={(event) => onUpdate({ config: { content: event.target.value } })} />;
+    const content = String(block.config.content ?? "").trim();
+    return mode === "edit"
+      ? <textarea className="compact-textarea" value={content} placeholder="Comentario pequeno" onChange={(event) => onUpdate({ config: { content: event.target.value } })} />
+      : <div className="informative-text-block comment">{content || <span>Comentario ainda nao configurado.</span>}</div>;
   }
 
   if (block.type === "short_text" || block.type === "long_text") {
@@ -3342,7 +3376,9 @@ function BlockBody({
   }
 
   const content = String(block.config.content ?? value ?? "");
-  return <textarea className="compact-textarea" value={content} placeholder="Digite o conteudo" onChange={(event) => onUpdate({ config: { content: event.target.value } })} onBlur={() => onSaveValue(content)} />;
+  return mode === "edit"
+    ? <textarea className="compact-textarea" value={content} placeholder="Digite o conteudo" onChange={(event) => onUpdate({ config: { content: event.target.value } })} onBlur={() => onSaveValue(content)} />
+    : <div className="informative-text-block"><p>{content || "Bloco ainda nao configurado."}</p></div>;
 }
 
 type PromptBlockRuntimeValue = {
@@ -3450,7 +3486,7 @@ function PromptBlockSettings({
   );
 }
 
-function PromptExecutionBlock({ block, value, tables, onSaveValue, onUpdate }: { block: StepBuilderBlock; value: any; tables: Tables; onSaveValue: (value: unknown) => void; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
+function PromptExecutionBlock({ block, value, tables, isStructureEditing, onSaveValue, onUpdate }: { block: StepBuilderBlock; value: any; tables: Tables; isStructureEditing: boolean; onSaveValue: (value: unknown) => void; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
   const runtimeValue = value && typeof value === "object" && !Array.isArray(value) ? value as PromptBlockRuntimeValue : {};
   const linkedPrompt = tables.prompts.find((prompt) => prompt.id === block.config.promptId) ?? null;
   const tool = tables.ai_tools.find((item) => item.id === (block.config.toolId ?? linkedPrompt?.ai_tool_id)) ?? null;
@@ -3502,7 +3538,7 @@ function PromptExecutionBlock({ block, value, tables, onSaveValue, onUpdate }: {
       <div className="prompt-execution-actions">
         <button className={`primary-button copy-feedback-button ${copyFeedback ? "copied" : ""}`} type="button" onClick={copyPrompt}><Copy size={15} /> {copyFeedback ? "Copiado!" : "Copiar prompt"}</button>
         <button className={`secondary-button ${isApplied ? "is-applied" : ""}`} type="button" onClick={toggleApplied}><CheckCircle2 size={15} /> {isApplied ? "Aplicado" : "Confirmar aplicado"}</button>
-        <button className="icon-button subtle" type="button" title="Atualizar titulo pelo prompt vinculado" disabled={!linkedPrompt} onClick={() => linkedPrompt && onUpdate({ title: linkedPrompt.title })}><RefreshCw size={14} /></button>
+        {isStructureEditing && <button className="icon-button subtle" type="button" title="Atualizar titulo pelo prompt vinculado" disabled={!linkedPrompt} onClick={() => linkedPrompt && onUpdate({ title: linkedPrompt.title })}><RefreshCw size={14} /></button>}
       </div>
     </div>
   );
@@ -3521,6 +3557,7 @@ function SummaryOperationalBlock({
   onDeleteItem,
   onSaveGeneratedPrompt,
   onOpenSummary,
+  isStructureEditing,
 }: {
   block: StepBuilderBlock;
   project: Project;
@@ -3535,6 +3572,7 @@ function SummaryOperationalBlock({
   onDeleteItem: (summaryId: string, itemId: string) => void;
   onSaveGeneratedPrompt: (payload: Omit<GeneratedPrompt, "id" | "created_at">) => void;
   onOpenSummary: () => void;
+  isStructureEditing: boolean;
 }) {
   const [summarySearch, setSummarySearch] = useState("");
   const [collapsedTopicIds, setCollapsedTopicIds] = useState<string[]>([]);
@@ -3611,7 +3649,7 @@ function SummaryOperationalBlock({
           <GitBranch size={28} />
           <strong>Nenhum sumario vinculado</strong>
           <span>Abra o editor para importar e selecionar a estrutura do sumario.</span>
-          <button className="primary-button" type="button" onClick={onOpenSummary}>Editar sumario</button>
+          {isStructureEditing && <button className="primary-button" type="button" onClick={onOpenSummary}>Editar sumario</button>}
         </div>
       </div>
     );
@@ -3627,7 +3665,7 @@ function SummaryOperationalBlock({
         </div>
         <div className="inline-actions">
           <button className="secondary-button" type="button" disabled={!summary.consolidated_text} onClick={() => copyToClipboard(summary.consolidated_text ?? "")}><Copy size={15} /> Copiar sumario</button>
-          <button className="primary-button" type="button" onClick={onOpenSummary}><GitBranch size={15} /> Editar sumario</button>
+          {isStructureEditing && <button className="primary-button" type="button" onClick={onOpenSummary}><GitBranch size={15} /> Editar sumario</button>}
         </div>
       </div>
 
@@ -3674,10 +3712,14 @@ function SummaryOperationalBlock({
           return (
             <article className={`summary-item tree-row operational-row level-${Math.min(item.level, 4)} ${item.is_selected ? "selected" : "excluded"} ${isPromptScope ? "prompt-scope" : ""}`} key={item.id} style={{ "--tree-level": Math.max(0, item.level - 1) } as CSSProperties}>
               <button className="summary-expand-button" disabled={childCount === 0} onClick={() => toggleCollapsedTopic(item.id)} title={collapsedTopicIds.includes(item.id) ? "Expandir topico" : "Recolher topico"}>{childCount > 0 ? (collapsedTopicIds.includes(item.id) ? "+" : "-") : ""}</button>
-              <button className={`checkbox ${item.is_selected ? "checked" : ""}`} onClick={() => onSetSelection(summary.id, item.id, !item.is_selected)} title="Entrar no sumario consolidado">{item.is_selected && <Check size={14} />}</button>
+              {isStructureEditing ? (
+                <button className={`checkbox ${item.is_selected ? "checked" : ""}`} onClick={() => onSetSelection(summary.id, item.id, !item.is_selected)} title="Entrar no sumario consolidado">{item.is_selected && <Check size={14} />}</button>
+              ) : <span className={`summary-selection-state ${item.is_selected ? "selected" : "excluded"}`} title={item.is_selected ? "Incluido no sumario" : "Fora do sumario"}>{item.is_selected ? <Check size={14} /> : ""}</span>}
               <span className="summary-topic-number">{item.topic_number}</span>
               <div className="summary-item-main">
-                <InlineText defaultValue={item.title} className="summary-title-input" onSave={(value) => onUpdateItem(item.id, { title: value })} />
+                {isStructureEditing ? (
+                  <InlineText defaultValue={item.title} className="summary-title-input" onSave={(value) => onUpdateItem(item.id, { title: value })} />
+                ) : <strong className="summary-topic-title">{item.title}</strong>}
                 <div className="summary-item-controls compact-topic-meta">
                   <span className={`summary-status-dot ${item.status}`} title={formatStatus(item.status)} />
                   <select className={`summary-status-select ${item.status}`} value={item.status} onChange={(event) => onUpdateItem(item.id, { status: event.target.value as SummaryItemStatus })} title="Status do topico">
@@ -3690,7 +3732,7 @@ function SummaryOperationalBlock({
               </div>
               <button className={`icon-button subtle prompt-pick-button ${isPromptScope ? "active" : ""}`} title="Incluir este topico na composicao do prompt" onClick={() => togglePromptScopeItem(item.id)}><Sparkles size={15} /></button>
               <button className="icon-button subtle" title="Incluir este topico e todos os subtitulos no prompt" onClick={() => selectPromptScope(branchIds)}><GitBranch size={15} /></button>
-              <button className="icon-button subtle operational-danger-action" title="Excluir topico" onClick={() => onDeleteItem(summary.id, item.id)}><Trash2 size={15} /></button>
+              {isStructureEditing && <button className="icon-button subtle operational-danger-action" title="Excluir topico" onClick={() => onDeleteItem(summary.id, item.id)}><Trash2 size={15} /></button>}
             </article>
           );
         })}
@@ -3698,7 +3740,12 @@ function SummaryOperationalBlock({
     </div>
   );
 }
-function PhaseBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
+function PhaseBlock({ block, isStructureEditing, onUpdate }: { block: StepBuilderBlock; isStructureEditing: boolean; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
+  if (!isStructureEditing) {
+    const description = String(block.config.content ?? "").trim();
+    return <div className="phase-block-body phase-execution"><span className={`chip ${String(block.config.status ?? "pendente")}`}>{formatStepStatus(String(block.config.status ?? "pendente") as StepStatus)}</span>{description && <p>{description}</p>}</div>;
+  }
+
   return (
     <div className="phase-block-body">
       <SelectField label="Status da fase" value={String(block.config.status ?? "pendente")} onChange={(status) => onUpdate({ config: { status } })} options={["pendente", "em_andamento", "concluido", "bloqueado"].map((status) => ({ value: status, label: formatStepStatus(status as StepStatus) }))} />
@@ -3708,7 +3755,7 @@ function PhaseBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: (p
   );
 }
 
-function ChecklistBlock({ block, value, onSaveValue, onUpdate }: { block: StepBuilderBlock; value: any; onSaveValue: (value: unknown) => void; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
+function ChecklistBlock({ block, value, isStructureEditing, onSaveValue, onUpdate }: { block: StepBuilderBlock; value: any; isStructureEditing: boolean; onSaveValue: (value: unknown) => void; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
   const [newItem, setNewItem] = useState("");
   const items = Array.isArray(block.config.items) ? block.config.items as Array<any> : [];
   const checked = value?.checked ?? Object.fromEntries(items.map((item) => [item.id, Boolean(item.done)]));
@@ -3722,14 +3769,14 @@ function ChecklistBlock({ block, value, onSaveValue, onUpdate }: { block: StepBu
   return (
     <div className="checklist-block-body">
       {items.map((item) => (
-        <label key={item.id} className="check-item-row"><input type="checkbox" checked={Boolean(checked[item.id])} onChange={(event) => setChecked(item.id, event.target.checked)} /><span>{item.label}</span><button className="icon-button danger" type="button" onClick={() => removeItem(item.id)}><Trash2 size={13} /></button></label>
+        <label key={item.id} className="check-item-row"><input type="checkbox" checked={Boolean(checked[item.id])} onChange={(event) => setChecked(item.id, event.target.checked)} /><span>{item.label}</span>{isStructureEditing && <button className="icon-button danger" type="button" onClick={() => removeItem(item.id)}><Trash2 size={13} /></button>}</label>
       ))}
-      <div className="inline-form"><input value={newItem} onChange={(event) => setNewItem(event.target.value)} placeholder="Novo item" /><button className="secondary-button" type="button" onClick={addItem}><Plus size={15} /> Item</button></div>
+      {isStructureEditing && <div className="inline-form"><input value={newItem} onChange={(event) => setNewItem(event.target.value)} placeholder="Novo item" /><button className="secondary-button" type="button" onClick={addItem}><Plus size={15} /> Item</button></div>}
     </div>
   );
 }
 
-function MaterialsBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
+function MaterialsBlock({ block, isStructureEditing, onUpdate }: { block: StepBuilderBlock; isStructureEditing: boolean; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const links = Array.isArray(block.config.links) ? block.config.links as Array<any> : [];
@@ -3741,13 +3788,13 @@ function MaterialsBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate
   };
   return (
     <div className="materials-block-body">
-      {links.map((link) => <div className="material-row" key={link.id}><a href={link.url} target="_blank" rel="noreferrer">{link.title}</a><button className="icon-button danger" onClick={() => onUpdate({ config: { links: links.filter((item) => item.id !== link.id) } })}><Trash2 size={13} /></button></div>)}
-      <div className="inline-form"><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Nome" /><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://" /><button className="secondary-button" type="button" onClick={add}><Plus size={15} /> Link</button></div>
+      {links.map((link) => <div className="material-row" key={link.id}><a href={link.url} target="_blank" rel="noreferrer">{link.title}</a>{isStructureEditing && <button className="icon-button danger" onClick={() => onUpdate({ config: { links: links.filter((item) => item.id !== link.id) } })}><Trash2 size={13} /></button>}</div>)}
+      {isStructureEditing && <div className="inline-form"><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Nome" /><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://" /><button className="secondary-button" type="button" onClick={add}><Plus size={15} /> Link</button></div>}
     </div>
   );
 }
 
-function ContextBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
+function ContextBlock({ block, isStructureEditing, onUpdate }: { block: StepBuilderBlock; isStructureEditing: boolean; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
   const contextColors = ["mint", "teal", "amber", "blue", "rose", "slate"];
   const [draftTitle, setDraftTitle] = useState("");
   const [draftContent, setDraftContent] = useState("");
@@ -3820,10 +3867,10 @@ function ContextBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: 
     <div className="context-library compact-context-library">
       <div className="context-library-head">
         <span>{contexts.length ? `${contexts.length} contexto(s)` : "Nenhum contexto salvo neste bloco"}</span>
-        <button className="secondary-button" type="button" onClick={startNew}><Plus size={15} /> Adicionar contexto</button>
+        {isStructureEditing && <button className="secondary-button" type="button" onClick={startNew}><Plus size={15} /> Adicionar contexto</button>}
       </div>
 
-      {isWriting && (
+      {isStructureEditing && isWriting && (
         <div className="context-compose compact-context-compose">
           <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Titulo do contexto" />
           <textarea value={draftContent} onChange={(event) => setDraftContent(event.target.value)} placeholder="Cole aqui o contexto" rows={5} />
@@ -3845,12 +3892,12 @@ function ContextBlock({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: 
           <article className={`context-mini-card compact-context-card ${item.color || "mint"} ${item.pinned ? "pinned" : ""}`} key={item.id} onClick={() => copyToClipboard(item.content)} title="Clique para copiar o contexto">
             <strong>{item.title}</strong>
             {item.pinned && <span className="context-pin-label">Template</span>}
-            <div className="context-mini-actions" onClick={(event) => event.stopPropagation()}>
+            {isStructureEditing && <div className="context-mini-actions" onClick={(event) => event.stopPropagation()}>
               <button className={`icon-button ${item.pinned ? "active" : ""}`} type="button" title="Salvar no template" onClick={() => patchContext(item.id, { pinned: !item.pinned })}><Save size={14} /></button>
               <button className="icon-button" type="button" title="Copiar contexto" onClick={() => copyToClipboard(item.content)}><Copy size={14} /></button>
               <button className="icon-button" type="button" title="Editar contexto" onClick={() => startEdit(item)}><Pencil size={14} /></button>
               <button className="icon-button danger" type="button" title="Excluir contexto" onClick={() => removeContext(item.id)}><Trash2 size={14} /></button>
-            </div>
+            </div>}
           </article>
         ))}
       </div>
