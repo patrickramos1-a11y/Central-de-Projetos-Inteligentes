@@ -7751,3 +7751,139 @@ body {
   .summary-prompt-settings > summary { align-items: flex-start; flex-direction: column; gap: 2px; }
   .summary-status-menu { position: fixed; right: 16px; bottom: 16px; left: auto; top: auto; width: min(250px, calc(100vw - 32px)); }
 }
+
+/* Summary prompt composition: equal, compact cards with a readable selection line. */
+.summary-floating-composer {
+  grid-template-columns: repeat(auto-fit, minmax(146px, 1fr));
+  align-items: stretch;
+  gap: 7px;
+  padding: 9px;
+  border-color: rgba(13, 125, 99, 0.22);
+  background: linear-gradient(140deg, rgba(240, 255, 249, 0.88), rgba(229, 244, 239, 0.64));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.84), 0 10px 26px rgba(25, 91, 72, 0.08);
+}
+
+.summary-composer-selection {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  min-height: 26px;
+  padding: 1px 2px 3px;
+}
+
+.summary-composer-selection strong {
+  color: #103e35;
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.summary-composer-selection span {
+  color: #587068;
+  font-size: 0.7rem;
+  line-height: 1.25;
+}
+
+.summary-floating-composer .prompt-option-grid.mini-options { display: contents; }
+
+.summary-composer-card,
+.summary-floating-composer .summary-option-card,
+.summary-composer-save-card,
+.summary-composer-trigger-card {
+  display: grid;
+  min-width: 0;
+  min-height: 66px;
+  padding: 8px 10px;
+  border: 1px solid rgba(15, 118, 110, 0.16);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.summary-composer-base {
+  align-content: center;
+  gap: 4px;
+  background: linear-gradient(145deg, rgba(220, 245, 235, 0.94), rgba(238, 251, 246, 0.8));
+}
+
+.summary-composer-base strong,
+.summary-composer-base span {
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+}
+
+.summary-composer-base strong { color: #0f766e; font-size: 0.66rem; letter-spacing: 0; }
+.summary-composer-base span { color: #245248; font-size: 0.71rem; line-height: 1.2; }
+
+.summary-floating-composer .summary-option-card {
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: start;
+  gap: 7px;
+  cursor: pointer;
+  background: #f7fbfa;
+}
+
+.summary-floating-composer .summary-option-card input { width: 14px; height: 14px; margin: 1px 0 0; accent-color: #0d9b72; }
+.summary-floating-composer .summary-option-card span { min-width: 0; overflow-wrap: anywhere; color: #24463d; font-size: 0.68rem; font-weight: 760; line-height: 1.15; }
+.summary-floating-composer .summary-option-card.tone-0 { border-color: rgba(13, 155, 114, 0.25); background: rgba(231, 250, 242, 0.92); }
+.summary-floating-composer .summary-option-card.tone-1 { border-color: rgba(38, 126, 166, 0.24); background: rgba(233, 246, 252, 0.92); }
+.summary-floating-composer .summary-option-card.tone-2 { border-color: rgba(181, 122, 42, 0.24); background: rgba(255, 248, 229, 0.92); }
+.summary-floating-composer .summary-option-card.tone-3 { border-color: rgba(169, 78, 57, 0.22); background: rgba(255, 241, 236, 0.92); }
+.summary-floating-composer .summary-option-card.tone-4 { border-color: rgba(73, 123, 106, 0.22); background: rgba(238, 248, 242, 0.94); }
+
+.summary-composer-save-card,
+.summary-composer-trigger-card {
+  place-content: center;
+  gap: 6px;
+  justify-items: center;
+  font-size: 0.73rem;
+  line-height: 1.14;
+  text-align: center;
+  white-space: normal;
+}
+
+.summary-composer-save-card { background: linear-gradient(145deg, #0fae7d, #087c65); }
+.summary-composer-trigger-card { color: #14627b; border-color: rgba(20, 98, 123, 0.22); background: rgba(232, 247, 251, 0.92); }
+.summary-composer-trigger-card:disabled { color: #81918d; border-color: rgba(128, 145, 141, 0.18); background: rgba(244, 247, 246, 0.78); }
+
+.summary-generated-prompt { position: relative; gap: 0; }
+.summary-archive-prompt {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff8f6;
+  box-shadow: 0 2px 7px rgba(69, 33, 27, 0.14);
+}
+
+.summary-topic-number-input {
+  width: 52px;
+  min-height: 28px;
+  padding: 3px 6px;
+  border: 1px solid rgba(13, 155, 114, 0.52);
+  border-radius: 6px;
+  color: #124b40;
+  background: #ffffff;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 800;
+  outline: none;
+}
+
+.summary-prompt-settings-body { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.summary-prompt-settings-body .summary-base-prompt-field:last-of-type { grid-column: auto; }
+.summary-prompt-settings-body .summary-base-prompt-field textarea { min-height: 102px; resize: vertical; }
+
+@media (max-width: 760px) {
+  .summary-floating-composer { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-composer-selection { grid-column: 1 / -1; }
+  .summary-composer-card,
+  .summary-floating-composer .summary-option-card,
+  .summary-composer-save-card,
+  .summary-composer-trigger-card { min-height: 62px; }
+  .summary-prompt-settings-body { grid-template-columns: 1fr; }
+}

@@ -305,6 +305,7 @@ type SummaryPromptConfig = {
   // New summary versions use their own text snapshot, never the general library.
   basePromptId?: string | null;
   basePromptSnapshot?: string;
+  triggerPromptSnapshot?: string;
   additions?: SummaryPromptAddition[];
 };
 
@@ -1433,7 +1434,7 @@ function App() {
     }));
   }
 
-  async function moveProjectSummaryItem(summaryId: string, itemId: string, parentId: string | null) {
+  async function moveProjectSummaryItem(summaryId: string, itemId: string, parentId: string | null, targetIndex?: number) {
     if (!supabase) return;
 
     const items = tables.project_summary_items.filter((item) => item.summary_id === summaryId).sort(byOrder);
@@ -1446,7 +1447,7 @@ function App() {
       return;
     }
 
-    const normalized = normalizeProjectSummaryStructure(items, itemId, nextParentId);
+    const normalized = normalizeProjectSummaryStructure(items, itemId, nextParentId, targetIndex);
     const now = new Date().toISOString();
     const updates = await Promise.all(normalized.map((row) => supabase
       .from("project_summary_items")
@@ -1472,6 +1473,27 @@ function App() {
       project_summary_items: current.project_summary_items.map((currentItem) => nextById.get(currentItem.id) ?? currentItem),
     }));
     setNotice("Estrutura do sumario reorganizada e numeracao atualizada.");
+  }
+
+  async function moveProjectSummaryItemToNumber(summaryId: string, itemId: string, topicNumber: string) {
+    const normalizedNumber = topicNumber.trim().replace(/\.+$/, "");
+    if (!/^\d+(?:\.\d+)*$/.test(normalizedNumber) || normalizedNumber.split(".").some((part) => Number(part) < 1)) {
+      setNotice("Informe uma numeracao valida, como 5 ou 5.2.1.");
+      return;
+    }
+
+    const parts = normalizedNumber.split(".").map(Number);
+    const parentNumber = parts.slice(0, -1).join(".");
+    const targetIndex = parts[parts.length - 1] - 1;
+    const items = tables.project_summary_items.filter((item) => item.summary_id === summaryId);
+    const parent = parentNumber ? items.find((item) => item.topic_number === parentNumber) : null;
+
+    if (parentNumber && !parent) {
+      setNotice(`O topico ${parentNumber} precisa existir antes de mover este item.`);
+      return;
+    }
+
+    await moveProjectSummaryItem(summaryId, itemId, parent?.id ?? null, targetIndex);
   }
 
   async function deleteProjectSummaryItem(summaryId: string, itemId: string) {
@@ -2280,6 +2302,7 @@ function App() {
             onSetSummaryItemSelection={setSummaryItemSelection}
             onAddSummaryItem={addProjectSummaryItem}
             onMoveSummaryItem={moveProjectSummaryItem}
+            onMoveSummaryItemToNumber={moveProjectSummaryItemToNumber}
             onDeleteSummaryItem={deleteProjectSummaryItem}
             onConsolidateSummary={consolidateProjectSummary}
             onSaveGeneratedPrompt={saveGeneratedPrompt}
@@ -3175,6 +3198,7 @@ function JourneyView({
   onSetSummaryItemSelection,
   onAddSummaryItem,
   onMoveSummaryItem,
+  onMoveSummaryItemToNumber,
   onDeleteSummaryItem,
   onConsolidateSummary,
   onSaveGeneratedPrompt,
@@ -3213,7 +3237,8 @@ function JourneyView({
   onUpdateSummaryItem: (itemId: string, payload: Partial<ProjectSummaryItem>) => void;
   onSetSummaryItemSelection: (summaryId: string, itemId: string, isSelected: boolean) => void;
   onAddSummaryItem: (summaryId: string, parentId: string, title: string) => void;
-  onMoveSummaryItem: (summaryId: string, itemId: string, parentId: string | null) => void;
+  onMoveSummaryItem: (summaryId: string, itemId: string, parentId: string | null, targetIndex?: number) => void;
+  onMoveSummaryItemToNumber: (summaryId: string, itemId: string, topicNumber: string) => void;
   onDeleteSummaryItem: (summaryId: string, itemId: string) => void;
   onConsolidateSummary: (summaryId: string) => Promise<ProjectSummary | null>;
   onSaveGeneratedPrompt: (payload: GeneratedPromptWrite) => Promise<boolean>;
@@ -3474,6 +3499,7 @@ function JourneyView({
               onSetSelection={onSetSummaryItemSelection}
               onAddItem={onAddSummaryItem}
               onMoveItem={onMoveSummaryItem}
+              onMoveItemToNumber={onMoveSummaryItemToNumber}
               onDeleteItem={onDeleteSummaryItem}
               onConsolidate={onConsolidateSummary}
             />
@@ -4032,6 +4058,7 @@ function LegacySummaryOperationalBlock({
   const summaryPromptConfig = parseSummaryPromptConfig(summary?.prompt_config_json);
   const promptAdditions = summaryPromptConfig.additions ?? [];
   const basePromptText = summaryPromptConfig.basePromptSnapshot?.trim() ?? "";
+  const triggerPromptText = summaryPromptConfig.triggerPromptSnapshot?.trim() ?? "";
   const basePrompt = basePromptText
     ? { id: "", content: basePromptText, ai_tool_id: null, title: "Prompt base desta versao" } as Pick<Prompt, "id" | "content" | "ai_tool_id" | "title">
     : null;
@@ -4080,11 +4107,9 @@ function LegacySummaryOperationalBlock({
     setSelectedPromptOptions((current) => (current.includes(option) ? current.filter((item) => item !== option) : [...current, option]));
   }
 
-  async function copyAndSavePrompt() {
+  async function saveComposedPrompt() {
     if (!summary || !basePrompt || !finalPrompt.trim() || selectedPromptItems.length === 0) return;
     const summaryItemIds = selectedPromptItems.map((item) => item.id);
-    const copied = await copyToClipboard(finalPrompt, "Composicao de prompt");
-    if (!copied) return;
     const saved = await onSaveGeneratedPrompt({
       project_id: project.id,
       summary_id: summary.id,
@@ -4099,11 +4124,15 @@ function LegacySummaryOperationalBlock({
     });
     if (!saved) return;
 
-    const scopedIds = new Set(summaryItemIds);
     selectedPromptItems
-      .filter((item) => !item.parent_id || !scopedIds.has(item.parent_id))
       .filter((item) => item.status === "pendente")
       .forEach((item) => onUpdateItem(item.id, { status: "em_andamento" }));
+  }
+
+  function updateSummaryItemStatus(item: ProjectSummaryItem, status: SummaryItemStatus) {
+    const ids = collectSummaryBranchIds(items, item.id);
+    ids.forEach((id) => onUpdateItem(id, { status }));
+    setStatusMenuItemId(null);
   }
 
   if (!summary) {
@@ -4154,14 +4183,15 @@ function LegacySummaryOperationalBlock({
 
       {promptScopeIds.length > 0 && (
         <div className="summary-floating-composer">
-          <div><strong>{promptScopeIds.length} topico(s) selecionado(s)</strong><span>Estes itens vao compor o prompt desta versao.</span></div>
-          <div className={`summary-composer-base ${basePrompt ? "configured" : "missing"}`}><strong>Prompt base</strong><span>{basePrompt ? "Configurado nesta versao" : "Configure no editor antes de gerar"}</span></div>
+          <div className="summary-composer-selection"><strong>{promptScopeIds.length} topico(s) selecionado(s)</strong><span>Estes itens vao compor o prompt desta versao.</span></div>
+          <div className={`summary-composer-card summary-composer-base ${basePrompt ? "configured" : "missing"}`}><strong>Prompt base</strong><span>{basePrompt ? "Configurado nesta versao" : "Configure no editor antes de gerar"}</span></div>
           <div className="prompt-option-grid mini-options">
             {promptAdditions.length ? promptAdditions.map((addition) => (
-              <label key={addition.id}><input type="checkbox" checked={selectedPromptOptions.includes(addition.id)} onChange={() => togglePromptOption(addition.id)} /><span>{addition.label}</span></label>
+              <label className={`summary-option-card tone-${promptAdditions.indexOf(addition) % 5}`} key={addition.id}><input type="checkbox" checked={selectedPromptOptions.includes(addition.id)} onChange={() => togglePromptOption(addition.id)} /><span>{addition.label}</span></label>
             )) : <span className="summary-additions-empty">Configure adicionais no editor do sumario.</span>}
           </div>
-          <button className="primary-button" type="button" disabled={!basePrompt} onClick={copyAndSavePrompt}><Copy size={15} /> Copiar e salvar prompt</button>
+          <button className="summary-composer-save-card primary-button" type="button" disabled={!basePrompt} onClick={saveComposedPrompt}><Save size={15} /> Salvar prompt</button>
+          <button className="summary-composer-trigger-card secondary-button" type="button" disabled={!triggerPromptText} title={triggerPromptText ? "Copiar prompt fixo para iniciar a execucao" : "Configure o prompt de gatilho no editor"} onClick={() => void copyToClipboard(triggerPromptText, "Prompt de gatilho")}><Copy size={15} /> Copiar gatilho</button>
         </div>
       )}
 
@@ -4199,18 +4229,18 @@ function LegacySummaryOperationalBlock({
                     </button>
                     {statusMenuItemId === item.id && (
                       <div className="summary-status-menu" role="menu">
-                        {summaryStatusOptions.map((status) => <button key={status} className={status === item.status ? "active" : ""} type="button" onClick={() => { onUpdateItem(item.id, { status }); setStatusMenuItemId(null); }}>{formatStatus(status)}</button>)}
+                        {summaryStatusOptions.map((status) => <button key={status} className={status === item.status ? "active" : ""} type="button" onClick={() => updateSummaryItemStatus(item, status)}>{formatStatus(status)}</button>)}
                       </div>
                     )}
                   </div>
                   {childCount > 0 && <span className="summary-mini-chip">{childCount} sub</span>}
-                  {coveredInBranch > 0 && <span className="summary-mini-chip covered" title={`${coveredInBranch} de ${branchIds.length} topico(s) deste ramo possuem prompt gerado.`}>{coveredInBranch} topico(s) de {branchIds.length} com prompt</span>}
+                  {coveredInBranch > 0 && <span className="summary-mini-chip covered" title={`${coveredInBranch} de ${branchIds.length} topico(s) deste ramo possuem prompt gerado.`}>{coveredInBranch} de {branchIds.length} com prompt</span>}
                   {generatedForItem.map((prompt) => {
                     const promptNumber = summaryPrompts.findIndex((candidate) => candidate.id === prompt.id) + 1;
                     return (
                       <span className="summary-generated-prompt" key={prompt.id}>
-                        <button className="summary-copy-chip" onClick={() => void copyToClipboard(prompt.final_prompt, `Prompt ${promptNumber}`)}><Copy size={13} /> Prompt {promptNumber}</button>
-                        <button className="summary-archive-prompt" type="button" title={`Arquivar Prompt ${promptNumber}`} onClick={() => onArchiveGeneratedPrompt(prompt.id)}><X size={12} /></button>
+                        <button className="summary-copy-chip" onClick={() => void copyToClipboard(prompt.final_prompt, `Prompt v${promptNumber}`)}><Copy size={13} /> Prompt v{promptNumber}</button>
+                        <button className="summary-archive-prompt" type="button" title={`Arquivar somente o Prompt v${promptNumber}`} onClick={() => onArchiveGeneratedPrompt(prompt.id)}><X size={12} /></button>
                       </span>
                     );
                   })}
@@ -4730,6 +4760,7 @@ function ProjectSummaryPanel({
   onSetSelection,
   onAddItem,
   onMoveItem,
+  onMoveItemToNumber,
   onDeleteItem,
   onConsolidate,
 }: {
@@ -4741,7 +4772,8 @@ function ProjectSummaryPanel({
   onUpdateItem: (itemId: string, payload: Partial<ProjectSummaryItem>) => void;
   onSetSelection: (summaryId: string, itemId: string, isSelected: boolean) => void;
   onAddItem: (summaryId: string, parentId: string, title: string) => void;
-  onMoveItem: (summaryId: string, itemId: string, parentId: string | null) => void;
+  onMoveItem: (summaryId: string, itemId: string, parentId: string | null, targetIndex?: number) => void;
+  onMoveItemToNumber: (summaryId: string, itemId: string, topicNumber: string) => void;
   onDeleteItem: (summaryId: string, itemId: string) => void;
   onConsolidate: (summaryId: string) => Promise<ProjectSummary | null>;
 }) {
@@ -4757,7 +4789,8 @@ function ProjectSummaryPanel({
   const [additionContent, setAdditionContent] = useState("");
   const [addingChildOfId, setAddingChildOfId] = useState<string | null>(null);
   const [childTitle, setChildTitle] = useState("");
-  const [hierarchyMenuItemId, setHierarchyMenuItemId] = useState<string | null>(null);
+  const [editingTopicNumberId, setEditingTopicNumberId] = useState<string | null>(null);
+  const [topicNumberDraft, setTopicNumberDraft] = useState("");
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
 
   const sortedSummaries = useMemo(
@@ -4791,7 +4824,8 @@ function ProjectSummaryPanel({
     setAdditionContent("");
     setAddingChildOfId(null);
     setChildTitle("");
-    setHierarchyMenuItemId(null);
+    setEditingTopicNumberId(null);
+    setTopicNumberDraft("");
   }, [activeSummary?.id, activeSummary?.prompt_config_json]);
 
   function toggleCollapsedTopic(itemId: string) {
@@ -4895,7 +4929,7 @@ function ProjectSummaryPanel({
         <details className="summary-prompt-settings">
           <summary>
             <span>Configurar prompts do sumario</span>
-            <small>{promptConfig.basePromptSnapshot?.trim() ? "Prompt base configurado" : "Prompt base pendente"} · versao {activeSummary.version_number}</small>
+            <small>{promptConfig.basePromptSnapshot?.trim() ? "Prompt base configurado" : "Prompt base pendente"} · {promptConfig.triggerPromptSnapshot?.trim() ? "gatilho configurado" : "gatilho pendente"} · versao {activeSummary.version_number}</small>
           </summary>
           <div className="summary-prompt-settings-body">
             <label className="field summary-base-prompt-field">
@@ -4907,7 +4941,16 @@ function ProjectSummaryPanel({
                 placeholder="Escreva o prompt base e use {{topicos_selecionados}} onde os itens escolhidos devem entrar."
               />
             </label>
-            <p className="summary-prompt-variable-help">Variaveis disponiveis: <code>{"{{projeto}}"}</code>, <code>{"{{empresa}}"}</code>, <code>{"{{sumario_consolidado}}"}</code> e <code>{"{{topicos_selecionados}}"}</code>. Esta configuracao acompanha a proxima versao criada ao consolidar.</p>
+            <label className="field summary-base-prompt-field">
+              <span>Prompt de gatilho</span>
+              <textarea
+                rows={3}
+                value={promptConfig.triggerPromptSnapshot ?? ""}
+                onChange={(event) => updatePromptConfig({ triggerPromptSnapshot: event.target.value })}
+                placeholder="Escreva a instrucao fixa que inicia a execucao do prompt salvo."
+              />
+            </label>
+            <p className="summary-prompt-variable-help">Variaveis disponiveis: <code>{"{{projeto}}"}</code>, <code>{"{{empresa}}"}</code>, <code>{"{{sumario_consolidado}}"}</code> e <code>{"{{topicos_selecionados}}"}</code>. O prompt de gatilho e fixo; o prompt base e as instrucoes adicionais compoem o arquivo salvo.</p>
 
             <div className="summary-additions-editor">
               <div className="summary-additions-heading"><strong>Instrucoes adicionais</strong><span>Entram na composicao quando selecionadas na execucao.</span></div>
@@ -4977,8 +5020,6 @@ function ProjectSummaryPanel({
             <div className="summary-item-list compact-tree-list summary-editor-tree-list">
               {visibleSummaryItems.map((item) => {
                 const childCount = summaryItems.filter((child) => child.parent_id === item.id).length;
-                const branchIds = new Set(collectSummaryBranchIds(summaryItems, item.id));
-                const availableParents = summaryItems.filter((candidate) => candidate.id !== item.id && !branchIds.has(candidate.id));
 
                 return (
                   <Fragment key={item.id}>
@@ -5000,12 +5041,29 @@ function ProjectSummaryPanel({
                         {item.is_selected && <Check size={14} />}
                       </button>
                       <div className="summary-topic-hierarchy">
-                        <button className="summary-topic-button" type="button" title="Alterar nivel do topico" onClick={() => setHierarchyMenuItemId((current) => current === item.id ? null : item.id)}><strong>{item.topic_number}</strong></button>
-                        {hierarchyMenuItemId === item.id && (
-                          <select autoFocus className="summary-hierarchy-select" value={item.parent_id ?? ""} onChange={(event) => { onMoveItem(activeSummary.id, item.id, event.target.value || null); setHierarchyMenuItemId(null); }} onBlur={() => setHierarchyMenuItemId(null)}>
-                            <option value="">Topico raiz</option>
-                            {availableParents.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.topic_number} {candidate.title}</option>)}
-                          </select>
+                        {editingTopicNumberId === item.id ? (
+                          <input
+                            autoFocus
+                            className="summary-topic-number-input"
+                            value={topicNumberDraft}
+                            onChange={(event) => setTopicNumberDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                event.currentTarget.dataset.committed = "true";
+                                onMoveItemToNumber(activeSummary.id, item.id, topicNumberDraft);
+                                setEditingTopicNumberId(null);
+                              }
+                              if (event.key === "Escape") setEditingTopicNumberId(null);
+                            }}
+                            onBlur={(event) => {
+                              if (event.currentTarget.dataset.committed !== "true" && topicNumberDraft.trim() && topicNumberDraft.trim() !== item.topic_number) onMoveItemToNumber(activeSummary.id, item.id, topicNumberDraft);
+                              setEditingTopicNumberId(null);
+                            }}
+                            aria-label={`Nova numeracao para ${item.title}`}
+                          />
+                        ) : (
+                          <button className="summary-topic-button" type="button" title="Editar numeracao e reposicionar topico" onClick={() => { setEditingTopicNumberId(item.id); setTopicNumberDraft(item.topic_number); }}><strong>{item.topic_number}</strong></button>
                         )}
                       </div>
                       <div className="summary-item-main">
@@ -6373,21 +6431,26 @@ function getBlockingPhase(phase: ProjectStepPhase | null | undefined, phases: Pr
   return previousPhase && previousPhase.status !== "concluido" ? previousPhase : null;
 }
 
-function normalizeProjectSummaryStructure(items: ProjectSummaryItem[], movedItemId: string, nextParentId: string | null) {
+function normalizeProjectSummaryStructure(items: ProjectSummaryItem[], movedItemId: string, nextParentId: string | null, targetIndex?: number) {
+  const movedItem = items.find((item) => item.id === movedItemId);
+  if (!movedItem) return items;
+
   const childrenByParent = new Map<string | null, ProjectSummaryItem[]>();
   const updatedParents = new Map(items.map((item) => [item.id, item.id === movedItemId ? nextParentId : item.parent_id]));
 
-  items.forEach((item) => {
-    const parentId = updatedParents.get(item.id) ?? null;
-    childrenByParent.set(parentId, [...(childrenByParent.get(parentId) ?? []), item]);
-  });
-
-  const orderedChildren = (parentId: string | null) => [...(childrenByParent.get(parentId) ?? [])]
-    .sort((left, right) => {
-      if (left.id === movedItemId) return 1;
-      if (right.id === movedItemId) return -1;
-      return left.sort_order - right.sort_order;
+  items
+    .filter((item) => item.id !== movedItemId)
+    .forEach((item) => {
+      const parentId = updatedParents.get(item.id) ?? null;
+      childrenByParent.set(parentId, [...(childrenByParent.get(parentId) ?? []), item]);
     });
+
+  const targetChildren = [...(childrenByParent.get(nextParentId) ?? [])].sort((left, right) => left.sort_order - right.sort_order);
+  const insertionIndex = Math.max(0, Math.min(targetIndex ?? targetChildren.length, targetChildren.length));
+  targetChildren.splice(insertionIndex, 0, movedItem);
+  childrenByParent.set(nextParentId, targetChildren);
+
+  const orderedChildren = (parentId: string | null) => [...(childrenByParent.get(parentId) ?? [])];
 
   const normalized: ProjectSummaryItem[] = [];
   const walk = (parentId: string | null, prefix: string, level: number) => {
@@ -6511,6 +6574,7 @@ function parseSummaryPromptConfig(raw: string | null | undefined): SummaryPrompt
     return {
       basePromptId: typeof parsed.basePromptId === "string" ? parsed.basePromptId : null,
       basePromptSnapshot: typeof parsed.basePromptSnapshot === "string" ? parsed.basePromptSnapshot : "",
+      triggerPromptSnapshot: typeof parsed.triggerPromptSnapshot === "string" ? parsed.triggerPromptSnapshot : "",
       additions: Array.isArray(parsed.additions)
         ? parsed.additions
           .filter((addition): addition is SummaryPromptAddition => Boolean(addition && typeof addition.id === "string" && typeof addition.label === "string" && typeof addition.content === "string"))
