@@ -286,7 +286,11 @@ type GeneratedPrompt = {
   ai_tool_id: string | null;
   created_by: string | null;
   created_at: string;
+  status: "ativo" | "arquivado";
+  archived_at: string | null;
 };
+
+type GeneratedPromptWrite = Omit<GeneratedPrompt, "id" | "created_at" | "status" | "archived_at">;
 
 type SummaryPromptAddition = {
   id: string;
@@ -1268,7 +1272,20 @@ function App() {
       return;
     }
 
-    const { error } = await supabase.from("project_summary_items").update(normalizePayload({ ...payload, updated_at: new Date().toISOString() })).eq("id", itemId);
+    const target = tables.project_summary_items.find((item) => item.id === itemId);
+    if (!target) return;
+
+    const now = new Date().toISOString();
+    const branchIds = payload.status
+      ? collectSummaryBranchIds(tables.project_summary_items.filter((item) => item.summary_id === target.summary_id), itemId)
+      : [itemId];
+    const updates = await Promise.all(branchIds.map((id) => {
+      const nextPayload = id === itemId
+        ? normalizePayload({ ...payload, updated_at: now })
+        : normalizePayload({ status: payload.status, updated_at: now });
+      return supabase.from("project_summary_items").update(nextPayload).eq("id", id);
+    }));
+    const error = updates.find((result) => result.error)?.error;
 
     if (error) {
       setNotice(`Erro ao atualizar item do sumario: ${error.message}`);
@@ -1277,7 +1294,12 @@ function App() {
 
     setTables((current) => ({
       ...current,
-      project_summary_items: current.project_summary_items.map((item) => (item.id === itemId ? { ...item, ...payload } : item)),
+      project_summary_items: current.project_summary_items.map((item) => {
+        if (!branchIds.includes(item.id)) return item;
+        return item.id === itemId
+          ? { ...item, ...payload, updated_at: now }
+          : { ...item, status: payload.status ?? item.status, updated_at: now };
+      }),
     }));
   }
 
@@ -1535,9 +1557,9 @@ function App() {
     return insertedSummary as ProjectSummary;
   }
 
-  async function saveGeneratedPrompt(payload: Omit<GeneratedPrompt, "id" | "created_at">) {
+  async function saveGeneratedPrompt(payload: GeneratedPromptWrite) {
     if (!supabase || !payload.final_prompt.trim()) {
-      return;
+      return false;
     }
 
     const { data, error } = await supabase
@@ -1545,6 +1567,8 @@ function App() {
       .insert(
         normalizePayload({
           ...payload,
+          status: "ativo",
+          archived_at: null,
           created_by: payload.created_by || currentUser?.name || "Patrick",
         }),
       )
@@ -1553,11 +1577,35 @@ function App() {
 
     if (error || !data) {
       setNotice(`Erro ao salvar historico do prompt: ${error?.message ?? "erro desconhecido"}`);
-      return;
+      return false;
     }
 
     setTables((current) => ({ ...current, generated_prompts: [...current.generated_prompts, data as GeneratedPrompt] }));
     setNotice("Prompt salvo no historico do projeto.");
+    return true;
+  }
+
+  async function archiveGeneratedPrompt(promptId: string) {
+    if (!supabase) return;
+
+    const archivedAt = new Date().toISOString();
+    const { error } = await supabase
+      .from("generated_prompts")
+      .update({ status: "arquivado", archived_at: archivedAt })
+      .eq("id", promptId);
+
+    if (error) {
+      setNotice(`Erro ao arquivar prompt: ${error.message}`);
+      return;
+    }
+
+    setTables((current) => ({
+      ...current,
+      generated_prompts: current.generated_prompts.map((prompt) => (
+        prompt.id === promptId ? { ...prompt, status: "arquivado", archived_at: archivedAt } : prompt
+      )),
+    }));
+    setNotice("Prompt arquivado. O historico foi preservado.");
   }
 
   async function addStepLink(stepId: string, title: string, url: string) {
@@ -2190,6 +2238,7 @@ function App() {
             onDeleteSummaryItem={deleteProjectSummaryItem}
             onConsolidateSummary={consolidateProjectSummary}
             onSaveGeneratedPrompt={saveGeneratedPrompt}
+            onArchiveGeneratedPrompt={archiveGeneratedPrompt}
             onCreatePromptFromBlock={createPromptFromBlock}
           />
         )}
@@ -2896,7 +2945,7 @@ function ClientBlockJourneyView({
           <div className="step-auto-status"><span className={`chip active ${payload?.completion.status ?? selectedStep.status}`}>{formatStepStatus(payload?.completion.status ?? selectedStep.status)}</span><span>{payload ? `${payload.completion.completedBlocks}/${payload.completion.totalBlocks} blocos completos` : "Carregando blocos"}</span><div className="progress-bar"><span style={{ width: `${payload?.completion.progress ?? 0}%` }} /></div></div>
           {!payload && <div className="empty-state compact"><Loader2 className="spin" size={23} /> Carregando jornada...</div>}
           {payload && !blocks.length && <div className="empty-block-canvas"><Sparkles size={30} /><strong>Etapa limpa</strong><span>{mode === "edit" ? "Adicione apenas os blocos necessarios." : "Esta etapa ainda nao possui conteudo para executar."}</span>{mode === "edit" && <button className="primary-button" onClick={() => setIsAdding(true)}><Plus size={16} /> Adicionar primeiro bloco</button>}</div>}
-          <div className="block-canvas">{blocks.map((block, index) => <StepBuilderBlockCard key={block.id} block={block} index={index} total={blocks.length} value={payload?.values.find((value) => value.block_id === block.id)?.value} tables={tables} summaries={[]} summaryItems={[]} generatedPrompts={[]} project={projectLike} selectedStep={stepLike} currentUser={currentUser} onUpdateSummaryItem={() => undefined} onSetSummaryItemSelection={() => undefined} onDeleteSummaryItem={() => undefined} onSaveGeneratedPrompt={() => undefined} onCreatePromptFromBlock={onCreatePromptFromBlock} mode={mode} isEditing={mode === "edit" && editingBlockId === block.id} isCollapsed={collapsedBlockIds.has(block.id)} onToggleCollapse={() => setCollapsedBlockIds((current) => { const next = new Set(current); next.has(block.id) ? next.delete(block.id) : next.add(block.id); return next; })} onDuplicate={() => void addBlock(block.type)} onEdit={() => setEditingBlockId((current) => current === block.id ? null : block.id)} onUpdate={(patch) => void updateBlock(block.id, patch)} onDelete={() => void request(`/blocks/${encodeURIComponent(block.id)}`, { method: "DELETE" }).then(setPayload)} onMove={move} onSaveValue={(value) => void saveValue(block.id, value)} onOpenSummary={() => undefined} ownerType="client" />)}</div>
+          <div className="block-canvas">{blocks.map((block, index) => <StepBuilderBlockCard key={block.id} block={block} index={index} total={blocks.length} value={payload?.values.find((value) => value.block_id === block.id)?.value} tables={tables} summaries={[]} summaryItems={[]} generatedPrompts={[]} project={projectLike} selectedStep={stepLike} currentUser={currentUser} onUpdateSummaryItem={() => undefined} onSetSummaryItemSelection={() => undefined} onDeleteSummaryItem={() => undefined} onSaveGeneratedPrompt={async () => false} onArchiveGeneratedPrompt={() => undefined} onCreatePromptFromBlock={onCreatePromptFromBlock} mode={mode} isEditing={mode === "edit" && editingBlockId === block.id} isCollapsed={collapsedBlockIds.has(block.id)} onToggleCollapse={() => setCollapsedBlockIds((current) => { const next = new Set(current); next.has(block.id) ? next.delete(block.id) : next.add(block.id); return next; })} onDuplicate={() => void addBlock(block.type)} onEdit={() => setEditingBlockId((current) => current === block.id ? null : block.id)} onUpdate={(patch) => void updateBlock(block.id, patch)} onDelete={() => void request(`/blocks/${encodeURIComponent(block.id)}`, { method: "DELETE" }).then(setPayload)} onMove={move} onSaveValue={(value) => void saveValue(block.id, value)} onOpenSummary={() => undefined} ownerType="client" />)}</div>
         </section>
       </section>
     </>
@@ -3083,6 +3132,7 @@ function JourneyView({
   onDeleteSummaryItem,
   onConsolidateSummary,
   onSaveGeneratedPrompt,
+  onArchiveGeneratedPrompt,
   onCreatePromptFromBlock,
 }: {
   project: Project;
@@ -3119,7 +3169,8 @@ function JourneyView({
   onAddSummaryItem: (summaryId: string, parentId: string, title: string) => void;
   onDeleteSummaryItem: (summaryId: string, itemId: string) => void;
   onConsolidateSummary: (summaryId: string) => Promise<ProjectSummary | null>;
-  onSaveGeneratedPrompt: (payload: Omit<GeneratedPrompt, "id" | "created_at">) => void;
+  onSaveGeneratedPrompt: (payload: GeneratedPromptWrite) => Promise<boolean>;
+  onArchiveGeneratedPrompt: (promptId: string) => void;
   onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
 }) {
   const doneSteps = steps.filter((step) => step.status === "concluido").length;
@@ -3333,6 +3384,7 @@ function JourneyView({
                 onSetSummaryItemSelection={onSetSummaryItemSelection}
                 onDeleteSummaryItem={onDeleteSummaryItem}
                 onSaveGeneratedPrompt={onSaveGeneratedPrompt}
+                onArchiveGeneratedPrompt={onArchiveGeneratedPrompt}
                 onCreatePromptFromBlock={onCreatePromptFromBlock}
                 mode={journeyMode}
                 isEditing={journeyMode === "edit" && editingBlockId === block.id}
@@ -3412,6 +3464,7 @@ function StepBuilderBlockCard({
   onSetSummaryItemSelection,
   onDeleteSummaryItem,
   onSaveGeneratedPrompt,
+  onArchiveGeneratedPrompt,
   onCreatePromptFromBlock,
   mode,
   isEditing,
@@ -3440,7 +3493,8 @@ function StepBuilderBlockCard({
   onUpdateSummaryItem: (itemId: string, payload: Partial<ProjectSummaryItem>) => void;
   onSetSummaryItemSelection: (summaryId: string, itemId: string, isSelected: boolean) => void;
   onDeleteSummaryItem: (summaryId: string, itemId: string) => void;
-  onSaveGeneratedPrompt: (payload: Omit<GeneratedPrompt, "id" | "created_at">) => void;
+  onSaveGeneratedPrompt: (payload: GeneratedPromptWrite) => Promise<boolean>;
+  onArchiveGeneratedPrompt: (promptId: string) => void;
   onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
   mode: JourneyMode;
   isEditing: boolean;
@@ -3476,7 +3530,7 @@ function StepBuilderBlockCard({
       </div>
 
       {!isCollapsed && isEditing && <BlockSettings block={block} tables={tables} onUpdate={onUpdate} onCreatePromptFromBlock={onCreatePromptFromBlock} />}
-      {!isCollapsed && <BlockBody block={block} value={value} mode={mode} summaries={summaries} summaryItems={summaryItems} generatedPrompts={generatedPrompts} project={project} selectedStep={selectedStep} tables={tables} currentUser={currentUser} onUpdateSummaryItem={onUpdateSummaryItem} onSetSummaryItemSelection={onSetSummaryItemSelection} onDeleteSummaryItem={onDeleteSummaryItem} onSaveGeneratedPrompt={onSaveGeneratedPrompt} onSaveValue={onSaveValue} onOpenSummary={onOpenSummary} onUpdate={onUpdate} ownerType={ownerType} />}
+      {!isCollapsed && <BlockBody block={block} value={value} mode={mode} summaries={summaries} summaryItems={summaryItems} generatedPrompts={generatedPrompts} project={project} selectedStep={selectedStep} tables={tables} currentUser={currentUser} onUpdateSummaryItem={onUpdateSummaryItem} onSetSummaryItemSelection={onSetSummaryItemSelection} onDeleteSummaryItem={onDeleteSummaryItem} onSaveGeneratedPrompt={onSaveGeneratedPrompt} onArchiveGeneratedPrompt={onArchiveGeneratedPrompt} onSaveValue={onSaveValue} onOpenSummary={onOpenSummary} onUpdate={onUpdate} ownerType={ownerType} />}
     </article>
   );
 }
@@ -3540,6 +3594,7 @@ function BlockBody({
   onSetSummaryItemSelection,
   onDeleteSummaryItem,
   onSaveGeneratedPrompt,
+  onArchiveGeneratedPrompt,
   onSaveValue,
   onOpenSummary,
   onUpdate,
@@ -3558,7 +3613,8 @@ function BlockBody({
   onUpdateSummaryItem: (itemId: string, payload: Partial<ProjectSummaryItem>) => void;
   onSetSummaryItemSelection: (summaryId: string, itemId: string, isSelected: boolean) => void;
   onDeleteSummaryItem: (summaryId: string, itemId: string) => void;
-  onSaveGeneratedPrompt: (payload: Omit<GeneratedPrompt, "id" | "created_at">) => void;
+  onSaveGeneratedPrompt: (payload: GeneratedPromptWrite) => Promise<boolean>;
+  onArchiveGeneratedPrompt: (promptId: string) => void;
   onSaveValue: (value: unknown) => void;
   onOpenSummary: () => void;
   onUpdate: (patch: Partial<StepBuilderBlock>) => void;
@@ -3599,6 +3655,7 @@ function BlockBody({
         onSetSelection={onSetSummaryItemSelection}
         onDeleteItem={onDeleteSummaryItem}
         onSaveGeneratedPrompt={onSaveGeneratedPrompt}
+        onArchiveGeneratedPrompt={onArchiveGeneratedPrompt}
         onOpenSummary={onOpenSummary}
         isStructureEditing={mode === "edit"}
       />
@@ -3884,6 +3941,7 @@ function LegacySummaryOperationalBlock({
   onSetSelection,
   onDeleteItem,
   onSaveGeneratedPrompt,
+  onArchiveGeneratedPrompt,
   onOpenSummary,
   isStructureEditing,
 }: {
@@ -3898,7 +3956,8 @@ function LegacySummaryOperationalBlock({
   onUpdateItem: (itemId: string, payload: Partial<ProjectSummaryItem>) => void;
   onSetSelection: (summaryId: string, itemId: string, isSelected: boolean) => void;
   onDeleteItem: (summaryId: string, itemId: string) => void;
-  onSaveGeneratedPrompt: (payload: Omit<GeneratedPrompt, "id" | "created_at">) => void;
+  onSaveGeneratedPrompt: (payload: GeneratedPromptWrite) => Promise<boolean>;
+  onArchiveGeneratedPrompt: (promptId: string) => void;
   onOpenSummary: () => void;
   isStructureEditing: boolean;
 }) {
@@ -3913,7 +3972,9 @@ function LegacySummaryOperationalBlock({
   const items = summary ? summaryItems.filter((item) => item.summary_id === summary.id).sort(byOrder) : [];
   const selectedItems = items.filter((item) => item.is_selected);
   const visibleItems = getVisibleSummaryItems(items, collapsedTopicIds, summarySearch);
-  const summaryPrompts = summary ? generatedPrompts.filter((prompt) => prompt.summary_id === summary.id) : [];
+  const summaryPrompts = summary ? generatedPrompts
+    .filter((prompt) => prompt.summary_id === summary.id && prompt.status !== "arquivado")
+    .sort((left, right) => left.created_at.localeCompare(right.created_at)) : [];
   const promptCoveredItemIds = new Set(summaryPrompts.flatMap((prompt) => getGeneratedPromptItemIds(prompt)));
   const coveredSelectedCount = selectedItems.filter((item) => promptCoveredItemIds.has(item.id)).length;
   const summaryStatusOptions: SummaryItemStatus[] = ["pendente", "em_andamento", "desenvolvido", "em_revisao", "concluido", "bloqueado", "arquivado"];
@@ -3975,7 +4036,7 @@ function LegacySummaryOperationalBlock({
     const summaryItemIds = selectedPromptItems.map((item) => item.id);
     const copied = await copyToClipboard(finalPrompt, "Composicao de prompt");
     if (!copied) return;
-    onSaveGeneratedPrompt({
+    const saved = await onSaveGeneratedPrompt({
       project_id: project.id,
       summary_id: summary.id,
       summary_item_id: summaryItemIds[0] ?? null,
@@ -3987,6 +4048,13 @@ function LegacySummaryOperationalBlock({
       ai_tool_id: basePrompt?.ai_tool_id ?? null,
       created_by: currentUser?.name ?? null,
     });
+    if (!saved) return;
+
+    const scopedIds = new Set(summaryItemIds);
+    selectedPromptItems
+      .filter((item) => !item.parent_id || !scopedIds.has(item.parent_id))
+      .filter((item) => item.status === "pendente")
+      .forEach((item) => onUpdateItem(item.id, { status: "em_andamento" }));
   }
 
   if (!summary) {
@@ -4008,7 +4076,7 @@ function LegacySummaryOperationalBlock({
         <div>
           <span className={`summary-version-state ${summary.status === "active" ? "active" : "draft"}`}>{versionStateLabel}</span>
           <strong>Versao {summary.version_number}</strong>
-          <span>{versionStateHelp} {selectedItems.length}/{items.length} topicos no sumario · {coveredSelectedCount}/{selectedItems.length || 0} com prompt.</span>
+          <span>{versionStateHelp} {selectedItems.length}/{items.length} topicos no sumario · {coveredSelectedCount} topico(s) com prompt.</span>
         </div>
         <div className="inline-actions">
           <button className="secondary-button" type="button" disabled={!summary.consolidated_text} onClick={() => void copyToClipboard(summary.consolidated_text ?? "", "Sumario consolidado")}><Copy size={15} /> Copiar sumario</button>
@@ -4021,7 +4089,7 @@ function LegacySummaryOperationalBlock({
         <div><strong>{completedSelectedCount}</strong><span>Finalizados</span></div>
         <div><strong>{reviewSelectedCount}</strong><span>Em revisao</span></div>
         <div><strong>{blockedSelectedCount}</strong><span>Bloqueados</span></div>
-        <div><strong>{coveredSelectedCount}/{selectedItems.length || 0}</strong><span>Com prompt</span></div>
+        <div><strong>{coveredSelectedCount}</strong><span>Topicos com prompt</span></div>
       </div>
 
       <div className="summary-operational-tools">
@@ -4078,6 +4146,7 @@ function LegacySummaryOperationalBlock({
                     <button className={`summary-status-trigger ${item.status}`} type="button" onClick={() => setStatusMenuItemId((current) => current === item.id ? null : item.id)}>
                       <span className={`summary-status-dot ${item.status}`} />
                       {formatStatus(item.status)}
+                      <ChevronDown size={12} aria-hidden="true" />
                     </button>
                     {statusMenuItemId === item.id && (
                       <div className="summary-status-menu" role="menu">
@@ -4086,8 +4155,16 @@ function LegacySummaryOperationalBlock({
                     )}
                   </div>
                   {childCount > 0 && <span className="summary-mini-chip">{childCount} sub</span>}
-                  {coveredInBranch > 0 && <span className="summary-mini-chip covered">{coveredInBranch}/{branchIds.length} prompt</span>}
-                  {generatedForItem.map((prompt) => <button className="summary-copy-chip" key={prompt.id} onClick={() => void copyToClipboard(prompt.final_prompt, "Prompt") }><Copy size={13} /> Prompt</button>)}
+                  {coveredInBranch > 0 && <span className="summary-mini-chip covered" title={`${coveredInBranch} de ${branchIds.length} topico(s) deste ramo possuem prompt gerado.`}>{coveredInBranch} topico(s) de {branchIds.length} com prompt</span>}
+                  {generatedForItem.map((prompt) => {
+                    const promptNumber = summaryPrompts.findIndex((candidate) => candidate.id === prompt.id) + 1;
+                    return (
+                      <span className="summary-generated-prompt" key={prompt.id}>
+                        <button className="summary-copy-chip" onClick={() => void copyToClipboard(prompt.final_prompt, `Prompt ${promptNumber}`)}><Copy size={13} /> Prompt {promptNumber}</button>
+                        <button className="summary-archive-prompt" type="button" title={`Arquivar Prompt ${promptNumber}`} onClick={() => onArchiveGeneratedPrompt(prompt.id)}><X size={12} /></button>
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
               {isStructureEditing && <button className="icon-button subtle operational-danger-action" title="Excluir topico" onClick={() => onDeleteItem(summary.id, item.id)}><Trash2 size={15} /></button>}
@@ -4111,7 +4188,7 @@ type SummaryTechnicalExecutionBlockProps = {
   onUpdateItem: (itemId: string, payload: Partial<ProjectSummaryItem>) => void;
   onSetSelection: (summaryId: string, itemId: string, isSelected: boolean) => void;
   onDeleteItem: (summaryId: string, itemId: string) => void;
-  onSaveGeneratedPrompt: (payload: Omit<GeneratedPrompt, "id" | "created_at">) => void;
+  onSaveGeneratedPrompt: (payload: GeneratedPromptWrite) => Promise<boolean>;
   onOpenSummary: () => void;
   isStructureEditing: boolean;
 };

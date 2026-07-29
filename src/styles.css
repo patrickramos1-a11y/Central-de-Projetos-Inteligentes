@@ -7527,6 +7527,41 @@ body {
 .summary-status-menu button:hover,
 .summary-status-menu button.active { color: #075c48; background: rgba(var(--brand-green-rgb), 0.14); }
 
+.summary-generated-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.summary-archive-prompt {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #b24a3d;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition), border-color var(--transition), background var(--transition);
+}
+
+.summary-generated-prompt:hover .summary-archive-prompt,
+.summary-generated-prompt:focus-within .summary-archive-prompt {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.summary-archive-prompt:hover,
+.summary-archive-prompt:focus-visible {
+  border-color: rgba(178, 74, 61, 0.24);
+  background: rgba(255, 232, 228, 0.8);
+  outline: none;
+}
+
 .summary-composer-base {
   display: grid;
   align-self: stretch;
