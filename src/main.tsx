@@ -3541,7 +3541,7 @@ function BlockBody({
 
   if (block.type === "project_summary") {
     return (
-      <SummaryTechnicalExecutionBlock
+      <LegacySummaryOperationalBlock
         block={block}
         project={project}
         selectedStep={selectedStep}
@@ -4637,7 +4637,7 @@ function ProjectSummaryPanel({
       </details>
 
       {activeSummary ? (
-        <div className="summary-workspace summary-workspace-compact">
+        <div className="summary-workspace summary-workspace-compact summary-editor-technical">
           <div className="summary-review-card summary-tree-card">
             <div className="summary-toolbar compact-tree-toolbar">
               <SelectField
@@ -4670,7 +4670,12 @@ function ProjectSummaryPanel({
               </button>
             </div>
 
-            <div className="summary-item-list compact-tree-list">
+            <div className="summary-editor-tree-columns" aria-hidden="true">
+              <span>Estrutura do sumario</span>
+              <span>Selecionar</span>
+              <span>Editar</span>
+            </div>
+            <div className="summary-item-list compact-tree-list summary-editor-tree-list">
               {visibleSummaryItems.map((item) => {
                 const childCount = summaryItems.filter((child) => child.parent_id === item.id).length;
 
