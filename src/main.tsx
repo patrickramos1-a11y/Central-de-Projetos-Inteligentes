@@ -1651,8 +1651,40 @@ function App() {
     return true;
   }
 
-  async function archiveGeneratedPrompt(promptId: string) {
+  async function archiveGeneratedPrompt(promptId: string, summaryItemId?: string) {
     if (!supabase) return;
+
+    const prompt = tables.generated_prompts.find((item) => item.id === promptId);
+    const linkedItemIds = prompt ? getGeneratedPromptItemIds(prompt) : [];
+
+    if (prompt && summaryItemId && linkedItemIds.length > 1 && linkedItemIds.includes(summaryItemId)) {
+      try {
+        const parsed = prompt.selected_blocks_json ? JSON.parse(prompt.selected_blocks_json) : null;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const remainingItemIds = linkedItemIds.filter((id) => id !== summaryItemId);
+          const selectedBlocks = { ...(parsed as Record<string, unknown>), summaryItemIds: remainingItemIds };
+          const nextSummaryItemId = prompt.summary_item_id === summaryItemId ? remainingItemIds[0] ?? null : prompt.summary_item_id;
+          const { error } = await supabase
+            .from("generated_prompts")
+            .update({ selected_blocks_json: JSON.stringify(selectedBlocks), summary_item_id: nextSummaryItemId })
+            .eq("id", promptId);
+
+          if (error) throw error;
+
+          setTables((current) => ({
+            ...current,
+            generated_prompts: current.generated_prompts.map((item) => item.id === promptId
+              ? { ...item, selected_blocks_json: JSON.stringify(selectedBlocks), summary_item_id: nextSummaryItemId }
+              : item),
+          }));
+          setNotice("Prompt removido somente deste topico. Os demais vinculos foram preservados.");
+          return;
+        }
+      } catch (error) {
+        setNotice(`Erro ao remover o vinculo do prompt: ${error instanceof Error ? error.message : "erro desconhecido"}`);
+        return;
+      }
+    }
 
     const archivedAt = new Date().toISOString();
     const { error } = await supabase
@@ -1712,6 +1744,17 @@ function App() {
       setSelectedStepId(step.id);
       setNotice("Etapa adicionada a jornada do projeto.");
     }
+  }
+
+  async function deleteProjectStep(stepId: string) {
+    const orderedSteps = tables.project_steps.filter((step) => step.project_id === selectedProjectId).sort(byOrder);
+    const index = orderedSteps.findIndex((step) => step.id === stepId);
+    await deleteRecord("project_steps", stepId);
+
+    if (selectedStepId === stepId) {
+      setSelectedStepId(orderedSteps[index + 1]?.id ?? orderedSteps[index - 1]?.id ?? "");
+    }
+    setNotice("Etapa removida da jornada.");
   }
 
   async function saveProjectAsTemplate(project: Project) {
@@ -2294,6 +2337,7 @@ function App() {
             onUpdateContext={updateProjectStepContext}
             onDeleteContext={deleteProjectStepContext}
             onAddNextStep={addNextStep}
+            onDeleteStep={deleteProjectStep}
             onSaveTemplate={saveProjectAsTemplate}
             currentUser={currentUser}
             onImportSummary={importProjectSummary}
@@ -3190,6 +3234,7 @@ function JourneyView({
   onUpdateContext,
   onDeleteContext,
   onAddNextStep,
+  onDeleteStep,
   onSaveTemplate,
   currentUser,
   onImportSummary,
@@ -3230,6 +3275,7 @@ function JourneyView({
   onUpdateContext: (contextId: string, payload: Partial<ProjectStepContext>) => void;
   onDeleteContext: (contextId: string) => void;
   onAddNextStep: (projectId: string, name: string) => void;
+  onDeleteStep: (stepId: string) => void;
   onSaveTemplate: (project: Project) => void;
   currentUser: AppUser | null;
   onImportSummary: (project: Project, rawText: string) => void;
@@ -3242,7 +3288,7 @@ function JourneyView({
   onDeleteSummaryItem: (summaryId: string, itemId: string) => void;
   onConsolidateSummary: (summaryId: string) => Promise<ProjectSummary | null>;
   onSaveGeneratedPrompt: (payload: GeneratedPromptWrite) => Promise<boolean>;
-  onArchiveGeneratedPrompt: (promptId: string) => void;
+  onArchiveGeneratedPrompt: (promptId: string, summaryItemId?: string) => void;
   onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
 }) {
   const doneSteps = steps.filter((step) => step.status === "concluido").length;
@@ -3251,6 +3297,7 @@ function JourneyView({
   const [isLoadingBlocks, setIsLoadingBlocks] = useState(false);
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
   const [newStepName, setNewStepName] = useState("");
+  const [isStepManagerOpen, setIsStepManagerOpen] = useState(false);
   const [summaryEditorOpen, setSummaryEditorOpen] = useState(false);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [collapsedBlockIds, setCollapsedBlockIds] = useState<Set<string>>(() => new Set());
@@ -3359,6 +3406,18 @@ function JourneyView({
     if (nextMode === "execute") setEditingBlockId(null);
   }
 
+  function moveJourneyStep(stepId: string, direction: -1 | 1) {
+    const ordered = [...steps].sort(byOrder);
+    const index = ordered.findIndex((step) => step.id === stepId);
+    const targetIndex = index + direction;
+    if (index < 0 || targetIndex < 0 || targetIndex >= ordered.length) return;
+
+    const current = ordered[index];
+    const target = ordered[targetIndex];
+    onUpdateStep(current.id, { step_order: target.step_order });
+    onUpdateStep(target.id, { step_order: current.step_order });
+  }
+
   return (
     <>
       <section className="journey-hero journey-context-bar">
@@ -3378,7 +3437,7 @@ function JourneyView({
 
       <section className="journey-layout block-journey-layout">
         <aside className="step-rail collapsible-rail">
-          <div className="rail-heading"><strong>Etapas</strong><span>{doneSteps} concluidas</span></div>
+          <div className="rail-heading"><div><strong>Etapas</strong><span>{doneSteps} concluidas</span></div><button className="rail-edit-button" type="button" title="Organizar etapas" onClick={() => setIsStepManagerOpen(true)}><Pencil size={14} /> Editar</button></div>
           {steps.map((step) => (
             <button key={step.id} className={`step-item ${selectedStepId === step.id ? "active" : ""}`} onClick={() => onSelectStep(step.id)}>
               <span className={`step-dot ${step.status}`}>{step.status === "concluido" ? <Check size={13} /> : step.step_order}</span>
@@ -3506,6 +3565,32 @@ function JourneyView({
           </div>
         </div>
       )}
+
+      {isStepManagerOpen && (
+        <div className="modal-backdrop step-manager-backdrop" role="dialog" aria-modal="true" aria-label="Organizar etapas da jornada">
+          <div className="step-manager-modal glass-panel">
+            <div className="modal-heading">
+              <div><span className="eyebrow">Organizacao da jornada</span><h2>Etapas do projeto</h2></div>
+              <button className="icon-button" type="button" title="Fechar" onClick={() => setIsStepManagerOpen(false)}><X size={17} /></button>
+            </div>
+            <div className="step-manager-list">
+              {[...steps].sort(byOrder).map((step, index) => (
+                <article className={`step-manager-row ${step.id === selectedStepId ? "active" : ""}`} key={step.id}>
+                  <button className="step-manager-select" type="button" onClick={() => { onSelectStep(step.id); setIsStepManagerOpen(false); }}>
+                    <span className={`step-dot ${step.status}`}>{step.status === "concluido" ? <Check size={13} /> : index + 1}</span>
+                    <span><strong>{step.name}</strong><small>{formatStepStatus(step.status)}</small></span>
+                  </button>
+                  <div className="step-manager-actions">
+                    <button className="icon-button subtle" type="button" title="Subir etapa" disabled={index === 0} onClick={() => moveJourneyStep(step.id, -1)}>↑</button>
+                    <button className="icon-button subtle" type="button" title="Descer etapa" disabled={index === steps.length - 1} onClick={() => moveJourneyStep(step.id, 1)}>↓</button>
+                    <button className="icon-button danger" type="button" title="Excluir etapa" onClick={() => onDeleteStep(step.id)}><Trash2 size={15} /></button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -3567,7 +3652,7 @@ function StepBuilderBlockCard({
   onSetSummaryItemSelection: (summaryId: string, itemId: string, isSelected: boolean) => void;
   onDeleteSummaryItem: (summaryId: string, itemId: string) => void;
   onSaveGeneratedPrompt: (payload: GeneratedPromptWrite) => Promise<boolean>;
-  onArchiveGeneratedPrompt: (promptId: string) => void;
+  onArchiveGeneratedPrompt: (promptId: string, summaryItemId?: string) => void;
   onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
   mode: JourneyMode;
   isEditing: boolean;
@@ -3687,7 +3772,7 @@ function BlockBody({
   onSetSummaryItemSelection: (summaryId: string, itemId: string, isSelected: boolean) => void;
   onDeleteSummaryItem: (summaryId: string, itemId: string) => void;
   onSaveGeneratedPrompt: (payload: GeneratedPromptWrite) => Promise<boolean>;
-  onArchiveGeneratedPrompt: (promptId: string) => void;
+  onArchiveGeneratedPrompt: (promptId: string, summaryItemId?: string) => void;
   onSaveValue: (value: unknown) => void;
   onOpenSummary: () => void;
   onUpdate: (patch: Partial<StepBuilderBlock>) => void;
@@ -4030,7 +4115,7 @@ function LegacySummaryOperationalBlock({
   onSetSelection: (summaryId: string, itemId: string, isSelected: boolean) => void;
   onDeleteItem: (summaryId: string, itemId: string) => void;
   onSaveGeneratedPrompt: (payload: GeneratedPromptWrite) => Promise<boolean>;
-  onArchiveGeneratedPrompt: (promptId: string) => void;
+  onArchiveGeneratedPrompt: (promptId: string, summaryItemId?: string) => void;
   onOpenSummary: () => void;
   isStructureEditing: boolean;
 }) {
@@ -4184,11 +4269,17 @@ function LegacySummaryOperationalBlock({
       {promptScopeIds.length > 0 && (
         <div className="summary-floating-composer">
           <div className="summary-composer-selection"><strong>{promptScopeIds.length} topico(s) selecionado(s)</strong><span>Estes itens vao compor o prompt desta versao.</span></div>
-          <div className={`summary-composer-card summary-composer-base ${basePrompt ? "configured" : "missing"}`}><strong>Prompt base</strong><span>{basePrompt ? "Configurado nesta versao" : "Configure no editor antes de gerar"}</span></div>
           <div className="prompt-option-grid mini-options">
-            {promptAdditions.length ? promptAdditions.map((addition) => (
-              <label className={`summary-option-card tone-${promptAdditions.indexOf(addition) % 5}`} key={addition.id}><input type="checkbox" checked={selectedPromptOptions.includes(addition.id)} onChange={() => togglePromptOption(addition.id)} /><span>{addition.label}</span></label>
-            )) : <span className="summary-additions-empty">Configure adicionais no editor do sumario.</span>}
+            {promptAdditions.length ? promptAdditions.map((addition, index) => {
+              const AdditionIcon = summaryAdditionIcon(addition.label);
+              return (
+                <label className={`summary-option-card tone-${index % 5} ${selectedPromptOptions.includes(addition.id) ? "selected" : ""}`} key={addition.id}>
+                  <input type="checkbox" checked={selectedPromptOptions.includes(addition.id)} onChange={() => togglePromptOption(addition.id)} />
+                  <AdditionIcon size={14} aria-hidden="true" />
+                  <span>{addition.label}</span>
+                </label>
+              );
+            }) : <span className="summary-additions-empty">Configure adicionais no editor do sumario.</span>}
           </div>
           <button className="summary-composer-save-card primary-button" type="button" disabled={!basePrompt} onClick={saveComposedPrompt}><Save size={15} /> Salvar prompt</button>
           <button className="summary-composer-trigger-card secondary-button" type="button" disabled={!triggerPromptText} title={triggerPromptText ? "Copiar prompt fixo para iniciar a execucao" : "Configure o prompt de gatilho no editor"} onClick={() => void copyToClipboard(triggerPromptText, "Prompt de gatilho")}><Copy size={15} /> Copiar gatilho</button>
@@ -4240,7 +4331,7 @@ function LegacySummaryOperationalBlock({
                     return (
                       <span className="summary-generated-prompt" key={prompt.id}>
                         <button className="summary-copy-chip" onClick={() => void copyToClipboard(prompt.final_prompt, `Prompt v${promptNumber}`)}><Copy size={13} /> Prompt v{promptNumber}</button>
-                        <button className="summary-archive-prompt" type="button" title={`Arquivar somente o Prompt v${promptNumber}`} onClick={() => onArchiveGeneratedPrompt(prompt.id)}><X size={12} /></button>
+                        <button className="summary-archive-prompt" type="button" title={`Remover somente o Prompt v${promptNumber} deste topico`} onClick={() => onArchiveGeneratedPrompt(prompt.id, item.id)}><X size={12} /></button>
                       </span>
                     );
                   })}
@@ -4750,6 +4841,16 @@ function blockTypeText(type: string) {
   return blockCatalog.find((item) => item.type === type)?.label ?? type;
 }
 
+function summaryAdditionIcon(label: string) {
+  const normalized = normalizeSearchText(label);
+  if (normalized.includes("tabela")) return ListChecks;
+  if (normalized.includes("grafico") || normalized.includes("visual")) return Sparkles;
+  if (normalized.includes("fluxograma") || normalized.includes("cronograma")) return Route;
+  if (normalized.includes("legislacao") || normalized.includes("norma")) return Clipboard;
+  if (normalized.includes("pendencia")) return CheckCircle2;
+  return FileText;
+}
+
 function ProjectSummaryPanel({
   project,
   summaries,
@@ -4954,15 +5055,18 @@ function ProjectSummaryPanel({
 
             <div className="summary-additions-editor">
               <div className="summary-additions-heading"><strong>Instrucoes adicionais</strong><span>Entram na composicao quando selecionadas na execucao.</span></div>
-              {(promptConfig.additions ?? []).map((addition) => (
-                <article className="summary-addition-row" key={addition.id}>
-                  <strong title={addition.content}>{addition.label}</strong>
-                  <div className="summary-addition-actions">
-                    <button className="icon-button subtle" type="button" title="Editar instrucao adicional" onClick={() => openAdditionEditor(addition)}><Pencil size={15} /></button>
-                    <button className="icon-button subtle" type="button" title="Excluir instrucao adicional" onClick={() => updatePromptConfig({ additions: (promptConfig.additions ?? []).filter((item) => item.id !== addition.id) })}><Trash2 size={15} /></button>
-                  </div>
-                </article>
-              ))}
+              <div className="summary-addition-card-grid">
+                {(promptConfig.additions ?? []).map((addition) => (
+                  <article className="summary-addition-row" key={addition.id}>
+                    <strong title={addition.content}>{addition.label}</strong>
+                    <div className="summary-addition-actions">
+                      <button className="icon-button subtle" type="button" title="Editar instrucao adicional" onClick={() => openAdditionEditor(addition)}><Pencil size={15} /></button>
+                      <button className="icon-button subtle" type="button" title="Excluir instrucao adicional" onClick={() => updatePromptConfig({ additions: (promptConfig.additions ?? []).filter((item) => item.id !== addition.id) })}><Trash2 size={15} /></button>
+                    </div>
+                  </article>
+                ))}
+                {!editingAdditionId && <button className="secondary-button summary-addition-new" type="button" onClick={() => openAdditionEditor()}><Plus size={15} /> Adicionar instrucao</button>}
+              </div>
               {editingAdditionId ? (
                 <div className="summary-addition-create">
                   <input value={additionLabel} onChange={(event) => setAdditionLabel(event.target.value)} placeholder="Nome da instrucao" />
@@ -4972,9 +5076,7 @@ function ProjectSummaryPanel({
                     <button className="secondary-button" type="button" onClick={() => setEditingAdditionId(null)}>Cancelar</button>
                   </div>
                 </div>
-              ) : (
-                <button className="secondary-button summary-addition-new" type="button" onClick={() => openAdditionEditor()}><Plus size={15} /> Adicionar instrucao</button>
-              )}
+              ) : null}
             </div>
             <div className="inline-actions summary-prompt-settings-actions">
               <button className="primary-button" type="button" onClick={savePromptConfig}><Save size={15} /> Salvar configuracao desta versao</button>
