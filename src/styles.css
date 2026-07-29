@@ -7604,7 +7604,7 @@ body {
 
 .summary-prompt-settings-body {
   display: grid;
-  grid-template-columns: minmax(200px, 0.42fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px 14px;
   padding: 0 12px 12px;
   border-top: 1px solid rgba(15, 118, 110, 0.09);
@@ -7619,12 +7619,15 @@ body {
 .summary-additions-heading { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
 .summary-additions-heading strong { color: #173b32; font-size: 0.78rem; }
 .summary-additions-heading span { color: var(--muted); font-size: 0.72rem; }
-.summary-addition-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 38px; padding: 7px 9px; border: 1px solid rgba(15, 118, 110, 0.09); border-radius: 7px; background: rgba(246, 252, 249, 0.66); }
-.summary-addition-row div { display: grid; min-width: 0; gap: 2px; }
+.summary-addition-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 34px; padding: 5px 9px; border: 1px solid rgba(15, 118, 110, 0.09); border-radius: 7px; background: rgba(246, 252, 249, 0.66); }
 .summary-addition-row strong { color: #17493d; font-size: 0.76rem; }
-.summary-addition-row span { overflow: hidden; color: var(--muted); font-size: 0.72rem; text-overflow: ellipsis; white-space: nowrap; }
-.summary-addition-create { display: grid; grid-template-columns: minmax(140px, 0.45fr) minmax(220px, 1fr) auto; gap: 8px; }
-.summary-addition-create input { min-width: 0; min-height: 34px; padding: 7px 9px; border: 1px solid rgba(15, 118, 110, 0.14); border-radius: 7px; background: rgba(255, 255, 255, 0.72); }
+.summary-addition-actions { display: flex; gap: 4px; }
+.summary-addition-create { display: grid; grid-template-columns: minmax(160px, 0.35fr) minmax(0, 1fr); gap: 8px; padding: 8px; border: 1px dashed rgba(15, 118, 110, 0.2); border-radius: 8px; background: rgba(255, 255, 255, 0.42); }
+.summary-addition-create input,
+.summary-addition-create textarea { min-width: 0; min-height: 34px; padding: 7px 9px; border: 1px solid rgba(15, 118, 110, 0.14); border-radius: 7px; background: rgba(255, 255, 255, 0.72); }
+.summary-addition-create textarea { resize: vertical; }
+.summary-addition-create .inline-actions { grid-column: 1 / -1; justify-content: flex-end; }
+.summary-addition-new { justify-self: start; }
 .summary-prompt-settings-actions { grid-column: 1 / -1; justify-content: flex-end; }
 
 /* The editor tree header is only a compact column label, never a blank panel. */
@@ -7636,6 +7639,110 @@ body {
 }
 
 .summary-editor-technical .summary-item-list.summary-editor-tree-list { margin: 0 !important; }
+
+/* Full-screen editor: dense outline management rather than a panel of cards. */
+.summary-editor-technical .summary-toolbar.compact-tree-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px 6px;
+}
+
+.summary-editor-technical .summary-toolbar.compact-tree-toolbar .field {
+  width: min(240px, 100%);
+  margin: 0;
+}
+
+.summary-editor-technical .summary-structure-progress {
+  margin: 0 12px 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.summary-editor-technical .summary-structure-progress > div {
+  display: grid;
+  grid-template-columns: auto auto minmax(140px, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.summary-editor-technical .summary-structure-progress span,
+.summary-editor-technical .summary-structure-progress strong { font-size: 0.72rem; }
+
+.summary-editor-technical .compact-tree-toolbar + .summary-structure-progress + .summary-compact-actions { padding-top: 0; }
+
+.summary-editor-technical .summary-item.tree-row {
+  grid-template-columns: 18px 24px 28px 54px minmax(0, 1fr) 28px 28px;
+}
+
+.summary-drag-handle {
+  display: inline-grid;
+  width: 18px;
+  height: 24px;
+  place-items: center;
+  color: #8aa298;
+  cursor: grab;
+}
+
+.summary-drag-handle:active { cursor: grabbing; }
+.summary-topic-hierarchy { position: relative; }
+.summary-topic-button { cursor: pointer; }
+.summary-hierarchy-select {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 240px;
+  max-width: min(420px, 72vw);
+  min-height: 32px;
+  padding: 5px 7px;
+  border: 1px solid rgba(15, 118, 110, 0.24);
+  border-radius: 6px;
+  color: #183f35;
+  background: #ffffff;
+  box-shadow: 0 12px 26px rgba(18, 52, 44, 0.16);
+}
+
+.summary-add-child-button { color: #08795e; }
+
+.summary-inline-child-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  gap: 7px;
+  align-items: center;
+  margin: 3px 7px 5px calc(48px + (var(--tree-level, 0) * 18px));
+  padding: 6px 8px;
+  border-left: 2px solid rgba(var(--brand-green-rgb), 0.56);
+  background: rgba(233, 249, 240, 0.52);
+}
+
+.summary-inline-child-form input {
+  min-width: 0;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid rgba(15, 118, 110, 0.17);
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.summary-composer-base.missing { border-color: rgba(178, 74, 61, 0.28); background: rgba(255, 242, 239, 0.72); }
+.summary-composer-base.missing strong,
+.summary-composer-base.missing span { color: #9a482f; }
+
+@media (max-width: 760px) {
+  .summary-editor-technical .summary-toolbar.compact-tree-toolbar { align-items: stretch; flex-direction: column; }
+  .summary-editor-technical .summary-toolbar.compact-tree-toolbar .field { width: 100%; }
+  .summary-editor-technical .summary-structure-progress > div { grid-template-columns: auto auto 1fr; }
+  .summary-editor-technical .summary-item.tree-row { grid-template-columns: 16px 22px 24px 40px minmax(0, 1fr) 26px 26px; gap: 3px; }
+  .summary-drag-handle { width: 16px; }
+  .summary-inline-child-form,
+  .summary-addition-create { grid-template-columns: 1fr; }
+  .summary-inline-child-form { margin-left: 28px; }
+  .summary-inline-child-form .secondary-button,
+  .summary-inline-child-form .primary-button { width: 100%; }
+}
 
 @media (max-width: 760px) {
   .summary-item.tree-row.operational-row { grid-template-columns: 24px 26px minmax(36px, auto) minmax(0, 1fr); }
