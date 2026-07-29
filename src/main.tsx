@@ -2298,6 +2298,7 @@ function App() {
             query={query}
             setQuery={setQuery}
             onCreate={createProject}
+            onUpdate={updateProject}
             onOpen={(id) => {
               setSelectedProjectId(id);
               setView("journey");
@@ -2422,6 +2423,7 @@ function ProjectsView({
   query,
   setQuery,
   onCreate,
+  onUpdate,
   onOpen,
   onDelete,
 }: {
@@ -2430,15 +2432,37 @@ function ProjectsView({
   query: string;
   setQuery: (query: string) => void;
   onCreate: (form: NewProjectFormState) => void;
+  onUpdate: (id: string, payload: Partial<Project>) => void;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
   const [statusFilter, setStatusFilter] = useState<ProjectStatus | "todos">("todos");
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [projectNameDraft, setProjectNameDraft] = useState("");
+  const [projectCompanyDraft, setProjectCompanyDraft] = useState("");
+  const [projectResponsibleDraft, setProjectResponsibleDraft] = useState("");
   const filteredProjects = tables.projects
     .filter((project) => statusFilter === "todos" || project.status === statusFilter)
     .filter((project) => normalizeSearch(project.name, project.company, project.responsible).includes(query.toLowerCase()))
     .sort((a, b) => new Date(b.updated_at ?? b.created_at).getTime() - new Date(a.updated_at ?? a.created_at).getTime());
+
+  function openProjectEditor(project: Project) {
+    setEditingProject(project);
+    setProjectNameDraft(project.name);
+    setProjectCompanyDraft(project.company ?? "");
+    setProjectResponsibleDraft(project.responsible ?? "");
+  }
+
+  function saveProjectEditor() {
+    if (!editingProject || !projectNameDraft.trim()) return;
+    onUpdate(editingProject.id, {
+      name: projectNameDraft.trim(),
+      company: projectCompanyDraft.trim() || null,
+      responsible: projectResponsibleDraft.trim() || null,
+    });
+    setEditingProject(null);
+  }
 
   return (
     <>
@@ -2489,7 +2513,8 @@ function ProjectsView({
         <div className="project-grid">
           {filteredProjects.map((project) => {
             const steps = tables.project_steps.filter((step) => step.project_id === project.id);
-            const done = steps.filter((step) => step.status === "concluido").length;
+  const hasProjectSummary = tables.project_summaries.some((summary) => summary.project_id === project.id && summary.status !== "archived");
+            const done = steps.filter((step) => step.status === "concluido" && (hasProjectSummary || !isProjectSummaryStep(step))).length;
             const progress = steps.length ? Math.round((done / steps.length) * 100) : 0;
 
             return (
@@ -2512,10 +2537,16 @@ function ProjectsView({
                     {progress}% concluido - {steps.length} etapas
                   </small>
                 </button>
-                <button className="danger-text-button" onClick={() => onDelete(project.id)}>
-                  <Trash2 size={15} />
-                  Excluir projeto
-                </button>
+                <div className="project-card-actions">
+                  <button className="secondary-button project-edit-button" type="button" onClick={() => openProjectEditor(project)}>
+                    <Pencil size={16} />
+                    Editar projeto
+                  </button>
+                  <button className="danger-text-button" onClick={() => onDelete(project.id)}>
+                    <Trash2 size={15} />
+                    Excluir projeto
+                  </button>
+                </div>
               </article>
             );
           })}
@@ -2529,8 +2560,32 @@ function ProjectsView({
           </div>
         )}
       </section>
+
+      {editingProject && (
+        <div className="modal-backdrop project-editor-backdrop" role="dialog" aria-modal="true" aria-label="Editar projeto">
+          <form className="project-editor-modal glass-panel" onSubmit={(event) => { event.preventDefault(); saveProjectEditor(); }}>
+            <div className="modal-heading">
+              <div><span className="eyebrow">Dados do projeto</span><h2>Editar projeto</h2></div>
+              <button className="icon-button" type="button" title="Fechar" onClick={() => setEditingProject(null)}><X size={17} /></button>
+            </div>
+            <div className="project-editor-fields">
+              <Field label="Nome do projeto" value={projectNameDraft} onChange={setProjectNameDraft} />
+              <Field label="Empresa ou cliente" value={projectCompanyDraft} onChange={setProjectCompanyDraft} />
+              <Field label="Responsavel" value={projectResponsibleDraft} onChange={setProjectResponsibleDraft} />
+            </div>
+            <div className="inline-actions project-editor-actions">
+              <button className="secondary-button" type="button" onClick={() => setEditingProject(null)}>Cancelar</button>
+              <button className="primary-button" type="submit"><Save size={16} /> Salvar alteracoes</button>
+            </div>
+          </form>
+        </div>
+      )}
     </>
   );
+}
+
+function isProjectSummaryStep(step: ProjectStep) {
+  return normalizeSearch(step.name, step.description, step.objective).includes("sumario");
 }
 
 function ProjectTemplatesView({ tables, query, setQuery }: { tables: Tables; query: string; setQuery: (query: string) => void }) {
@@ -4126,7 +4181,7 @@ function LegacySummaryOperationalBlock({
   const [statusMenuItemId, setStatusMenuItemId] = useState<string | null>(null);
   const initializedSummaryId = useRef<string | null>(null);
 
-  const summary = summaries.find((item) => item.id === block.config.summaryId) ?? summaries.find((item) => item.status === "active") ?? summaries[0] ?? null;
+  const summary = summaries.find((item) => item.status === "active") ?? summaries.find((item) => item.id === block.config.summaryId) ?? summaries[0] ?? null;
   const items = summary ? summaryItems.filter((item) => item.summary_id === summary.id).sort(byOrder) : [];
   const selectedItems = items.filter((item) => item.is_selected);
   const visibleItems = getVisibleSummaryItems(items, collapsedTopicIds, summarySearch);
@@ -4140,7 +4195,18 @@ function LegacySummaryOperationalBlock({
   const reviewSelectedCount = selectedItems.filter((item) => item.status === "em_revisao").length;
   const blockedSelectedCount = selectedItems.filter((item) => item.status === "bloqueado").length;
   const selectedPromptItems = promptScopeIds.length ? items.filter((item) => promptScopeIds.includes(item.id)).sort(byOrder) : [];
-  const summaryPromptConfig = parseSummaryPromptConfig(summary?.prompt_config_json);
+  const directPromptConfig = parseSummaryPromptConfig(summary?.prompt_config_json);
+  const hasPromptConfiguration = Boolean(
+    directPromptConfig.basePromptSnapshot?.trim()
+    || directPromptConfig.triggerPromptSnapshot?.trim()
+    || directPromptConfig.additions?.length,
+  );
+  const inheritedPromptConfig = summaries
+    .slice()
+    .sort((left, right) => right.version_number - left.version_number)
+    .map((candidate) => parseSummaryPromptConfig(candidate.prompt_config_json))
+    .find((candidate) => Boolean(candidate.basePromptSnapshot?.trim() || candidate.triggerPromptSnapshot?.trim() || candidate.additions?.length));
+  const summaryPromptConfig = hasPromptConfiguration ? directPromptConfig : inheritedPromptConfig ?? directPromptConfig;
   const promptAdditions = summaryPromptConfig.additions ?? [];
   const basePromptText = summaryPromptConfig.basePromptSnapshot?.trim() ?? "";
   const triggerPromptText = summaryPromptConfig.triggerPromptSnapshot?.trim() ?? "";
@@ -5852,12 +5918,14 @@ function ConfigCrud({
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formState, setFormState] = useState<Record<string, unknown>>(createBlankConfig(module.key));
+  const [isFormOpen, setIsFormOpen] = useState(module.key === "prompts");
   const records = (tables[module.key] as Array<Record<string, unknown>>).filter((record) => normalizeSearch(record.name, record.title, record.description).includes(query.toLowerCase()));
   const Icon = module.icon;
 
   useEffect(() => {
     setEditingId(null);
     setFormState(createBlankConfig(module.key));
+    setIsFormOpen(module.key === "prompts");
   }, [module.key]);
 
   async function saveConfig() {
@@ -5898,10 +5966,32 @@ function ConfigCrud({
   function editConfig(record: Record<string, unknown>) {
     setEditingId(String(record.id));
     setFormState(record);
+    setIsFormOpen(true);
+  }
+
+  function openNewRecord() {
+    setEditingId(null);
+    setFormState(createBlankConfig(module.key));
+    setIsFormOpen(true);
   }
 
   return (
-    <section className="module-layout">
+    <section className={`module-layout config-crud-layout ${module.key === "prompts" ? "prompt-library-layout" : ""}`}>
+      <aside className={`form-panel config-form-panel ${isFormOpen ? "is-open" : "is-collapsed"}`}>
+        <div className="form-heading">
+          <div>
+            <h2>{editingId ? "Editar cadastro" : module.key === "prompts" ? "Cadastrar novo prompt" : "Novo cadastro"}</h2>
+            <p>{module.label}</p>
+          </div>
+          <div className="config-form-actions">
+            {!isFormOpen && <button className="primary-button" type="button" onClick={openNewRecord}><Plus size={16} /> Novo</button>}
+            {isFormOpen && <button className="secondary-button" type="button" onClick={() => setIsFormOpen(false)}><ChevronDown size={16} /> Recolher</button>}
+            {isFormOpen && <button className="primary-button" type="button" onClick={() => void saveConfig()}><Save size={16} /> Salvar</button>}
+          </div>
+        </div>
+        {isFormOpen && <div className="config-form-content"><ConfigForm moduleKey={module.key} value={formState} tables={tables} onChange={(key, value) => setFormState((current) => ({ ...current, [key]: value }))} /></div>}
+      </aside>
+
       <div className="list-panel">
         <div className="panel-heading">
           <div>
@@ -5943,24 +6033,10 @@ function ConfigCrud({
           <div className="empty-state">
             <Icon size={34} />
             <strong>Nenhum registro</strong>
-            <span>Use o formulario lateral para cadastrar.</span>
+            <span>Abra o cadastro acima para criar o primeiro registro.</span>
           </div>
         )}
       </div>
-
-      <aside className="form-panel">
-        <div className="form-heading">
-          <div>
-            <h2>{editingId ? "Editar" : "Novo cadastro"}</h2>
-            <p>{module.label}</p>
-          </div>
-          <button className="primary-button" onClick={() => void saveConfig()}>
-            <Save size={16} />
-            Salvar
-          </button>
-        </div>
-        <ConfigForm moduleKey={module.key} value={formState} tables={tables} onChange={(key, value) => setFormState((current) => ({ ...current, [key]: value }))} />
-      </aside>
     </section>
   );
 }

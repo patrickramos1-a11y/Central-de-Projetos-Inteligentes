@@ -8021,3 +8021,167 @@ body {
   .step-manager-backdrop { padding: 8px; }
   .step-manager-modal { width: 100%; max-height: calc(100vh - 16px); }
 }
+
+/* Configuration now follows the working area: a compact, retractable form above its library. */
+.config-crud-layout {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.config-form-panel {
+  width: 100%;
+  order: -1;
+}
+
+.config-form-panel .form-heading {
+  min-height: 58px;
+  padding: 10px 14px;
+  align-items: center;
+}
+
+.config-form-panel .form-heading h2 { font-size: 0.98rem; }
+.config-form-panel .form-heading p { margin-top: 2px; font-size: 0.73rem; }
+
+.config-form-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.config-form-actions .primary-button,
+.config-form-actions .secondary-button {
+  min-height: 34px;
+  padding-inline: 11px;
+  font-size: 0.76rem;
+}
+
+.config-form-content { padding: 10px; }
+.config-form-panel.is-collapsed .form-heading { border-bottom: 0; }
+
+.prompt-library-layout .prompt-config-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 10px;
+}
+
+.prompt-library-layout .prompt-config-section {
+  min-width: 0;
+  min-height: 100%;
+  padding: 11px;
+  border-radius: 9px;
+}
+
+.prompt-library-layout .prompt-config-section.prompt-editor-section textarea {
+  min-height: 168px;
+}
+
+.prompt-library-layout .prompt-config-section .field { gap: 5px; }
+.prompt-library-layout .prompt-config-section .field span { font-size: 0.7rem; }
+.prompt-library-layout .prompt-config-section input,
+.prompt-library-layout .prompt-config-section select,
+.prompt-library-layout .prompt-config-section textarea { font-size: 0.82rem; }
+
+.prompt-library-layout .prompt-variable-editor { gap: 6px; }
+.prompt-library-layout .variable-chip-row,
+.prompt-library-layout .variable-selected-row { gap: 5px; }
+.prompt-library-layout .variable-chip,
+.prompt-library-layout .variable-selected-row button { padding: 5px 7px; font-size: 0.66rem; }
+
+.prompt-library-layout .record-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 410px));
+  align-items: start;
+  justify-content: start;
+  gap: 6px;
+  padding: 10px;
+}
+
+.prompt-library-layout .record-row {
+  min-height: 62px;
+  padding: 8px 9px;
+  border-radius: 8px;
+}
+
+.prompt-library-layout .record-main { gap: 8px; min-width: 0; }
+.prompt-library-layout .record-main > div { min-width: 0; }
+.prompt-library-layout .record-main strong {
+  display: block;
+  overflow: hidden;
+  font-size: 0.77rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-library-layout .record-main span {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  font-size: 0.67rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-library-layout .row-actions { gap: 5px; }
+.prompt-library-layout .row-actions .status-pill { padding: 4px 7px; font-size: 0.64rem; }
+.prompt-library-layout .row-actions button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+}
+
+.prompt-library-layout .row-actions button svg { width: 18px; height: 18px; }
+
+.project-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.project-card-actions .project-edit-button,
+.project-card-actions .danger-text-button {
+  min-height: 32px;
+  padding: 6px 9px;
+  font-size: 0.72rem;
+}
+
+.project-editor-backdrop { padding: 16px; }
+
+.project-editor-modal {
+  width: min(560px, calc(100vw - 32px));
+  padding: 14px;
+  border-radius: 12px;
+}
+
+.project-editor-modal .modal-heading { min-height: 48px; padding: 0 0 10px; }
+.project-editor-modal .modal-heading h2 { font-size: 1.05rem; }
+
+.project-editor-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+  padding: 8px 0 12px;
+}
+
+.project-editor-actions { justify-content: flex-end; }
+
+@media (max-width: 860px) {
+  .prompt-library-layout .prompt-config-form,
+  .project-editor-fields { grid-template-columns: 1fr; }
+  .prompt-library-layout .record-list { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .config-form-panel .form-heading { align-items: flex-start; flex-direction: column; }
+  .config-form-actions { width: 100%; }
+  .config-form-actions .primary-button,
+  .config-form-actions .secondary-button { flex: 1; }
+  .prompt-library-layout .record-list { grid-template-columns: 1fr; padding: 8px; }
+  .project-editor-backdrop { padding: 8px; }
+  .project-editor-modal { width: 100%; }
+}

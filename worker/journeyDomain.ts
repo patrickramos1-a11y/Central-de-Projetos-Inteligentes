@@ -109,7 +109,7 @@ async function handleGenericStepRequest(request: Request, db: D1Database, ownerT
       : null;
     const templateDocument = templateRow ? normalizeDocumentRow(templateRow).document : null;
     const document = templateDocument
-      ? { ...templateDocument, ownerType, projectId: ownerType === "project" ? getOwnerId(ownerType, step) : undefined, clientId: ownerType === "client" ? getOwnerId(ownerType, step) : undefined, templateId: undefined, stepId, structureId: crypto.randomUUID(), title: String(step.name ?? templateDocument.title), state: "draft" as const, versionNumber: 1, revision: 1 }
+      ? createRuntimeDocumentFromTemplate(templateDocument, ownerType, step, stepId)
       : ownerType === "client"
       ? await buildClientLegacyDocument(db, step, crypto.randomUUID())
       : await buildProjectLegacyDocument(db, step, crypto.randomUUID());
@@ -225,6 +225,26 @@ async function getStepRow(db: D1Database, ownerType: OwnerType, stepId: string) 
 
 function getOwnerId(ownerType: OwnerType, step: Record<string, unknown>) {
   return ownerType === "project" ? String(step.project_id ?? "") : ownerType === "client" ? String(step.client_id ?? "") : String(step.journey_template_id ?? "");
+}
+
+function createRuntimeDocumentFromTemplate(templateDocument: StepDocument, ownerType: OwnerType, step: Record<string, unknown>, stepId: string): StepDocument {
+  return {
+    ...templateDocument,
+    ownerType,
+    projectId: ownerType === "project" ? getOwnerId(ownerType, step) : undefined,
+    clientId: ownerType === "client" ? getOwnerId(ownerType, step) : undefined,
+    templateId: undefined,
+    stepId,
+    structureId: crypto.randomUUID(),
+    title: String(step.name ?? templateDocument.title),
+    state: "draft",
+    versionNumber: 1,
+    revision: 1,
+    // A project summary belongs to a single execution and cannot be reused by a template.
+    blocks: templateDocument.blocks.map((block) => ownerType === "project" && block.type === "project_summary"
+      ? { ...block, config: { ...(block.config ?? {}), summaryId: null } }
+      : block),
+  };
 }
 
 function createGenericBlock(type: string, order: number, title?: string, parentBlockId: string | null = null): Block {

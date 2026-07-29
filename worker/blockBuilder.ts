@@ -164,7 +164,7 @@ async function ensureDraftStructure(db: D1Database, stepId: string, templateStep
     : null;
   const templateDocument = template ? parseDocument(template) : null;
   const document = templateDocument
-    ? { ...templateDocument, ownerType: "project" as const, projectId: String(step.project_id ?? ""), stepId, structureId: id, title: String(step.name ?? templateDocument.title), state: "draft" as const, versionNumber: 1, revision: 1 }
+    ? createProjectDocumentFromTemplate(templateDocument, step, id)
     : await buildLegacyDocument(db, step, id);
   await insertStructure(db, id, stepId, document.title, document, 1, 1, "draft");
   await logEvent(db, stepId, id, null, templateDocument ? "structure_created_from_template" : "structure_created_from_legacy", { blockCount: document.blocks.length, templateStepId }, null);
@@ -381,10 +381,16 @@ async function getStructureById(db: D1Database, id: string) {
 
 async function buildPayload(db: D1Database, stepId: string, structure: StructureRow) {
   const document = parseDocument(structure);
-  const values = await db.prepare("select * from journey_step_values where owner_type = 'project' and owner_step_id = ?").bind(stepId).all<Record<string, unknown>>();
-  const files = await db.prepare("select *, r2_key as url from journey_step_files where owner_type = 'project' and owner_step_id = ?").bind(stepId).all<Record<string, unknown>>();
+  const [values, files, summaries] = await Promise.all([
+    db.prepare("select * from journey_step_values where owner_type = 'project' and owner_step_id = ?").bind(stepId).all<Record<string, unknown>>(),
+    db.prepare("select *, r2_key as url from journey_step_files where owner_type = 'project' and owner_step_id = ?").bind(stepId).all<Record<string, unknown>>(),
+    document.projectId
+      ? db.prepare("select id from project_summaries where project_id = ? and status != 'arquivado'").bind(document.projectId).all<{ id: string }>()
+      : Promise.resolve({ results: [] as Array<{ id: string }> }),
+  ]);
   const parsedValues = (values.results ?? []).map((row) => ({ ...row, value: safeJson(String(row.value_json ?? "null")) }));
-  const completion = calculateCompletion(document, parsedValues, files.results ?? []);
+  const validSummaryIds = new Set((summaries.results ?? []).map((summary) => String(summary.id)));
+  const completion = calculateCompletion(document, parsedValues, files.results ?? [], validSummaryIds);
   return { structure, document, values: parsedValues, files: files.results ?? [], completion };
 }
 
@@ -403,23 +409,23 @@ async function logEvent(db: D1Database, stepId: string, structureId: string, blo
   await db.prepare("insert into journey_step_events (id, owner_type, owner_step_id, document_id, block_id, event_type, event_payload_json, created_by, created_at) values (?, 'project', ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), stepId, structureId, blockId, eventType, JSON.stringify(payload), createdBy, new Date().toISOString()).run();
 }
 
-function calculateCompletion(document: StepDocument, valueRows: Array<Record<string, unknown>>, fileRows: Array<Record<string, unknown>>) {
+function calculateCompletion(document: StepDocument, valueRows: Array<Record<string, unknown>>, fileRows: Array<Record<string, unknown>>, validSummaryIds: Set<string>) {
   const valueMap = new Map(valueRows.map((row) => [String(row.block_id), row.value]));
   const progressBlocks = document.blocks.filter((block) => block.visible && !["section", "short_text", "long_text", "phase", "comment"].includes(block.type));
   const requiredBlocks = progressBlocks.filter((block) => block.required);
   const measuredBlocks = requiredBlocks.length ? requiredBlocks : progressBlocks;
-  const completed = measuredBlocks.filter((block) => isBlockComplete(block, valueMap.get(block.id), fileRows));
-  const reasons = measuredBlocks.filter((block) => !isBlockComplete(block, valueMap.get(block.id), fileRows)).map((block) => ({ code: "required_block_incomplete", message: `Preencha o bloco ${block.title}.`, blockId: block.id }));
+  const completed = measuredBlocks.filter((block) => isBlockComplete(block, valueMap.get(block.id), fileRows, validSummaryIds));
+  const reasons = measuredBlocks.filter((block) => !isBlockComplete(block, valueMap.get(block.id), fileRows, validSummaryIds)).map((block) => ({ code: "required_block_incomplete", message: `Preencha o bloco ${block.title}.`, blockId: block.id }));
   const total = measuredBlocks.length;
   const progress = total ? Math.round((completed.length / total) * 100) : 0;
-  const anyContent = progressBlocks.some((block) => isBlockComplete(block, valueMap.get(block.id), fileRows) || !isEmpty(valueMap.get(block.id)) || !isEmpty(block.config.content) || !isEmpty(block.config.contentSnapshot) || !isEmpty(block.config.contexts));
+  const anyContent = progressBlocks.some((block) => isBlockComplete(block, valueMap.get(block.id), fileRows, validSummaryIds) || !isEmpty(valueMap.get(block.id)) || !isEmpty(block.config.content) || !isEmpty(block.config.contentSnapshot) || !isEmpty(block.config.contexts));
   const status = total > 0 && completed.length === total ? "concluido" : anyContent ? "em_andamento" : "pendente";
   return { status, progress, completedBlocks: completed.length, totalBlocks: total, canComplete: total > 0 && completed.length === total, reasons };
 }
 
-function isBlockComplete(block: StepBlock, value: unknown, fileRows: Array<Record<string, unknown>>) {
+function isBlockComplete(block: StepBlock, value: unknown, fileRows: Array<Record<string, unknown>>, validSummaryIds: Set<string> = new Set()) {
   if (block.type === "file_upload") return fileRows.some((file) => file.block_id === block.id);
-  if (block.type === "project_summary") return Boolean(block.config.summaryId);
+  if (block.type === "project_summary") return validSummaryIds.has(String(block.config.summaryId ?? ""));
   if (block.type === "materials") return Array.isArray(block.config.links) && block.config.links.length > 0;
   if (block.type === "context") return Array.isArray(block.config.contexts) ? block.config.contexts.length > 0 : !isEmpty(block.config.content);
   if (block.type === "prompt") {
@@ -433,6 +439,24 @@ function isBlockComplete(block: StepBlock, value: unknown, fileRows: Array<Recor
     return items.filter((item) => item.required !== false).every((item) => Boolean(checked[String(item.id)] ?? item.done));
   }
   return !isEmpty(value) || !isEmpty(block.config.content);
+}
+
+function createProjectDocumentFromTemplate(templateDocument: StepDocument, step: Record<string, unknown>, structureId: string): StepDocument {
+  return {
+    ...templateDocument,
+    ownerType: "project",
+    projectId: String(step.project_id ?? ""),
+    stepId: String(step.id),
+    structureId,
+    title: String(step.name ?? templateDocument.title),
+    state: "draft",
+    versionNumber: 1,
+    revision: 1,
+    // A summary is runtime data for one project. Templates keep the block, never its source summary id.
+    blocks: templateDocument.blocks.map((block) => block.type === "project_summary"
+      ? { ...block, config: { ...block.config, summaryId: null } }
+      : block),
+  };
 }
 
 function isEmpty(value: unknown) {
