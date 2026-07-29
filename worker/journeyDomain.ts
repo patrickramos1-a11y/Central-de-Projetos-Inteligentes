@@ -388,8 +388,8 @@ async function consolidateSummary(db: D1Database, summaryId: string, createdBy: 
   const statements: D1PreparedStatement[] = [
     db.prepare("update project_summaries set status = 'archived', archived_at = ?, updated_at = ? where project_id = ? and status = 'active'")
       .bind(now, now, summary.project_id),
-    db.prepare("insert into project_summaries (id, project_id, raw_text, consolidated_text, version_number, status, parse_status, item_count, selected_item_count, created_by, created_at, updated_at, activated_at) values (?, ?, ?, ?, ?, 'active', 'reviewed', ?, ?, ?, ?, ?, ?)")
-      .bind(nextId, summary.project_id, summary.raw_text ?? "", consolidatedText, nextVersion, normalized.length, normalized.length, createdBy, now, now, now),
+    db.prepare("insert into project_summaries (id, project_id, raw_text, consolidated_text, version_number, status, parse_status, item_count, selected_item_count, prompt_config_json, created_by, created_at, updated_at, activated_at) values (?, ?, ?, ?, ?, 'active', 'reviewed', ?, ?, ?, ?, ?, ?, ?)")
+      .bind(nextId, summary.project_id, summary.raw_text ?? "", consolidatedText, nextVersion, normalized.length, normalized.length, summary.prompt_config_json ?? "{}", createdBy, now, now, now),
   ];
   for (const item of normalized) {
     statements.push(db.prepare("insert into project_summary_items (id, summary_id, project_id, parent_id, topic_number, title, level, sort_order, original_text, is_selected, status, notes, parse_confidence, parse_warning, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)")

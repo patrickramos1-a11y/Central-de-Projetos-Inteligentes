@@ -27,7 +27,7 @@ const tableColumns: Record<string, string[]> = {
   project_step_links: ["id", "project_step_id", "title", "url", "notes", "link_order", "created_at"],
   project_step_phases: ["id", "project_step_id", "title", "description", "phase_order", "status", "requires_previous_phase", "prerequisite_phase_id", "completion_condition", "created_at", "updated_at"],
   project_step_contexts: ["id", "project_step_id", "phase_id", "title", "content", "context_order", "status", "created_at", "updated_at"],
-  project_summaries: ["id", "project_id", "raw_text", "consolidated_text", "version_number", "status", "parse_status", "item_count", "selected_item_count", "created_by", "created_at", "updated_at", "activated_at", "archived_at"],
+  project_summaries: ["id", "project_id", "raw_text", "consolidated_text", "version_number", "status", "parse_status", "item_count", "selected_item_count", "prompt_config_json", "created_by", "created_at", "updated_at", "activated_at", "archived_at"],
   project_summary_items: ["id", "summary_id", "project_id", "parent_id", "topic_number", "title", "level", "sort_order", "original_text", "is_selected", "status", "notes", "parse_confidence", "parse_warning", "created_at", "updated_at"],
   prompt_blocks: ["id", "title", "description", "content", "category", "ai_tool_id", "project_type_id", "journey_step_id", "status", "created_at", "updated_at"],
   generated_prompts: ["id", "project_id", "summary_id", "summary_item_id", "base_prompt_id", "base_prompt_snapshot", "selected_blocks_json", "final_prompt", "notes", "ai_tool_id", "created_by", "created_at"],
