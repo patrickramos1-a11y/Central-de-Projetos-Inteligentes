@@ -102,6 +102,7 @@ export type StepBlockConfig = {
   maxFiles?: number;
   maxFileSizeMb?: number;
   allowMultipleFiles?: boolean;
+  fileMode?: "evidence" | "resource_pack";
   attachmentsEnabled?: boolean;
   attachmentsRequired?: boolean;
   requireDescription?: boolean;
@@ -325,6 +326,7 @@ export function createBlock(type: StepBlockType, order: number): StepBlock {
         maxFiles: 20,
         maxFileSizeMb: 25,
         allowMultipleFiles: true,
+        fileMode: "evidence",
         keepVersions: true,
       },
     };

@@ -9,6 +9,7 @@ import {
   Clipboard,
   Copy,
   Database,
+  Download,
   Upload,
   FileText,
   GitBranch,
@@ -4038,8 +4039,39 @@ function BlockSettings({ block, tables, onUpdate, onCreatePromptFromBlock }: { b
         </label>
       )}
       {block.type === "prompt" && <PromptBlockSettings block={block} tables={tables} onUpdate={onUpdate} onCreatePromptFromBlock={onCreatePromptFromBlock} />}
+      {block.type === "file_upload" && <FileUploadBlockSettings block={block} onUpdate={onUpdate} />}
       {block.type === "project_summary" && <SelectField label="Versao do sumario" value={String(block.config.summaryId ?? "")} onChange={(summaryId) => onUpdate({ config: { summaryId } })} options={tables.project_summaries.map((summary) => ({ value: summary.id, label: `Versao ${summary.version_number} - ${summary.status}` }))} emptyLabel="Nao vinculado" />}
     </div>
+  );
+}
+
+function FileUploadBlockSettings({ block, onUpdate }: { block: StepBuilderBlock; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
+  const fileMode = block.config.fileMode === "resource_pack" ? "resource_pack" : "evidence";
+  const allowMultiple = block.config.allowMultipleFiles !== false;
+  const maxFiles = Math.max(1, Number(block.config.maxFiles ?? 20));
+  const maxFileSizeMb = Math.max(1, Number(block.config.maxFileSizeMb ?? 25));
+
+  return (
+    <section className="file-block-settings">
+      <div className="block-settings-heading">
+        <strong>Uso dos arquivos</strong>
+        <span>Defina se este bloco recebe evidencias da execucao ou arquivos-modelo do template.</span>
+      </div>
+      <div className="file-mode-options">
+        <button className={`file-mode-option ${fileMode === "evidence" ? "active" : ""}`} type="button" onClick={() => onUpdate({ config: { fileMode: "evidence" } })}>
+          <Upload size={16} /><span><strong>Evidencias</strong><small>Arquivos enviados durante a execucao.</small></span>
+        </button>
+        <button className={`file-mode-option ${fileMode === "resource_pack" ? "active" : ""}`} type="button" onClick={() => onUpdate({ config: { fileMode: "resource_pack" } })}>
+          <Download size={16} /><span><strong>Arquivos e modelos</strong><small>Conjunto salvo no template para baixar na jornada.</small></span>
+        </button>
+      </div>
+      {fileMode === "resource_pack" && <p className="file-mode-help">Adicione os arquivos abaixo. Ao salvar ou atualizar o template, este conjunto sera disponibilizado nas novas jornadas criadas a partir dele.</p>}
+      <div className="file-limit-grid">
+        <label className="field"><span>Quantidade maxima</span><input type="number" min="1" max="100" value={maxFiles} onChange={(event) => onUpdate({ config: { maxFiles: Math.max(1, Number(event.target.value) || 1) } })} /></label>
+        <label className="field"><span>Limite por arquivo (MB)</span><input type="number" min="1" max="500" value={maxFileSizeMb} onChange={(event) => onUpdate({ config: { maxFileSizeMb: Math.max(1, Number(event.target.value) || 1) } })} /></label>
+        <label className="checkline"><input type="checkbox" checked={allowMultiple} onChange={(event) => onUpdate({ config: { allowMultipleFiles: event.target.checked } })} /> Permitir varios arquivos de uma vez</label>
+      </div>
+    </section>
   );
 }
 function BlockBody({
@@ -4126,7 +4158,7 @@ function BlockBody({
   }
 
   if (block.type === "file_upload") {
-    return <FileRuntimeBlock block={block} stepId={selectedStep.id} currentUser={currentUser} ownerType={ownerType} />;
+    return <FileRuntimeBlock block={block} stepId={selectedStep.id} currentUser={currentUser} ownerType={ownerType} isStructureEditing={mode === "edit"} />;
   }
 
   if (block.type === "comment") {
@@ -4174,10 +4206,14 @@ function AnswerBlock({ block, value, onSaveValue }: { block: StepBuilderBlock; v
 
 type JourneyRuntimeFile = JourneyFile;
 
-function FileRuntimeBlock({ block, stepId, currentUser, ownerType, label = "Anexar evidencia", onFilesChange }: { block: StepBuilderBlock; stepId: string; currentUser: AppUser | null; ownerType: "project" | "client"; label?: string; onFilesChange?: (files: JourneyRuntimeFile[]) => void }) {
+function FileRuntimeBlock({ block, stepId, currentUser, ownerType, label = "Anexar evidencia", onFilesChange, isStructureEditing = false }: { block: StepBuilderBlock; stepId: string; currentUser: AppUser | null; ownerType: "project" | "client"; label?: string; onFilesChange?: (files: JourneyRuntimeFile[]) => void; isStructureEditing?: boolean }) {
   const [files, setFiles] = useState<JourneyRuntimeFile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const isResourcePack = block.type === "file_upload" && block.config.fileMode === "resource_pack";
+  const canManageFiles = !isResourcePack || isStructureEditing;
+  const allowMultiple = block.config.allowMultipleFiles !== false;
+  const uploadLabel = isResourcePack ? "Adicionar arquivo de modelo" : label;
 
   const refresh = async () => {
     try {
@@ -4219,16 +4255,40 @@ function FileRuntimeBlock({ block, stepId, currentUser, ownerType, label = "Anex
     }
   }
 
+  function downloadFile(file: JourneyRuntimeFile) {
+    const anchor = document.createElement("a");
+    anchor.href = file.url ?? `/api/files/${encodeURIComponent(file.r2_key ?? "")}`;
+    anchor.download = file.name;
+    anchor.rel = "noreferrer";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }
+
+  function downloadAll() {
+    if (!files.length) return;
+    files.forEach((file, index) => window.setTimeout(() => downloadFile(file), index * 180));
+    const description = files.length === 1 ? "Arquivo de modelo baixado." : `${files.length} arquivos de modelo foram preparados para download.`;
+    window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: description } }));
+  }
+
   return (
-    <div className="file-runtime-block">
-      <label className="secondary-button upload-runtime-button">
-        <Upload size={15} /> {isLoading ? "Enviando..." : label}
-        <input type="file" multiple disabled={isLoading} onChange={(event) => { void upload(event.currentTarget.files); event.currentTarget.value = ""; }} />
-      </label>
+    <div className={`file-runtime-block ${isResourcePack ? "resource-pack" : "evidence-files"}`}>
+      {isResourcePack && !isStructureEditing ? (
+        <div className="resource-pack-actions">
+          <button className="secondary-button" type="button" disabled={!files.length} onClick={downloadAll}><Download size={15} /> Baixar arquivos e modelos{files.length ? ` (${files.length})` : ""}</button>
+          <span className="muted">Conjunto de apoio configurado no template.</span>
+        </div>
+      ) : (
+        <label className="secondary-button upload-runtime-button">
+          <Upload size={15} /> {isLoading ? "Enviando..." : uploadLabel}
+          <input type="file" multiple={allowMultiple} disabled={isLoading} onChange={(event) => { void upload(event.currentTarget.files); event.currentTarget.value = ""; }} />
+        </label>
+      )}
       {message && <span className="field-error">{message}</span>}
       <div className="runtime-file-list">
-        {files.map((file) => <div key={file.id} className="runtime-file-row"><a href={file.url ?? `/api/files/${encodeURIComponent(file.r2_key ?? "")}`} target="_blank" rel="noreferrer"><FileText size={15} /> {file.name}</a><span>{Math.max(1, Math.ceil(file.size_bytes / 1024))} KB</span><button className="icon-button danger" type="button" onClick={() => void remove(file.id)} title="Remover arquivo"><Trash2 size={14} /></button></div>)}
-        {!files.length && <span className="muted">Nenhuma evidencia anexada.</span>}
+        {files.map((file) => <div key={file.id} className="runtime-file-row"><a href={file.url ?? `/api/files/${encodeURIComponent(file.r2_key ?? "")}`} target="_blank" rel="noreferrer"><FileText size={15} /> {file.name}</a><span>{Math.max(1, Math.ceil(file.size_bytes / 1024))} KB</span>{canManageFiles && <button className="icon-button danger" type="button" onClick={() => void remove(file.id)} title="Remover arquivo"><Trash2 size={14} /></button>}</div>)}
+        {!files.length && <span className="muted">{isResourcePack ? "Nenhum arquivo de modelo configurado." : "Nenhuma evidencia anexada."}</span>}
       </div>
     </div>
   );

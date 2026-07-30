@@ -284,6 +284,7 @@ function createGenericBlock(type: string, order: number, title?: string, parentB
     allowMultipleFiles: true,
     maxFiles: 20,
     maxFileSizeMb: 25,
+    fileMode: "evidence",
   });
   if (type === "phase") Object.assign(config, { status: "pendente", content: "" });
   return { id: crypto.randomUUID(), type, order, title: title?.trim() || genericBlockLabel(type), required: false, visible: true, editableInExecution: true, collapsedByDefault: false, config };
