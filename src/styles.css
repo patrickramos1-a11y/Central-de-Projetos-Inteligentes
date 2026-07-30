@@ -674,6 +674,88 @@ button {
   color: #34433f;
 }
 
+.template-card-compact {
+  min-height: 166px;
+  align-content: start;
+  cursor: pointer;
+}
+
+.template-card-compact:focus-visible {
+  outline: 3px solid rgba(var(--brand-green-rgb), 0.45);
+  outline-offset: 2px;
+}
+
+.template-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.template-card-actions .secondary-button {
+  margin-right: auto;
+}
+
+.template-preview-modal,
+.template-edit-modal,
+.template-save-modal {
+  width: min(620px, 94vw);
+  max-height: min(720px, 90vh);
+  overflow: auto;
+  padding: 22px;
+}
+
+.template-preview-modal .modal-heading p,
+.template-save-modal .modal-heading p {
+  margin: 5px 0 0;
+  color: var(--muted);
+}
+
+.template-preview-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.template-preview-stats span {
+  border-radius: 999px;
+  background: rgba(18, 127, 111, 0.1);
+  color: var(--brand-deep);
+  font-size: 0.8rem;
+  font-weight: 800;
+  padding: 7px 10px;
+}
+
+.template-preview-steps {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.template-preview-steps li {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  border-bottom: 1px solid rgba(29, 68, 59, 0.1);
+  padding: 9px 0;
+}
+
+.template-preview-steps li > span {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(var(--brand-green-rgb), 0.14);
+  color: var(--brand-deep);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
 .journey-header {
   align-items: center;
 }
@@ -2458,6 +2540,55 @@ button {
   align-items: center;
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.step-completion-hint {
+  margin: 8px 0 0;
+  padding: 8px 11px;
+  border-left: 3px solid #d89b23;
+  border-radius: 0 8px 8px 0;
+  background: rgba(255, 243, 214, 0.75);
+  color: #765110;
+  font-size: 0.82rem;
+}
+
+.step-completion-hint span {
+  font-weight: 800;
+}
+
+.template-save-modal {
+  display: grid;
+  gap: 15px;
+}
+
+.template-save-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.template-save-mode button {
+  min-height: 48px;
+  border: 1px solid rgba(25, 96, 83, 0.18);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 750;
+  padding: 8px 10px;
+}
+
+.template-save-mode button.active {
+  border-color: rgba(var(--brand-green-rgb), 0.64);
+  background: rgba(var(--brand-green-rgb), 0.15);
+  box-shadow: inset 0 -2px 0 var(--brand-green);
+  color: var(--brand-deep);
+}
+
+.template-save-mode button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .block-add-wrap {

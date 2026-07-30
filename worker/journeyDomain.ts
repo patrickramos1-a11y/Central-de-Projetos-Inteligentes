@@ -58,8 +58,17 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
   }
 
   if (resource === "projects" && id && action === "templates" && request.method === "POST") {
-    const body = await request.json<{ name?: string; createdBy?: string }>();
-    return json({ data: await saveProjectAsTemplate(env.DB, id, body.name, body.createdBy ?? null) }, 201);
+    const body = await request.json<{ name?: string; templateId?: string | null; createdBy?: string }>();
+    return json(await saveProjectAsTemplate(env.DB, id, body.name, body.createdBy ?? null, body.templateId ?? null), 201);
+  }
+
+  if (resource === "journey-templates" && id && request.method === "PATCH") {
+    const body = await request.json<{ name?: string; description?: string | null; status?: string }>();
+    return json(await updateJourneyTemplate(env.DB, id, body));
+  }
+
+  if (resource === "journey-templates" && id && request.method === "DELETE") {
+    return json(await deleteJourneyTemplate(env.DB, id));
   }
 
   if (resource === "clients" && id && action === "templates" && request.method === "POST") {
@@ -322,14 +331,45 @@ async function createRuntimeContext(
   return { context, completion };
 }
 
-async function saveProjectAsTemplate(db: D1Database, projectId: string, requestedName?: string, createdBy: string | null = null) {
+async function saveProjectAsTemplate(
+  db: D1Database,
+  projectId: string,
+  requestedName?: string,
+  createdBy: string | null = null,
+  existingTemplateId: string | null = null,
+) {
   const project = await db.prepare("select * from projects where id = ?").bind(projectId).first<Record<string, unknown>>();
   if (!project) throw new Error("Projeto nao encontrado.");
-  const templateId = crypto.randomUUID();
   const now = new Date().toISOString();
-  const name = String(requestedName ?? `${project.name} - template`).trim() || "Template de jornada";
-  await db.prepare("insert into journey_templates (id, name, description, project_type_id, context, status, created_at) values (?, ?, ?, ?, 'projeto', 'ativo', ?)")
-    .bind(templateId, name, `Criado a partir do projeto ${project.name ?? ""}.`, project.project_type_id ?? null, now).run();
+  let templateId = existingTemplateId;
+  let mode: "created" | "updated" = "created";
+  let currentTemplate: Record<string, unknown> | null = null;
+
+  if (templateId) {
+    currentTemplate = await db.prepare("select * from journey_templates where id = ? and context in ('projeto', 'geral')")
+      .bind(templateId).first<Record<string, unknown>>();
+    if (!currentTemplate) throw new Error("Template de projeto nao encontrado.");
+    mode = "updated";
+  } else {
+    templateId = crypto.randomUUID();
+  }
+
+  const name = String(requestedName ?? currentTemplate?.name ?? `${project.name} - template`).trim() || "Template de jornada";
+
+  if (mode === "updated") {
+    await db.batch([
+      db.prepare("delete from journey_step_values where owner_type = 'template' and owner_step_id in (select id from journey_steps where journey_template_id = ?)").bind(templateId),
+      db.prepare("delete from journey_step_files where owner_type = 'template' and owner_step_id in (select id from journey_steps where journey_template_id = ?)").bind(templateId),
+      db.prepare("delete from journey_step_events where owner_type = 'template' and owner_step_id in (select id from journey_steps where journey_template_id = ?)").bind(templateId),
+      db.prepare("delete from journey_step_documents where owner_type = 'template' and owner_id = ?").bind(templateId),
+      db.prepare("delete from journey_steps where journey_template_id = ?").bind(templateId),
+      db.prepare("update journey_templates set name = ?, description = ?, project_type_id = ?, context = 'projeto', status = 'ativo' where id = ?")
+        .bind(name, `Atualizado a partir do projeto ${project.name ?? ""}.`, project.project_type_id ?? null, templateId),
+    ]);
+  } else {
+    await db.prepare("insert into journey_templates (id, name, description, project_type_id, context, status, created_at) values (?, ?, ?, ?, 'projeto', 'ativo', ?)")
+      .bind(templateId, name, `Criado a partir do projeto ${project.name ?? ""}.`, project.project_type_id ?? null, now).run();
+  }
 
   const steps = await db.prepare("select * from project_steps where project_id = ? order by step_order asc").bind(projectId).all<Record<string, unknown>>();
   for (const projectStep of steps.results ?? []) {
@@ -340,24 +380,77 @@ async function saveProjectAsTemplate(db: D1Database, projectId: string, requeste
     const source = await getCurrentDocument(db, "project", String(projectStep.id), false);
     if (!source) continue;
     const sourceDocument = normalizeDocumentRow(source).document;
-    const templateDocument: StepDocument = {
-      ...sourceDocument,
-      ownerType: "template",
-      projectId: undefined,
-      stepId: templateStepId,
-      structureId: crypto.randomUUID(),
-      title: String(projectStep.name ?? sourceDocument.title),
-      state: "published",
-      versionNumber: 1,
-      revision: 1,
-      // Runtime values must never cross into a template. Context cards remain only when intentionally pinned.
-      blocks: sourceDocument.blocks.map((block) => block.type === "context"
-        ? { ...block, config: { ...(block.config ?? {}), contexts: Array.isArray(block.config?.contexts) ? (block.config?.contexts as Array<Record<string, unknown>>).filter((context) => Boolean(context.pinned)) : [] } }
-        : block),
-    };
+    const templateDocument = await createProjectTemplateDocument(db, sourceDocument, String(projectStep.id), templateId, templateStepId, String(projectStep.name ?? sourceDocument.title));
     await insertDocument(db, templateDocument, templateId, createdBy);
   }
-  return { id: templateId, name };
+  await db.prepare("update projects set journey_template_id = ?, updated_at = ? where id = ?").bind(templateId, now, projectId).run();
+  return { id: templateId, name, mode };
+}
+
+async function createProjectTemplateDocument(
+  db: D1Database,
+  sourceDocument: StepDocument,
+  projectStepId: string,
+  templateId: string,
+  templateStepId: string,
+  title: string,
+): Promise<StepDocument> {
+  const values = await db.prepare("select block_id, value_json from journey_step_values where owner_type = 'project' and owner_step_id = ?")
+    .bind(projectStepId).all<Record<string, unknown>>();
+  const runtimeContexts = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of values.results ?? []) {
+    const value = asRecord(parseJson(String(row.value_json ?? "null")));
+    if (Array.isArray(value.contexts)) runtimeContexts.set(String(row.block_id), value.contexts.map(asRecord));
+  }
+
+  return {
+    ...sourceDocument,
+    ownerType: "template",
+    projectId: undefined,
+    templateId,
+    stepId: templateStepId,
+    structureId: crypto.randomUUID(),
+    title,
+    state: "published",
+    versionNumber: 1,
+    revision: 1,
+    // Contexts are the deliberate exception to runtime values: they become reusable cards in this template.
+    blocks: sourceDocument.blocks.map((block) => {
+      if (block.type !== "context") return block;
+      const configured = Array.isArray(block.config?.contexts) ? (block.config?.contexts as Array<Record<string, unknown>>) : [];
+      const contexts = [...configured, ...(runtimeContexts.get(block.id) ?? [])]
+        .filter((context) => String(context.content ?? "").trim())
+        .map((context) => ({ ...context, pinned: true }));
+      const uniqueContexts = contexts.filter((context, index, all) => all.findIndex((candidate) => String(candidate.title ?? "") === String(context.title ?? "") && String(candidate.content ?? "") === String(context.content ?? "")) === index);
+      return { ...block, config: { ...(block.config ?? {}), contexts: uniqueContexts } };
+    }),
+  };
+}
+
+async function updateJourneyTemplate(db: D1Database, templateId: string, patch: { name?: string; description?: string | null; status?: string }) {
+  const template = await db.prepare("select * from journey_templates where id = ?").bind(templateId).first<Record<string, unknown>>();
+  if (!template) throw new Error("Template nao encontrado.");
+  const name = String(patch.name ?? template.name ?? "").trim();
+  if (!name) throw new Error("Informe o nome do template.");
+  const description = patch.description === undefined ? template.description ?? null : patch.description;
+  const status = ["ativo", "inativo", "arquivado"].includes(String(patch.status)) ? patch.status : template.status ?? "ativo";
+  await db.prepare("update journey_templates set name = ?, description = ?, status = ? where id = ?")
+    .bind(name, description, status, templateId).run();
+  return { ...template, id: templateId, name, description, status };
+}
+
+async function deleteJourneyTemplate(db: D1Database, templateId: string) {
+  const template = await db.prepare("select * from journey_templates where id = ?").bind(templateId).first<Record<string, unknown>>();
+  if (!template) throw new Error("Template nao encontrado.");
+  await db.batch([
+    db.prepare("delete from journey_step_values where owner_type = 'template' and owner_step_id in (select id from journey_steps where journey_template_id = ?)").bind(templateId),
+    db.prepare("delete from journey_step_files where owner_type = 'template' and owner_step_id in (select id from journey_steps where journey_template_id = ?)").bind(templateId),
+    db.prepare("delete from journey_step_events where owner_type = 'template' and owner_step_id in (select id from journey_steps where journey_template_id = ?)").bind(templateId),
+    db.prepare("delete from journey_step_documents where owner_type = 'template' and owner_id = ?").bind(templateId),
+    db.prepare("delete from journey_steps where journey_template_id = ?").bind(templateId),
+    db.prepare("delete from journey_templates where id = ?").bind(templateId),
+  ]);
+  return { id: templateId, name: String(template.name ?? "Template") };
 }
 
 async function saveClientAsTemplate(db: D1Database, clientId: string, requestedName?: string, createdBy: string | null = null) {

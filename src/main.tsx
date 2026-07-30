@@ -97,6 +97,12 @@ type JourneyTemplate = {
   status: ConfigStatus;
 };
 
+type ProjectTemplateSaveRequest = {
+  mode: "update" | "create";
+  templateId?: string;
+  name: string;
+};
+
 type JourneyStep = {
   id: string;
   journey_template_id: string;
@@ -307,6 +313,35 @@ type SummaryPromptConfig = {
   basePromptSnapshot?: string;
   triggerPromptSnapshot?: string;
   additions?: SummaryPromptAddition[];
+};
+
+// Every project summary starts with the same operational composer. A version can
+// still replace any of these texts deliberately, but an empty legacy version no
+// longer loses the controls that are part of the standard Ramos workflow.
+const defaultSummaryPromptConfig: SummaryPromptConfig = {
+  basePromptId: null,
+  basePromptSnapshot: [
+    "Desenvolva os topicos selecionados do documento ambiental com clareza tecnica, coerencia e linguagem profissional.",
+    "Use {{topicos_selecionados}} como escopo obrigatorio da entrega e considere {{sumario_consolidado}} como referencia de estrutura.",
+    "Projeto: {{projeto}}. Empresa: {{empresa}}.",
+  ].join("\n\n"),
+  triggerPromptSnapshot: "Localize o arquivo de prompt gerado, aplique todas as instrucoes configuradas e execute integralmente a solicitacao para os topicos selecionados.",
+  additions: [
+    ["Tabelas", "Inclua tabelas quando ajudarem a organizar comparacoes, dados ou evidencias."],
+    ["Graficos", "Sugira ou descreva graficos quando a leitura visual melhorar a compreensao dos dados."],
+    ["Enfase visual", "Estruture a resposta para leitura visual, com destaques objetivos e boa hierarquia."],
+    ["Fluxograma", "Inclua um fluxograma textual quando houver sequencias, responsabilidades ou fluxos operacionais."],
+    ["Normas tecnicas", "Considere normas tecnicas, diretrizes e boas praticas aplicaveis ao tema."],
+    ["Legislacao", "Considere a legislacao ambiental e os requisitos regulatorios pertinentes."],
+    ["Concisao e objetividade", "Priorize uma redacao direta, evitando repeticoes e detalhes que nao apoiem a decisao."],
+    ["Aprofundamento", "Aprofunde a analise tecnica, explicando criterios, impactos e justificativas relevantes."],
+    ["Monitoramento simplificado", "Apresente medidas de monitoramento em formato simples, acionavel e verificavel."],
+    ["Acoes ambientais praticas", "Proponha acoes ambientais praticas, proporcionais e factiveis para a realidade do projeto."],
+    ["Cronograma simplificado", "Inclua um cronograma resumido com etapas, responsaveis e marcos quando fizer sentido."],
+    ["Etapas do processo", "Organize a resposta em etapas operacionais claras, indicando a sequencia recomendada."],
+    ["Impactos e controles", "Relacione impactos, riscos, medidas de controle e evidencias de verificacao."],
+    ["Indicadores simplificados", "Sugira indicadores simples para acompanhar a execucao e a conformidade."],
+  ].map(([label, content]) => ({ id: `default-summary-${normalizeSearchText(label).replace(/\s+/g, "-")}`, label, content, enabledByDefault: false })),
 };
 
 type Client = {
@@ -1245,6 +1280,7 @@ function App() {
       parse_status: parsed.warnings.length || parsed.items.some((item) => item.warning) ? "needs_review" : "analyzed",
       item_count: itemRows.length,
       selected_item_count: itemRows.filter((item) => item.is_selected).length,
+      prompt_config_json: JSON.stringify(resolveSummaryPromptConfig(null, tables.project_summaries)),
       created_by: currentUser?.name ?? "Patrick",
       updated_at: now,
     });
@@ -1757,28 +1793,38 @@ function App() {
     setNotice("Etapa removida da jornada.");
   }
 
-  async function saveProjectAsTemplate(project: Project) {
+  async function saveProjectAsTemplate(project: Project, request: ProjectTemplateSaveRequest): Promise<boolean> {
     if (!supabase) {
-      return;
+      return false;
     }
 
     try {
       const response = await fetch(`${cloudflareApiUrl}/api/projects/${encodeURIComponent(project.id)}/templates`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ createdBy: currentUser?.name ?? null }),
+        body: JSON.stringify({
+          name: request.name.trim(),
+          templateId: request.mode === "update" ? request.templateId ?? null : null,
+          createdBy: currentUser?.name ?? null,
+        }),
       });
-      const body = await response.json() as { data?: { name: string }; error?: string };
+      const body = await response.json() as { data?: { id: string; name: string; mode?: "created" | "updated" }; error?: string };
       if (response.ok && body.data) {
         await loadAll();
-        setNotice(`Template "${body.data.name}" salvo com a estrutura de blocos.`);
-        return;
+        setNotice(request.mode === "update" ? `Template "${body.data.name}" atualizado com a estrutura e os contextos da jornada.` : `Template "${body.data.name}" criado com a estrutura da jornada.`);
+        return true;
       }
+      setNotice(`Erro ao salvar template: ${body.error ?? "erro desconhecido"}`);
+      return false;
     } catch {
-      // Keep the legacy export only as a compatibility fallback during rollout.
+      if (request.mode === "update") {
+        setNotice("Nao foi possivel atualizar este template agora. Tente sincronizar e repita a operacao.");
+        return false;
+      }
+      // Keep the legacy export only as a compatibility fallback while an older Worker is being served.
     }
 
-    const templateName = `${project.name} - template`;
+    const templateName = request.name.trim() || `${project.name} - template`;
     const { data: template, error } = await supabase
       .from<JourneyTemplate>("journey_templates")
       .insert(
@@ -1795,7 +1841,7 @@ function App() {
 
     if (error || !template) {
       setNotice(`Erro ao salvar template: ${error?.message ?? "erro desconhecido"}`);
-      return;
+      return false;
     }
 
     const steps = tables.project_steps.filter((step) => step.project_id === project.id).sort(byOrder);
@@ -1851,6 +1897,44 @@ function App() {
 
     await loadAll();
     setNotice(`Template "${templateName}" salvo a partir da execucao real.`);
+    return true;
+  }
+
+  async function updateJourneyTemplate(templateId: string, payload: Pick<JourneyTemplate, "name" | "description" | "status">): Promise<boolean> {
+    try {
+      const response = await fetch(`${cloudflareApiUrl}/api/journey-templates/${encodeURIComponent(templateId)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json() as { data?: JourneyTemplate; error?: string };
+      if (!response.ok || !body.data) {
+        setNotice(`Erro ao editar template: ${body.error ?? "erro desconhecido"}`);
+        return false;
+      }
+      setTables((current) => ({ ...current, journey_templates: current.journey_templates.map((item) => item.id === templateId ? { ...item, ...body.data } : item) }));
+      setNotice(`Template "${body.data.name}" atualizado.`);
+      return true;
+    } catch {
+      setNotice("Nao foi possivel editar o template agora.");
+      return false;
+    }
+  }
+
+  async function deleteJourneyTemplate(template: JourneyTemplate) {
+    if (!window.confirm(`Excluir o template "${template.name}"? Esta acao remove somente o template e sua estrutura salva.`)) return;
+    try {
+      const response = await fetch(`${cloudflareApiUrl}/api/journey-templates/${encodeURIComponent(template.id)}`, { method: "DELETE" });
+      const body = await response.json() as { data?: { name: string }; error?: string };
+      if (!response.ok) {
+        setNotice(`Erro ao excluir template: ${body.error ?? "erro desconhecido"}`);
+        return;
+      }
+      await loadAll();
+      setNotice(`Template "${body.data?.name ?? template.name}" excluido.`);
+    } catch {
+      setNotice("Nao foi possivel excluir o template agora.");
+    }
   }
 
 
@@ -2307,7 +2391,7 @@ function App() {
           />
         )}
 
-        {view === "projectTemplates" && <ProjectTemplatesView tables={tables} query={query} setQuery={setQuery} />}
+        {view === "projectTemplates" && <ProjectTemplatesView tables={tables} query={query} setQuery={setQuery} onUpdate={updateJourneyTemplate} onDelete={deleteJourneyTemplate} />}
 
         {view === "clients" && <ClientsView tables={tables} query={query} setQuery={setQuery} onCreate={createClientJourney} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} />}
 
@@ -2588,11 +2672,35 @@ function isProjectSummaryStep(step: ProjectStep) {
   return normalizeSearch(step.name, step.description, step.objective).includes("sumario");
 }
 
-function ProjectTemplatesView({ tables, query, setQuery }: { tables: Tables; query: string; setQuery: (query: string) => void }) {
+function ProjectTemplatesView({
+  tables,
+  query,
+  setQuery,
+  onUpdate,
+  onDelete,
+}: {
+  tables: Tables;
+  query: string;
+  setQuery: (query: string) => void;
+  onUpdate: (templateId: string, payload: Pick<JourneyTemplate, "name" | "description" | "status">) => Promise<boolean>;
+  onDelete: (template: JourneyTemplate) => Promise<void>;
+}) {
+  const [previewTemplateId, setPreviewTemplateId] = useState<string | null>(null);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
+  const [descriptionDraft, setDescriptionDraft] = useState("");
   const templates = tables.journey_templates
     .filter((template) => template.context === "projeto" || template.context === "geral")
     .filter((template) => normalizeSearch(template.name, template.description).includes(query.toLowerCase()))
     .sort((a, b) => a.name.localeCompare(b.name));
+  const previewTemplate = templates.find((template) => template.id === previewTemplateId) ?? tables.journey_templates.find((template) => template.id === previewTemplateId) ?? null;
+  const editingTemplate = templates.find((template) => template.id === editingTemplateId) ?? tables.journey_templates.find((template) => template.id === editingTemplateId) ?? null;
+
+  function openTemplateEditor(template: JourneyTemplate) {
+    setEditingTemplateId(template.id);
+    setNameDraft(template.name);
+    setDescriptionDraft(template.description ?? "");
+  }
 
   return (
     <>
@@ -2623,7 +2731,14 @@ function ProjectTemplatesView({ tables, query, setQuery }: { tables: Tables; que
             const pendingPrompts = prompts.filter((prompt) => prompt.prompt_status === "pendente" || !String(prompt.content ?? "").trim()).length;
 
             return (
-              <article className="template-card" key={template.id}>
+              <article
+                className="template-card template-card-compact"
+                key={template.id}
+                tabIndex={0}
+                role="button"
+                onClick={() => setPreviewTemplateId(template.id)}
+                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setPreviewTemplateId(template.id); } }}
+              >
                 <div className="project-card-head">
                   <strong>{template.name}</strong>
                   <StatusPill status={template.status} />
@@ -2634,12 +2749,11 @@ function ProjectTemplatesView({ tables, query, setQuery }: { tables: Tables; que
                   <span>{prompts.length} prompts</span>
                   {pendingPrompts > 0 && <span className="warning-chip">{pendingPrompts} pendentes</span>}
                 </div>
-                <ol className="template-step-list">
-                  {steps.slice(0, 6).map((step) => (
-                    <li key={step.id}>{step.name}</li>
-                  ))}
-                </ol>
-                {steps.length > 6 && <small>+ {steps.length - 6} etapas</small>}
+                <div className="template-card-actions">
+                  <button className="secondary-button compact" type="button" onClick={(event) => { event.stopPropagation(); setPreviewTemplateId(template.id); }}><Route size={16} /> Ver estrutura</button>
+                  <button className="icon-button" type="button" title="Editar template" onClick={(event) => { event.stopPropagation(); openTemplateEditor(template); }}><Pencil size={18} /></button>
+                  <button className="icon-button danger" type="button" title="Excluir template" onClick={(event) => { event.stopPropagation(); void onDelete(template); }}><Trash2 size={18} /></button>
+                </div>
               </article>
             );
           })}
@@ -2653,6 +2767,39 @@ function ProjectTemplatesView({ tables, query, setQuery }: { tables: Tables; que
           </div>
         )}
       </section>
+
+      {previewTemplate && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setPreviewTemplateId(null)}>
+          <section className="template-preview-modal glass-panel" role="dialog" aria-modal="true" aria-label={`Estrutura do template ${previewTemplate.name}`} onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-heading">
+              <div><span className="eyebrow">Estrutura salva</span><h2>{previewTemplate.name}</h2><p>{previewTemplate.description || "Template sem descricao."}</p></div>
+              <button className="icon-button" type="button" title="Fechar" onClick={() => setPreviewTemplateId(null)}><X size={18} /></button>
+            </div>
+            <div className="template-preview-stats">
+              <span>{tables.journey_steps.filter((step) => step.journey_template_id === previewTemplate.id).length} etapas</span>
+              <span>{tables.step_prompts.filter((prompt) => tables.journey_steps.some((step) => step.journey_template_id === previewTemplate.id && step.id === prompt.journey_step_id)).length} prompts</span>
+            </div>
+            <ol className="template-preview-steps">
+              {tables.journey_steps.filter((step) => step.journey_template_id === previewTemplate.id).sort(byOrder).map((step, index) => <li key={step.id}><span>{index + 1}</span>{step.name}</li>)}
+            </ol>
+          </section>
+        </div>
+      )}
+
+      {editingTemplate && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setEditingTemplateId(null)}>
+          <form className="template-edit-modal glass-panel" role="dialog" aria-modal="true" aria-label={`Editar template ${editingTemplate.name}`} onMouseDown={(event) => event.stopPropagation()} onSubmit={async (event) => {
+            event.preventDefault();
+            const saved = await onUpdate(editingTemplate.id, { name: nameDraft, description: descriptionDraft || null, status: editingTemplate.status });
+            if (saved) setEditingTemplateId(null);
+          }}>
+            <div className="modal-heading"><div><span className="eyebrow">Editar template</span><h2>Dados do template</h2></div><button className="icon-button" type="button" title="Fechar" onClick={() => setEditingTemplateId(null)}><X size={18} /></button></div>
+            <Field label="Nome do template" value={nameDraft} onChange={setNameDraft} />
+            <label className="field"><span>Descricao</span><textarea value={descriptionDraft} onChange={(event) => setDescriptionDraft(event.target.value)} rows={3} /></label>
+            <div className="inline-actions"><button className="secondary-button" type="button" onClick={() => setEditingTemplateId(null)}>Cancelar</button><button className="primary-button" type="submit"><Save size={16} /> Salvar</button></div>
+          </form>
+        </div>
+      )}
     </>
   );
 }
@@ -3331,7 +3478,7 @@ function JourneyView({
   onDeleteContext: (contextId: string) => void;
   onAddNextStep: (projectId: string, name: string) => void;
   onDeleteStep: (stepId: string) => void;
-  onSaveTemplate: (project: Project) => void;
+  onSaveTemplate: (project: Project, request: ProjectTemplateSaveRequest) => Promise<boolean>;
   currentUser: AppUser | null;
   onImportSummary: (project: Project, rawText: string) => void;
   onUpdateSummary: (summaryId: string, payload: Partial<ProjectSummary>) => void;
@@ -3353,6 +3500,10 @@ function JourneyView({
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
   const [newStepName, setNewStepName] = useState("");
   const [isStepManagerOpen, setIsStepManagerOpen] = useState(false);
+  const [isTemplateSaveOpen, setIsTemplateSaveOpen] = useState(false);
+  const [templateSaveMode, setTemplateSaveMode] = useState<"update" | "create">("create");
+  const [templateTargetId, setTemplateTargetId] = useState("");
+  const [templateNameDraft, setTemplateNameDraft] = useState("");
   const [summaryEditorOpen, setSummaryEditorOpen] = useState(false);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [collapsedBlockIds, setCollapsedBlockIds] = useState<Set<string>>(() => new Set());
@@ -3360,6 +3511,7 @@ function JourneyView({
   const summaries = tables.project_summaries.filter((summary) => summary.project_id === project.id);
   const summaryItems = tables.project_summary_items.filter((item) => item.project_id === project.id).sort(byOrder);
   const generatedPrompts = tables.generated_prompts.filter((prompt) => prompt.project_id === project.id);
+  const projectTemplates = tables.journey_templates.filter((template) => template.context === "projeto" || template.context === "geral");
 
   useEffect(() => {
     void loadStepStructure();
@@ -3473,6 +3625,24 @@ function JourneyView({
     onUpdateStep(target.id, { step_order: current.step_order });
   }
 
+  function openTemplateSave() {
+    const linkedTemplate = projectTemplates.find((template) => template.id === project.journey_template_id) ?? null;
+    setTemplateSaveMode(linkedTemplate ? "update" : "create");
+    setTemplateTargetId(linkedTemplate?.id ?? "");
+    setTemplateNameDraft(linkedTemplate?.name ?? `${project.name} - template`);
+    setIsTemplateSaveOpen(true);
+  }
+
+  async function submitTemplateSave() {
+    const target = projectTemplates.find((template) => template.id === templateTargetId);
+    const saved = await onSaveTemplate(project, {
+      mode: templateSaveMode,
+      templateId: templateSaveMode === "update" ? target?.id : undefined,
+      name: templateNameDraft.trim() || target?.name || `${project.name} - template`,
+    });
+    if (saved) setIsTemplateSaveOpen(false);
+  }
+
   return (
     <>
       <section className="journey-hero journey-context-bar">
@@ -3515,7 +3685,7 @@ function JourneyView({
               <button className={journeyMode === "execute" ? "active" : ""} type="button" onClick={() => switchJourneyMode("execute")}><CheckCircle2 size={15} /> Executar</button>
               <button className={journeyMode === "edit" ? "active" : ""} type="button" onClick={() => switchJourneyMode("edit")}><Pencil size={15} /> Editar estrutura</button>
             </div>
-            <button className="secondary-button" type="button" disabled={!completion?.canComplete} onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}><CheckCircle2 size={17} /> Concluir</button>
+            <button className="secondary-button" type="button" disabled={!completion?.canComplete} title={completion?.canComplete ? "Concluir etapa" : completion?.reasons[0]?.message ?? "Carregando condicoes de conclusao"} onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}><CheckCircle2 size={17} /> Concluir</button>
             {journeyMode === "edit" && (
               <>
                 <form className="quick-step-form" onSubmit={(event) => { event.preventDefault(); onAddNextStep(project.id, newStepName || "Nova etapa"); setNewStepName(""); }}>
@@ -3526,7 +3696,7 @@ function JourneyView({
                   <button className="primary-button" type="button" onClick={() => setIsAddMenuOpen((value) => !value)}><Plus size={17} /> Adicionar bloco</button>
                   {isAddMenuOpen && <BlockTypeMenu onSelect={addBlock} />}
                 </div>
-                <button className="secondary-button" type="button" onClick={() => onSaveTemplate(project)}><Save size={17} /> Salvar template</button>
+                <button className="secondary-button" type="button" onClick={openTemplateSave}><Save size={17} /> Salvar template</button>
               </>
             )}
           </div>
@@ -3535,6 +3705,9 @@ function JourneyView({
             <span>{completion ? `${completion.completedBlocks}/${completion.totalBlocks} blocos completos` : "Carregando blocos"}</span>
             <div className="progress-bar"><span style={{ width: `${completion?.progress ?? 0}%` }} /></div>
           </div>
+          {completion && !completion.canComplete && completion.reasons.length > 0 && (
+            <div className="step-completion-hint" role="status"><span>Para concluir esta etapa:</span> {completion.reasons[0].message}</div>
+          )}
 
           {isLoadingBlocks && <div className="empty-state compact"><Loader2 className="spin" size={24} /> Carregando construtor da etapa...</div>}
 
@@ -3606,6 +3779,7 @@ function JourneyView({
             <ProjectSummaryPanel
               project={project}
               summaries={summaries}
+              allSummaries={tables.project_summaries}
               items={summaryItems}
               onImport={onImportSummary}
               onUpdateSummary={onUpdateSummary}
@@ -3618,6 +3792,26 @@ function JourneyView({
               onConsolidate={onConsolidateSummary}
             />
           </div>
+        </div>
+      )}
+
+      {isTemplateSaveOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setIsTemplateSaveOpen(false)}>
+          <section className="template-save-modal glass-panel" role="dialog" aria-modal="true" aria-label="Salvar estrutura como template" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-heading">
+              <div><span className="eyebrow">Salvar template</span><h2>Estrutura da jornada</h2><p>Checklists e prompts continuam vazios. Contextos da jornada entram no template como cards reutilizaveis.</p></div>
+              <button className="icon-button" type="button" title="Fechar" onClick={() => setIsTemplateSaveOpen(false)}><X size={18} /></button>
+            </div>
+            <div className="template-save-mode" role="group" aria-label="Destino do template">
+              <button className={templateSaveMode === "update" ? "active" : ""} type="button" disabled={projectTemplates.length === 0} onClick={() => { setTemplateSaveMode("update"); const fallback = projectTemplates.find((template) => template.id === project.journey_template_id) ?? projectTemplates[0]; setTemplateTargetId(fallback?.id ?? ""); setTemplateNameDraft(fallback?.name ?? ""); }}>Atualizar template existente</button>
+              <button className={templateSaveMode === "create" ? "active" : ""} type="button" onClick={() => { setTemplateSaveMode("create"); setTemplateNameDraft(`${project.name} - template`); }}>Criar novo template</button>
+            </div>
+            {templateSaveMode === "update" && (
+              <label className="field"><span>Template a atualizar</span><select value={templateTargetId} onChange={(event) => { const selected = projectTemplates.find((template) => template.id === event.target.value); setTemplateTargetId(event.target.value); setTemplateNameDraft(selected?.name ?? ""); }}><option value="">Selecione o template</option>{projectTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>
+            )}
+            <Field label={templateSaveMode === "update" ? "Nome do template" : "Nome do novo template"} value={templateNameDraft} onChange={setTemplateNameDraft} />
+            <div className="inline-actions"><button className="secondary-button" type="button" onClick={() => setIsTemplateSaveOpen(false)}>Cancelar</button><button className="primary-button" type="button" disabled={!templateNameDraft.trim() || (templateSaveMode === "update" && !templateTargetId)} onClick={() => void submitTemplateSave()}><Save size={16} /> {templateSaveMode === "update" ? "Atualizar template" : "Criar template"}</button></div>
+          </section>
         </div>
       )}
 
@@ -4195,18 +4389,7 @@ function LegacySummaryOperationalBlock({
   const reviewSelectedCount = selectedItems.filter((item) => item.status === "em_revisao").length;
   const blockedSelectedCount = selectedItems.filter((item) => item.status === "bloqueado").length;
   const selectedPromptItems = promptScopeIds.length ? items.filter((item) => promptScopeIds.includes(item.id)).sort(byOrder) : [];
-  const directPromptConfig = parseSummaryPromptConfig(summary?.prompt_config_json);
-  const hasPromptConfiguration = Boolean(
-    directPromptConfig.basePromptSnapshot?.trim()
-    || directPromptConfig.triggerPromptSnapshot?.trim()
-    || directPromptConfig.additions?.length,
-  );
-  const inheritedPromptConfig = summaries
-    .slice()
-    .sort((left, right) => right.version_number - left.version_number)
-    .map((candidate) => parseSummaryPromptConfig(candidate.prompt_config_json))
-    .find((candidate) => Boolean(candidate.basePromptSnapshot?.trim() || candidate.triggerPromptSnapshot?.trim() || candidate.additions?.length));
-  const summaryPromptConfig = hasPromptConfiguration ? directPromptConfig : inheritedPromptConfig ?? directPromptConfig;
+  const summaryPromptConfig = resolveSummaryPromptConfig(summary, tables.project_summaries);
   const promptAdditions = summaryPromptConfig.additions ?? [];
   const basePromptText = summaryPromptConfig.basePromptSnapshot?.trim() ?? "";
   const triggerPromptText = summaryPromptConfig.triggerPromptSnapshot?.trim() ?? "";
@@ -4920,6 +5103,7 @@ function summaryAdditionIcon(label: string) {
 function ProjectSummaryPanel({
   project,
   summaries,
+  allSummaries,
   items,
   onImport,
   onUpdateSummary,
@@ -4933,6 +5117,7 @@ function ProjectSummaryPanel({
 }: {
   project: Project;
   summaries: ProjectSummary[];
+  allSummaries: ProjectSummary[];
   items: ProjectSummaryItem[];
   onImport: (project: Project, rawText: string) => void;
   onUpdateSummary: (summaryId: string, payload: Partial<ProjectSummary>) => void;
@@ -4985,7 +5170,7 @@ function ProjectSummaryPanel({
   const allCollapsed = collapsibleIds.length > 0 && collapsibleIds.every((id) => collapsedTopicIds.includes(id));
 
   useEffect(() => {
-    setPromptConfig(parseSummaryPromptConfig(activeSummary?.prompt_config_json));
+    setPromptConfig(resolveSummaryPromptConfig(activeSummary, allSummaries));
     setEditingAdditionId(null);
     setAdditionLabel("");
     setAdditionContent("");
@@ -4993,7 +5178,7 @@ function ProjectSummaryPanel({
     setChildTitle("");
     setEditingTopicNumberId(null);
     setTopicNumberDraft("");
-  }, [activeSummary?.id, activeSummary?.prompt_config_json]);
+  }, [activeSummary?.id, activeSummary?.prompt_config_json, allSummaries]);
 
   function toggleCollapsedTopic(itemId: string) {
     setCollapsedTopicIds((current) => (current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]));
@@ -6762,6 +6947,57 @@ function parseSummaryPromptConfig(raw: string | null | undefined): SummaryPrompt
   } catch {
     return {};
   }
+}
+
+function cloneSummaryPromptConfig(config: SummaryPromptConfig): SummaryPromptConfig {
+  return {
+    basePromptId: config.basePromptId ?? null,
+    basePromptSnapshot: config.basePromptSnapshot ?? "",
+    triggerPromptSnapshot: config.triggerPromptSnapshot ?? "",
+    additions: (config.additions ?? []).map((addition) => ({ ...addition })),
+  };
+}
+
+function hasSummaryPromptConfig(config: SummaryPromptConfig) {
+  return Boolean(
+    config.basePromptSnapshot?.trim()
+    || config.triggerPromptSnapshot?.trim()
+    || config.additions?.length,
+  );
+}
+
+function summaryPromptConfigScore(config: SummaryPromptConfig) {
+  return (config.basePromptSnapshot?.trim() ? 50 : 0)
+    + (config.triggerPromptSnapshot?.trim() ? 25 : 0)
+    + (config.additions?.length ?? 0);
+}
+
+function mergeSummaryPromptConfig(base: SummaryPromptConfig, override: SummaryPromptConfig): SummaryPromptConfig {
+  const useOwnBase = Boolean(override.basePromptSnapshot?.trim());
+  const useOwnTrigger = Boolean(override.triggerPromptSnapshot?.trim());
+  const useOwnAdditions = Boolean(override.additions?.length);
+  return {
+    basePromptId: useOwnBase ? override.basePromptId ?? null : base.basePromptId ?? null,
+    basePromptSnapshot: useOwnBase ? override.basePromptSnapshot : base.basePromptSnapshot,
+    triggerPromptSnapshot: useOwnTrigger ? override.triggerPromptSnapshot : base.triggerPromptSnapshot,
+    additions: (useOwnAdditions ? override.additions ?? [] : base.additions ?? []).map((addition) => ({ ...addition })),
+  };
+}
+
+function resolveSummaryPromptConfig(summary: ProjectSummary | null | undefined, allSummaries: ProjectSummary[]) {
+  const inherited = allSummaries
+    .map((candidate) => ({
+      config: parseSummaryPromptConfig(candidate.prompt_config_json),
+      updatedAt: candidate.updated_at ?? candidate.created_at ?? "",
+    }))
+    .filter(({ config }) => hasSummaryPromptConfig(config))
+    .sort((left, right) => {
+      const scoreDifference = summaryPromptConfigScore(right.config) - summaryPromptConfigScore(left.config);
+      return scoreDifference || right.updatedAt.localeCompare(left.updatedAt);
+    })[0]?.config;
+
+  const platformConfig = inherited ? mergeSummaryPromptConfig(defaultSummaryPromptConfig, inherited) : cloneSummaryPromptConfig(defaultSummaryPromptConfig);
+  return mergeSummaryPromptConfig(platformConfig, parseSummaryPromptConfig(summary?.prompt_config_json));
 }
 
 function interpolateSummaryPrompt(template: string, values: Record<string, string>) {
