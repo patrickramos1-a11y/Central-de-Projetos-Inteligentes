@@ -35,6 +35,7 @@ import { createCloudflareApi } from "./lib/cloudflareApi";
 import { createJourneyApi, type JourneyFile } from "./api/journey";
 import { parseProjectSummary } from "./lib/summaryParser";
 import { copyText as copyToClipboard } from "./components/ui/clipboard";
+import { resolveBoundSummary } from "./features/summary/summaryBinding";
 import "./styles.css";
 
 type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
@@ -2325,7 +2326,7 @@ function App() {
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark">
-            <Sparkles size={20} />
+            <img className="brand-mark-image" src="/brand/ramos-jornadas-mark-white.svg" alt="" />
           </span>
           <span>Ramos Jornadas</span>
         </div>
@@ -3997,7 +3998,7 @@ function getCollapsedBlockState(block: StepBuilderBlock, value: any, summaries: 
   if (block.type === "file_upload") return pending("Aguardando arquivo");
 
   if (block.type === "project_summary") {
-    const summary = summaries.find((item) => item.status === "active" || String(item.status) === "ativo") ?? summaries.find((item) => item.id === block.config.summaryId);
+    const summary = resolveBoundSummary(summaries, String(block.config.summaryId ?? ""));
     const items = summary ? summaryItems.filter((item) => item.summary_id === summary.id && item.is_selected) : [];
     const done = items.filter((item) => item.status === "concluido").length;
     if (!summary) return pending("Sem sumario vinculado");
@@ -4600,12 +4601,7 @@ function LegacySummaryOperationalBlock({
   const [statusMenuItemId, setStatusMenuItemId] = useState<string | null>(null);
   const initializedSummaryId = useRef<string | null>(null);
 
-  const summary = [...summaries]
-    .filter((item) => item.status === "active" || String(item.status) === "ativo")
-    .sort((left, right) => right.version_number - left.version_number)[0]
-    ?? summaries.find((item) => item.id === block.config.summaryId)
-    ?? summaries[0]
-    ?? null;
+  const summary = resolveBoundSummary(summaries, String(block.config.summaryId ?? ""));
   const items = summary ? summaryItems.filter((item) => item.summary_id === summary.id).sort(byOrder) : [];
   const selectedItems = items.filter((item) => item.is_selected);
   const visibleItems = getVisibleSummaryItems(items, collapsedTopicIds, summarySearch);
@@ -4874,7 +4870,7 @@ function SummaryTechnicalExecutionBlock({
   const [basePromptId, setBasePromptId] = useState("");
   const [selectedPromptOptions, setSelectedPromptOptions] = useState<string[]>(["Mais tecnico", "Formato Word"]);
 
-  const summary = summaries.find((item) => item.id === block.config.summaryId) ?? summaries.find((item) => item.status === "active") ?? summaries[0] ?? null;
+  const summary = resolveBoundSummary(summaries, String(block.config.summaryId ?? ""));
   const items = summary ? summaryItems.filter((item) => item.summary_id === summary.id).sort(byOrder) : [];
   const selectedItems = items.filter((item) => item.is_selected);
   const visibleItems = getVisibleSummaryItems(items, collapsedTopicIds, summarySearch);

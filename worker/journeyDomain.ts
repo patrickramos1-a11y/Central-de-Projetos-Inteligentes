@@ -785,11 +785,7 @@ async function syncStepStatus(db: D1Database, ownerType: OwnerType, stepId: stri
 
 async function isProjectSummaryComplete(db: D1Database, ownerType: OwnerType, stepId: string, block: Block) {
   if (ownerType !== "project") return false;
-  const step = await db.prepare("select project_id from project_steps where id = ?").bind(stepId).first<Record<string, unknown>>();
-  const projectId = String(step?.project_id ?? "");
-  if (!projectId) return false;
-  const activeSummary = await db.prepare("select id from project_summaries where project_id = ? and status in ('active', 'ativo') order by version_number desc limit 1").bind(projectId).first<Record<string, unknown>>();
-  const summaryId = String(activeSummary?.id ?? block.config?.summaryId ?? "");
+  const summaryId = String(block.config?.summaryId ?? "").trim();
   if (!summaryId) return false;
   const selected = await db.prepare("select status from project_summary_items where summary_id = ? and is_selected = 1").bind(summaryId).all<Record<string, unknown>>();
   const items = selected.results ?? [];
