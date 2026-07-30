@@ -134,10 +134,10 @@ async function handleGenericStepRequest(request: Request, env: Env, ownerType: O
   }
 
   if (request.method === "POST" && action === "blocks" && !nested) {
-    const body = await request.json() as { type?: string; title?: string; parentBlockId?: string | null; updatedBy?: string };
+    const body = await request.json() as { type?: string; title?: string; parentBlockId?: string | null; config?: Record<string, unknown>; updatedBy?: string };
     const documentRow = await getCurrentDocument(db, ownerType, stepId);
     const normalized = normalizeDocumentRow(documentRow).document;
-    const block = createGenericBlock(body.type ?? "long_text", normalized.blocks.length + 1, body.title, body.parentBlockId ?? null);
+    const block = createGenericBlock(body.type ?? "long_text", normalized.blocks.length + 1, body.title, body.parentBlockId ?? null, body.config);
     normalized.blocks = normalizeBlocks([...normalized.blocks, block]);
     await saveGenericDocument(db, documentRow, normalized, "block_created", block.id, { type: block.type }, body.updatedBy ?? null);
     return json({ data: await genericPayload(db, ownerType, stepId, await getCurrentDocument(db, ownerType, stepId)) }, 201);
@@ -258,7 +258,7 @@ function createRuntimeDocumentFromTemplate(templateDocument: StepDocument, owner
   };
 }
 
-function createGenericBlock(type: string, order: number, title?: string, parentBlockId: string | null = null): Block {
+function createGenericBlock(type: string, order: number, title?: string, parentBlockId: string | null = null, configOverride?: Record<string, unknown>): Block {
   const config: Record<string, unknown> = { parentBlockId };
   if (type === "short_text") Object.assign(config, { mode: "info", content: "", maxLength: 180 });
   if (type === "long_text") Object.assign(config, { mode: "info", content: "", rows: 5 });
@@ -287,6 +287,7 @@ function createGenericBlock(type: string, order: number, title?: string, parentB
     fileMode: "evidence",
   });
   if (type === "phase") Object.assign(config, { status: "pendente", content: "" });
+  Object.assign(config, configOverride ?? {}, { parentBlockId });
   return { id: crypto.randomUUID(), type, order, title: title?.trim() || genericBlockLabel(type), required: false, visible: true, editableInExecution: true, collapsedByDefault: false, config };
 }
 

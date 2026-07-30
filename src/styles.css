@@ -8507,6 +8507,18 @@ body {
   gap: 8px;
 }
 
+.materials-group {
+  display: grid;
+  gap: 6px;
+}
+
+.materials-group-label {
+  color: var(--muted);
+  font-size: .74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 .materials-block-body .material-row {
   display: flex;
   align-items: center;

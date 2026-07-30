@@ -3211,8 +3211,9 @@ function ClientBlockJourneyView({
     }
   }
 
-  async function addBlock(type: string) {
-    const next = await request("/blocks", { method: "POST", body: JSON.stringify({ type, updatedBy: currentUser?.name ?? null }) });
+  async function addBlock(item: BlockCatalogItem | string) {
+    const catalogItem = typeof item === "string" ? blockCatalog.find((candidate) => candidate.type === item) ?? { key: item, type: item, label: item, icon: FileText } : item;
+    const next = await request("/blocks", { method: "POST", body: JSON.stringify({ type: catalogItem.type, title: catalogItem.title, config: catalogItem.config, updatedBy: currentUser?.name ?? null }) });
     setPayload(next);
     setEditingBlockId(next.document.blocks[next.document.blocks.length - 1]?.id ?? null);
     setIsAdding(false);
@@ -3398,19 +3399,22 @@ type StepBuilderPayload = {
   completion: { status: StepStatus; progress: number; completedBlocks: number; totalBlocks: number; canComplete: boolean; reasons: Array<{ message: string; blockId?: string }> };
 };
 
-const blockCatalog = [
-  { type: "phase", label: "Fase", icon: Layers3 },
-  { type: "short_text", label: "Texto simples", icon: Pencil },
-  { type: "long_text", label: "Texto longo", icon: FileText },
-  { type: "short_answer", label: "Resposta curta", icon: Pencil },
-  { type: "long_answer", label: "Resposta longa", icon: FileText },
-  { type: "checklist", label: "Checklist", icon: ListChecks },
-  { type: "prompt", label: "Prompt", icon: Clipboard },
-  { type: "context", label: "Contexto", icon: Copy },
-  { type: "project_summary", label: "Sumario", icon: GitBranch },
-  { type: "materials", label: "Materiais", icon: Link2 },
-  { type: "file_upload", label: "Arquivo / evidencia", icon: Upload },
-  { type: "comment", label: "Comentario", icon: FileText },
+type BlockCatalogItem = { key: string; type: string; label: string; icon: typeof Layers3; title?: string; config?: Record<string, unknown> };
+
+const blockCatalog: BlockCatalogItem[] = [
+  { key: "phase", type: "phase", label: "Fase", icon: Layers3 },
+  { key: "short_text", type: "short_text", label: "Texto simples", icon: Pencil },
+  { key: "long_text", type: "long_text", label: "Texto longo", icon: FileText },
+  { key: "short_answer", type: "short_answer", label: "Resposta curta", icon: Pencil },
+  { key: "long_answer", type: "long_answer", label: "Resposta longa", icon: FileText },
+  { key: "checklist", type: "checklist", label: "Checklist", icon: ListChecks },
+  { key: "prompt", type: "prompt", label: "Prompt", icon: Clipboard },
+  { key: "context", type: "context", label: "Contexto", icon: Copy },
+  { key: "project_summary", type: "project_summary", label: "Sumario", icon: GitBranch },
+  { key: "materials", type: "materials", label: "Links e materiais", icon: Link2, title: "Links e materiais", config: { links: [] } },
+  { key: "evidence", type: "file_upload", label: "Evidencia / envio", icon: Upload, title: "Evidencias", config: { fileMode: "evidence", acceptedFileTypes: [], allowMultipleFiles: true } },
+  { key: "resource_pack", type: "file_upload", label: "Arquivos e modelos", icon: Download, title: "Arquivos e modelos", config: { fileMode: "resource_pack", acceptedFileTypes: [], allowMultipleFiles: true } },
+  { key: "comment", type: "comment", label: "Comentario", icon: FileText },
 ];
 
 function JourneyView({
@@ -3545,8 +3549,9 @@ function JourneyView({
     }
   }
 
-  async function addBlock(type: string) {
-    const next = await stepRequest("/blocks", { method: "POST", body: JSON.stringify({ type }) });
+  async function addBlock(item: BlockCatalogItem | string) {
+    const catalogItem = typeof item === "string" ? blockCatalog.find((candidate) => candidate.type === item) ?? { key: item, type: item, label: item, icon: FileText } : item;
+    const next = await stepRequest("/blocks", { method: "POST", body: JSON.stringify({ type: catalogItem.type, title: catalogItem.title, config: catalogItem.config }) });
     setPayload(next);
     const createdId = next.document.blocks[next.document.blocks.length - 1]?.id ?? null;
     setEditingBlockId(createdId);
@@ -3852,12 +3857,12 @@ function JourneyView({
   );
 }
 
-function BlockTypeMenu({ onSelect }: { onSelect: (type: string) => void }) {
+function BlockTypeMenu({ onSelect }: { onSelect: (item: BlockCatalogItem) => void }) {
   return (
     <div className="block-type-menu glass-panel">
       {blockCatalog.map((item) => {
         const Icon = item.icon;
-        return <button key={item.type} type="button" onClick={() => onSelect(item.type)}><Icon size={16} /> {item.label}</button>;
+        return <button key={item.key} type="button" onClick={() => onSelect(item)}><Icon size={16} /> {item.label}</button>;
       })}
     </div>
   );
@@ -5198,8 +5203,9 @@ function MaterialsBlock({ block, value, isStructureEditing, onUpdate, onSaveValu
 
   return (
     <div className="materials-block-body">
-      {links.map((link) => <div className="material-row" key={link.id}><a href={link.url} target="_blank" rel="noreferrer">{link.title}</a><button className="icon-button" type="button" title="Copiar link" onClick={() => void copyToClipboard(String(link.url), "Link")}><Copy size={13} /></button>{(isStructureEditing || runtimeLinks.some((item) => item.id === link.id)) && <button className="icon-button danger" type="button" title="Excluir link" onClick={() => remove(link.id)}><Trash2 size={13} /></button>}</div>)}
-      <div className="inline-form materials-runtime-form"><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Nome do link" /><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://" /><button className="secondary-button" type="button" onClick={add}><Plus size={15} /> Adicionar link</button></div>
+      {templateLinks.length > 0 && <div className="materials-group"><span className="materials-group-label">Links fixos do template</span>{templateLinks.map((link) => <div className="material-row" key={link.id}><a href={link.url} target="_blank" rel="noreferrer">{link.title}</a><button className="icon-button" type="button" title="Copiar link" onClick={() => void copyToClipboard(String(link.url), "Link")}><Copy size={13} /></button>{isStructureEditing && <button className="icon-button danger" type="button" title="Excluir link do template" onClick={() => remove(link.id)}><Trash2 size={13} /></button>}</div>)}</div>}
+      {!isStructureEditing && runtimeLinks.length > 0 && <div className="materials-group"><span className="materials-group-label">Links deste projeto</span>{runtimeLinks.map((link) => <div className="material-row" key={link.id}><a href={link.url} target="_blank" rel="noreferrer">{link.title}</a><button className="icon-button" type="button" title="Copiar link" onClick={() => void copyToClipboard(String(link.url), "Link")}><Copy size={13} /></button><button className="icon-button danger" type="button" title="Excluir link do projeto" onClick={() => remove(link.id)}><Trash2 size={13} /></button></div>)}</div>}
+      <div className="inline-form materials-runtime-form"><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Nome do link" /><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://" /><button className="secondary-button" type="button" onClick={add}><Plus size={15} /> {isStructureEditing ? "Salvar no template" : "Adicionar ao projeto"}</button></div>
     </div>
   );
 }
