@@ -540,7 +540,7 @@ function App() {
   const [selectedClientStepId, setSelectedClientStepId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [notice, setNotice] = useState("Pronto para conduzir projetos com IA.");
+  const [notice, setNotice] = useState<string | null>(null);
   const [tableErrors, setTableErrors] = useState<string[]>([]);
 
   const selectedProject = tables.projects.find((project) => project.id === selectedProjectId) ?? null;
@@ -584,6 +584,12 @@ function App() {
     window.addEventListener("ramos:toast", showToast);
     return () => window.removeEventListener("ramos:toast", showToast);
   }, []);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timeoutId = window.setTimeout(() => setNotice(null), 4000);
+    return () => window.clearTimeout(timeoutId);
+  }, [notice]);
 
   useEffect(() => {
     if (!selectedProjectId && tables.projects.length > 0) {
@@ -2305,7 +2311,7 @@ function App() {
       <UserEntryScreen
         users={activeUsers}
         isLoading={isLoading}
-        notice={notice}
+        notice={notice ?? ""}
         tableErrors={tableErrors}
         onSelect={selectUser}
         onCreate={createAppUser}
@@ -2375,7 +2381,7 @@ function App() {
             Sincronizar
           </button>
         </div>
-        <div className="global-toast" aria-live="polite" role="status">{notice}</div>
+        {notice && <div className="global-toast" aria-live="polite" role="status">{notice}</div>}
 
         {view === "projects" && (
           <ProjectsView
