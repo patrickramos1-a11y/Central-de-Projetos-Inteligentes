@@ -101,6 +101,9 @@ export type StepBlockConfig = {
   acceptedFileTypes?: string[];
   maxFiles?: number;
   maxFileSizeMb?: number;
+  allowMultipleFiles?: boolean;
+  attachmentsEnabled?: boolean;
+  attachmentsRequired?: boolean;
   requireDescription?: boolean;
   keepVersions?: boolean;
   promptId?: string | null;
@@ -317,9 +320,11 @@ export function createBlock(type: StepBlockType, order: number): StepBlock {
     return {
       ...base,
       config: {
-        acceptedFileTypes: ["pdf", "jpg", "jpeg", "png", "docx", "xlsx"],
-        maxFiles: 5,
+        // An empty list means that this evidence block accepts every file type.
+        acceptedFileTypes: [],
+        maxFiles: 20,
         maxFileSizeMb: 25,
+        allowMultipleFiles: true,
         keepVersions: true,
       },
     };
@@ -502,10 +507,6 @@ export function validateStepDocument(document: StepDocument): ValidationIssue[] 
       if (items.length === 0) {
         issues.push({ severity: "warning", code: "checklist_empty", message: "Checklist sem itens.", blockId: block.id });
       }
-    }
-
-    if (block.type === "file_upload" && block.required && (block.config.acceptedFileTypes ?? []).length === 0) {
-      issues.push({ severity: "error", code: "file_types_missing", message: "Defina ao menos um tipo de arquivo aceito.", blockId: block.id });
     }
 
     if (block.type === "approval" && block.required && !block.config.approverUserId) {

@@ -8407,6 +8407,7 @@ body {
 .summary-bulk-complete:disabled { opacity: 0.48; }
 
 .prompt-condition-config,
+.prompt-attachment-config,
 .prompt-conditions-runtime {
   display: grid;
   gap: 8px;
@@ -8449,6 +8450,22 @@ body {
 
 .prompt-condition-row > .icon-button { margin-left: auto; }
 .prompt-condition-add { margin-top: 1px; }
+
+.prompt-attachment-config { border-left-color: rgba(23, 126, 112, 0.5); }
+.prompt-attachment-requirement {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  width: fit-content;
+  padding: 6px 9px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: rgba(255, 190, 70, 0.13);
+  color: #8a5b0d;
+}
+.prompt-attachment-requirement.complete { background: rgba(13, 211, 117, 0.13); color: var(--deep-teal); }
 
 .prompt-conditions-runtime {
   border-left: 3px solid var(--brand-green);

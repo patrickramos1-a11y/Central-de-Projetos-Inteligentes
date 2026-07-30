@@ -265,10 +265,26 @@ function createGenericBlock(type: string, order: number, title?: string, parentB
   if (type === "short_answer") Object.assign(config, { mode: "input", placeholder: "Digite a resposta", maxLength: 180 });
   if (type === "long_answer") Object.assign(config, { mode: "input", placeholder: "Digite a resposta", rows: 5 });
   if (type === "checklist") Object.assign(config, { items: [], completionMode: "all_required" });
-  if (type === "prompt") Object.assign(config, { promptId: null, contentSnapshot: "", expectedOutput: "", executionMode: "manual" });
+  if (type === "prompt") Object.assign(config, {
+    promptId: null,
+    contentSnapshot: "",
+    expectedOutput: "",
+    executionMode: "manual",
+    attachmentsEnabled: false,
+    attachmentsRequired: false,
+    allowMultipleFiles: true,
+    maxFiles: 20,
+    maxFileSizeMb: 25,
+  });
   if (type === "context") Object.assign(config, { contexts: [] });
   if (type === "materials") Object.assign(config, { links: [] });
-  if (type === "file_upload") Object.assign(config, { acceptedFileTypes: ["pdf", "jpg", "jpeg", "png", "docx", "xlsx"], maxFileSizeMb: 25 });
+  if (type === "file_upload") Object.assign(config, {
+    // An empty acceptedFileTypes array means every format is accepted.
+    acceptedFileTypes: [],
+    allowMultipleFiles: true,
+    maxFiles: 20,
+    maxFileSizeMb: 25,
+  });
   if (type === "phase") Object.assign(config, { status: "pendente", content: "" });
   return { id: crypto.randomUUID(), type, order, title: title?.trim() || genericBlockLabel(type), required: false, visible: true, editableInExecution: true, collapsedByDefault: false, config };
 }
@@ -523,6 +539,9 @@ async function handleJourneyFileRequest(request: Request, env: Env, ownerType: O
   const document = normalizeDocumentRow(documentRow).document;
   const block = document.blocks.find((candidate) => candidate.id === blockId && (candidate.type === "file_upload" || candidate.type === "prompt"));
   if (!block) return error("Bloco de arquivos nao encontrado.", 404);
+  if (block.type === "prompt" && !Boolean(block.config?.attachmentsEnabled)) {
+    return error("Os arquivos de apoio nao estao habilitados neste prompt.", 409);
+  }
 
   if (request.method === "GET") {
     const records = await env.DB.prepare("select * from journey_step_files where owner_type = ? and owner_step_id = ? and block_id = ? order by created_at desc")
@@ -536,9 +555,15 @@ async function handleJourneyFileRequest(request: Request, env: Env, ownerType: O
     if (!(file instanceof File)) return error("Envie um arquivo.");
     const maxSizeMb = Number(block.config?.maxFileSizeMb ?? 25);
     if (file.size > maxSizeMb * 1024 * 1024) return error(`O arquivo excede ${maxSizeMb} MB.`);
-    const accepted = Array.isArray(block.config?.acceptedFileTypes) ? block.config?.acceptedFileTypes.map(String) : [];
+    const accepted = block.type === "file_upload"
+      ? []
+      : Array.isArray(block.config?.acceptedFileTypes) ? block.config?.acceptedFileTypes.map(String) : [];
     const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
     if (accepted.length > 0 && !accepted.includes(extension) && !accepted.includes(file.type)) return error("Tipo de arquivo nao aceito neste bloco.");
+    const maxFiles = Math.max(1, Math.floor(Number(block.config?.maxFiles ?? 20) || 20));
+    const count = await env.DB.prepare("select count(*) as total from journey_step_files where owner_type = ? and owner_step_id = ? and block_id = ?")
+      .bind(ownerType, stepId, blockId).first<{ total: number }>();
+    if (Number(count?.total ?? 0) >= maxFiles) return error(`Este bloco aceita no maximo ${maxFiles} arquivo(s).`);
     const id = crypto.randomUUID();
     const key = `journeys/${ownerType}/${stepId}/${blockId}/${id}-${sanitizeFileName(file.name)}`;
     await env.FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream" } });
@@ -716,7 +741,19 @@ async function calculateRuntimeCompletion(db: D1Database, ownerType: OwnerType, 
       const checked = asRecord(asRecord(value).checked);
       const items = Array.isArray(block.config?.items) ? block.config?.items as Array<Record<string, unknown>> : [];
       complete = items.filter((item) => item.required !== false).every((item) => Boolean(checked[String(item.id)]));
-    } else if (block.type === "prompt") complete = Boolean(asRecord(value).applied);
+    } else if (block.type === "prompt") {
+      const promptValue = asRecord(value);
+      const conditions = Array.isArray(block.config?.applicationConditions)
+        ? block.config.applicationConditions as Array<Record<string, unknown>>
+        : [];
+      const checks = asRecord(promptValue.conditionChecks);
+      const conditionsComplete = conditions
+        .filter((condition) => condition.required !== false)
+        .every((condition) => Boolean(checks[String(condition.id ?? "")]));
+      const requiresAttachment = Boolean(block.config?.attachmentsEnabled) && Boolean(block.config?.attachmentsRequired);
+      const hasAttachment = files.some((file) => String(file.block_id) === block.id);
+      complete = Boolean(promptValue.applied) && conditionsComplete && (!requiresAttachment || hasAttachment);
+    }
     else if (block.type === "context") complete = Array.isArray(asRecord(value).contexts) && (asRecord(value).contexts as unknown[]).length > 0;
     else if (block.type === "file_upload") complete = files.some((file) => String(file.block_id) === block.id);
     else if (block.type === "materials") complete = Array.isArray(asRecord(value).links) && (asRecord(value).links as unknown[]).length > 0;

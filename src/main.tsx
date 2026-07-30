@@ -4174,14 +4174,16 @@ function AnswerBlock({ block, value, onSaveValue }: { block: StepBuilderBlock; v
 
 type JourneyRuntimeFile = JourneyFile;
 
-function FileRuntimeBlock({ block, stepId, currentUser, ownerType, label = "Anexar evidencia" }: { block: StepBuilderBlock; stepId: string; currentUser: AppUser | null; ownerType: "project" | "client"; label?: string }) {
+function FileRuntimeBlock({ block, stepId, currentUser, ownerType, label = "Anexar evidencia", onFilesChange }: { block: StepBuilderBlock; stepId: string; currentUser: AppUser | null; ownerType: "project" | "client"; label?: string; onFilesChange?: (files: JourneyRuntimeFile[]) => void }) {
   const [files, setFiles] = useState<JourneyRuntimeFile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
 
   const refresh = async () => {
     try {
-      setFiles(await journeyApi.listFiles(ownerType, stepId, block.id));
+      const nextFiles = await journeyApi.listFiles(ownerType, stepId, block.id);
+      setFiles(nextFiles);
+      onFilesChange?.(nextFiles);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Nao foi possivel carregar os arquivos.");
     }
@@ -4189,14 +4191,18 @@ function FileRuntimeBlock({ block, stepId, currentUser, ownerType, label = "Anex
 
   useEffect(() => { void refresh(); }, [stepId, block.id]);
 
-  async function upload(file: File | null) {
-    if (!file) return;
+  useEffect(() => { onFilesChange?.(files); }, [files, onFilesChange]);
+
+  async function upload(selectedFiles: FileList | File[] | null) {
+    const nextFiles = selectedFiles ? Array.from(selectedFiles) : [];
+    if (!nextFiles.length) return;
     setIsLoading(true);
     setMessage("");
     try {
-      const uploaded = await journeyApi.uploadFile(ownerType, stepId, block.id, file, currentUser?.name);
-      setFiles((current) => [uploaded, ...current]);
-      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: `${file.name} anexado com sucesso.` } }));
+      const uploaded = await Promise.all(nextFiles.map((file) => journeyApi.uploadFile(ownerType, stepId, block.id, file, currentUser?.name)));
+      setFiles((current) => [...uploaded, ...current]);
+      const description = uploaded.length === 1 ? `${uploaded[0].name} anexado com sucesso.` : `${uploaded.length} arquivos anexados com sucesso.`;
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: description } }));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Upload nao concluido.");
     } finally {
@@ -4217,7 +4223,7 @@ function FileRuntimeBlock({ block, stepId, currentUser, ownerType, label = "Anex
     <div className="file-runtime-block">
       <label className="secondary-button upload-runtime-button">
         <Upload size={15} /> {isLoading ? "Enviando..." : label}
-        <input type="file" disabled={isLoading} onChange={(event) => { void upload(event.currentTarget.files?.[0] ?? null); event.currentTarget.value = ""; }} />
+        <input type="file" multiple disabled={isLoading} onChange={(event) => { void upload(event.currentTarget.files); event.currentTarget.value = ""; }} />
       </label>
       {message && <span className="field-error">{message}</span>}
       <div className="runtime-file-list">
@@ -4349,6 +4355,25 @@ function PromptBlockSettings({
         <span>Resultado esperado</span>
         <input value={draftExpectedOutput} placeholder="Ex.: apresentacao por topicos gerada no NotebookLM" onChange={(event) => setDraftExpectedOutput(event.target.value)} onBlur={savePromptDraft} />
       </label>
+      <section className="prompt-attachment-config" aria-label="Arquivos de apoio do prompt">
+        <div className="prompt-condition-heading"><strong>Arquivos de apoio</strong><span>Habilite somente quando este prompt precisar entregar ou receber arquivos.</span></div>
+        <label className="check-item-row compact">
+          <input
+            type="checkbox"
+            checked={Boolean(block.config.attachmentsEnabled)}
+            onChange={(event) => onUpdate({ config: { attachmentsEnabled: event.target.checked, attachmentsRequired: event.target.checked ? Boolean(block.config.attachmentsRequired) : false, allowMultipleFiles: true } })}
+          />
+          <span className="check-item-control">{block.config.attachmentsEnabled && <Check size={16} />}</span>
+          <span>Permitir anexar arquivos de apoio</span>
+        </label>
+        {block.config.attachmentsEnabled && (
+          <label className="check-item-row compact">
+            <input type="checkbox" checked={Boolean(block.config.attachmentsRequired)} onChange={(event) => onUpdate({ config: { attachmentsRequired: event.target.checked } })} />
+            <span className="check-item-control">{block.config.attachmentsRequired && <Check size={16} />}</span>
+            <span>Exigir pelo menos um arquivo para confirmar a aplicação</span>
+          </label>
+        )}
+      </section>
       <section className="prompt-condition-config" aria-label="Condições para confirmar aplicação">
         <div className="prompt-condition-heading"><strong>Condições para confirmar aplicação</strong><span>Opcional: sem condição, a confirmação é direta.</span></div>
         {applicationConditions.map((condition) => (
@@ -4381,7 +4406,11 @@ function PromptExecutionBlock({ block, value, tables, stepId, currentUser, owner
     : [];
   const conditionChecks = runtimeValue.conditionChecks ?? {};
   const requiredConditions = conditions.filter((condition) => condition.required !== false);
-  const canConfirm = requiredConditions.every((condition) => Boolean(conditionChecks[condition.id]));
+  const attachmentsEnabled = Boolean(block.config.attachmentsEnabled);
+  const attachmentsRequired = attachmentsEnabled && Boolean(block.config.attachmentsRequired);
+  const [attachedFiles, setAttachedFiles] = useState<JourneyRuntimeFile[]>([]);
+  const conditionsComplete = requiredConditions.every((condition) => Boolean(conditionChecks[condition.id]));
+  const canConfirm = conditionsComplete && (!attachmentsRequired || attachedFiles.length > 0);
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [isConditionsOpen, setIsConditionsOpen] = useState(false);
 
@@ -4403,7 +4432,7 @@ function PromptExecutionBlock({ block, value, tables, stepId, currentUser, owner
       persist({ applied: false, appliedAt: null });
       return;
     }
-    if (requiredConditions.length) {
+    if (requiredConditions.length || attachmentsRequired) {
       setIsConditionsOpen(true);
       return;
     }
@@ -4452,10 +4481,11 @@ function PromptExecutionBlock({ block, value, tables, stepId, currentUser, owner
         <div className="prompt-conditions-runtime" role="group" aria-label="Condições da aplicação">
           <strong>Confirme as condições antes de aplicar</strong>
           {conditions.map((condition) => <label className="check-item-row compact" key={condition.id}><input type="checkbox" checked={Boolean(conditionChecks[condition.id])} onChange={(event) => setCondition(condition.id, event.target.checked)} /><span className="check-item-control">{conditionChecks[condition.id] && <Check size={16} />}</span><span>{condition.label}</span></label>)}
+          {attachmentsRequired && <div className={`prompt-attachment-requirement ${attachedFiles.length ? "complete" : "pending"}`}><FileText size={14} /><span>{attachedFiles.length ? `${attachedFiles.length} arquivo(s) de apoio anexado(s)` : "Anexe pelo menos um arquivo de apoio"}</span></div>}
           <div className="inline-actions"><button className="secondary-button" type="button" onClick={() => setIsConditionsOpen(false)}>Cancelar</button><button className="primary-button" type="button" disabled={!canConfirm} onClick={confirmWithConditions}><CheckCircle2 size={15} /> Confirmar aplicação</button></div>
         </div>
       )}
-      <FileRuntimeBlock block={block} stepId={stepId} currentUser={currentUser} ownerType={ownerType} label="Anexar arquivo de apoio" />
+      {attachmentsEnabled && <FileRuntimeBlock block={block} stepId={stepId} currentUser={currentUser} ownerType={ownerType} label="Anexar arquivos de apoio" onFilesChange={setAttachedFiles} />}
     </div>
   );
 }
