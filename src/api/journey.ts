@@ -11,6 +11,14 @@ export type JourneyFile = {
 
 type ApiEnvelope<T> = { data?: T; error?: string };
 
+function unwrapJourneyData<T>(body: ApiEnvelope<T | ApiEnvelope<T>>): T | undefined {
+  const data = body.data;
+  if (data && typeof data === "object" && !Array.isArray(data) && "data" in data) {
+    return (data as ApiEnvelope<T>).data;
+  }
+  return data as T | undefined;
+}
+
 function endpoint(baseUrl: string, ownerType: JourneyOwnerType, stepId: string, blockId: string) {
   return `${baseUrl.replace(/\/$/, "")}/api/journey-files/${ownerType}/${encodeURIComponent(stepId)}/${encodeURIComponent(blockId)}`;
 }
@@ -23,9 +31,10 @@ export function createJourneyApi(baseUrl: string) {
   return {
     async listFiles(ownerType: JourneyOwnerType, stepId: string, blockId: string) {
       const response = await fetch(endpoint(baseUrl, ownerType, stepId, blockId));
-      const body = await readJson<JourneyFile[]>(response);
+      const body = await readJson<JourneyFile[] | ApiEnvelope<JourneyFile[]>>(response);
       if (!response.ok) throw new Error(body.error ?? "Nao foi possivel carregar os arquivos.");
-      return body.data ?? [];
+      const files = unwrapJourneyData(body);
+      return Array.isArray(files) ? files : [];
     },
 
     async uploadFile(ownerType: JourneyOwnerType, stepId: string, blockId: string, file: File, createdBy?: string) {
@@ -33,9 +42,10 @@ export function createJourneyApi(baseUrl: string) {
       form.set("file", file);
       if (createdBy) form.set("createdBy", createdBy);
       const response = await fetch(endpoint(baseUrl, ownerType, stepId, blockId), { method: "POST", body: form });
-      const body = await readJson<JourneyFile>(response);
-      if (!response.ok || !body.data) throw new Error(body.error ?? "Upload nao concluido.");
-      return body.data;
+      const body = await readJson<JourneyFile | ApiEnvelope<JourneyFile>>(response);
+      const uploaded = unwrapJourneyData(body);
+      if (!response.ok || !uploaded) throw new Error(body.error ?? "Upload nao concluido.");
+      return uploaded;
     },
 
     async deleteFile(ownerType: JourneyOwnerType, stepId: string, blockId: string, fileId: string) {

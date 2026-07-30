@@ -527,7 +527,7 @@ async function handleJourneyFileRequest(request: Request, env: Env, ownerType: O
   if (request.method === "GET") {
     const records = await env.DB.prepare("select * from journey_step_files where owner_type = ? and owner_step_id = ? and block_id = ? order by created_at desc")
       .bind(ownerType, stepId, blockId).all();
-    return json({ data: records.results ?? [] });
+    return json(records.results ?? []);
   }
 
   if (request.method === "POST") {
@@ -546,7 +546,7 @@ async function handleJourneyFileRequest(request: Request, env: Env, ownerType: O
     await env.DB.prepare("insert into journey_step_files (id, owner_type, owner_step_id, document_id, block_id, item_id, r2_key, name, content_type, size_bytes, description, created_by, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
       .bind(id, ownerType, stepId, documentRow.id, blockId, form.get("itemId")?.toString() ?? null, key, file.name, file.type || null, file.size, form.get("description")?.toString() ?? null, form.get("createdBy")?.toString() ?? null, now).run();
     await logGenericEvent(env.DB, ownerType, stepId, documentRow.id, blockId, "file_uploaded", { id, name: file.name, size: file.size }, form.get("createdBy")?.toString() ?? null);
-    return json({ data: { id, name: file.name, content_type: file.type, size_bytes: file.size, url: `/api/files/${encodeURIComponent(key)}` } }, 201);
+    return json({ id, name: file.name, content_type: file.type, size_bytes: file.size, url: `/api/files/${encodeURIComponent(key)}` }, 201);
   }
 
   if (request.method === "DELETE" && fileId) {
@@ -556,7 +556,7 @@ async function handleJourneyFileRequest(request: Request, env: Env, ownerType: O
     await env.FILES.delete(String(record.r2_key));
     await env.DB.prepare("delete from journey_step_files where id = ?").bind(fileId).run();
     await logGenericEvent(env.DB, ownerType, stepId, documentRow.id, blockId, "file_deleted", { id: fileId }, null);
-    return json({ data: [] });
+    return json([]);
   }
   return error("Metodo nao permitido.", 405);
 }
