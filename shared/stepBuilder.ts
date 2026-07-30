@@ -109,6 +109,7 @@ export type StepBlockConfig = {
   contentSnapshot?: string;
   expectedOutput?: string;
   executionMode?: "manual" | "automatic";
+  applicationConditions?: Array<{ id: string; label: string; required?: boolean }>;
   saveResultToBlockKey?: string | null;
   allowPast?: boolean;
   allowFuture?: boolean;

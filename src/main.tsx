@@ -167,6 +167,7 @@ type ProjectStep = {
   expected_output: string | null;
   execution_instructions: string | null;
   status: StepStatus;
+  is_not_applicable?: boolean;
   notes: string | null;
 };
 
@@ -3407,6 +3408,7 @@ const blockCatalog = [
   { type: "context", label: "Contexto", icon: Copy },
   { type: "project_summary", label: "Sumario", icon: GitBranch },
   { type: "materials", label: "Materiais", icon: Link2 },
+  { type: "file_upload", label: "Arquivo / evidencia", icon: Upload },
   { type: "comment", label: "Comentario", icon: FileText },
 ];
 
@@ -3493,8 +3495,9 @@ function JourneyView({
   onArchiveGeneratedPrompt: (promptId: string, summaryItemId?: string) => void;
   onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
 }) {
-  const doneSteps = steps.filter((step) => step.status === "concluido").length;
-  const progress = steps.length ? Math.round((doneSteps / steps.length) * 100) : 0;
+  const applicableSteps = steps.filter((step) => !step.is_not_applicable);
+  const doneSteps = applicableSteps.filter((step) => step.status === "concluido").length;
+  const progress = applicableSteps.length ? Math.round((doneSteps / applicableSteps.length) * 100) : 0;
   const [payload, setPayload] = useState<StepBuilderPayload | null>(null);
   const [isLoadingBlocks, setIsLoadingBlocks] = useState(false);
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
@@ -3532,7 +3535,8 @@ function JourneyView({
     try {
       const next = await stepRequest("/structure");
       setPayload(next);
-      if (next.completion.status !== selectedStep.status) {
+      setCollapsedBlockIds(new Set(next.document.blocks.map((block) => block.id)));
+      if (!selectedStep.is_not_applicable && next.completion.status !== selectedStep.status) {
         void onUpdateStep(selectedStep.id, { status: next.completion.status });
       }
     } finally {
@@ -3543,7 +3547,9 @@ function JourneyView({
   async function addBlock(type: string) {
     const next = await stepRequest("/blocks", { method: "POST", body: JSON.stringify({ type }) });
     setPayload(next);
-    setEditingBlockId(next.document.blocks[next.document.blocks.length - 1]?.id ?? null);
+    const createdId = next.document.blocks[next.document.blocks.length - 1]?.id ?? null;
+    setEditingBlockId(createdId);
+    if (createdId) setCollapsedBlockIds((current) => { const collapsed = new Set(current); collapsed.delete(createdId); return collapsed; });
     setIsAddMenuOpen(false);
   }
 
@@ -3601,7 +3607,7 @@ function JourneyView({
   async function saveBlockValue(blockId: string, value: unknown) {
     const next = await stepRequest(`/block-values/${encodeURIComponent(blockId)}`, { method: "PATCH", body: JSON.stringify({ value, updatedBy: currentUser?.name ?? "Patrick" }) });
     setPayload(next);
-    if (next.completion.status !== selectedStep.status) onUpdateStep(selectedStep.id, { status: next.completion.status });
+    if (!selectedStep.is_not_applicable && next.completion.status !== selectedStep.status) onUpdateStep(selectedStep.id, { status: next.completion.status });
   }
 
   const blocks = payload?.document.blocks ?? [];
@@ -3664,9 +3670,9 @@ function JourneyView({
         <aside className="step-rail collapsible-rail">
           <div className="rail-heading"><div><strong>Etapas</strong><span>{doneSteps} concluidas</span></div><button className="rail-edit-button" type="button" title="Organizar etapas" onClick={() => setIsStepManagerOpen(true)}><Pencil size={14} /> Editar</button></div>
           {steps.map((step) => (
-            <button key={step.id} className={`step-item ${selectedStepId === step.id ? "active" : ""}`} onClick={() => onSelectStep(step.id)}>
-              <span className={`step-dot ${step.status}`}>{step.status === "concluido" ? <Check size={13} /> : step.step_order}</span>
-              <span><strong>{step.name}</strong><small>{formatStepStatus(step.status)}</small></span>
+            <button key={step.id} className={`step-item ${step.is_not_applicable ? "nao-aplicavel" : ""} ${selectedStepId === step.id ? "active" : ""}`} onClick={() => onSelectStep(step.id)}>
+              <span className={`step-dot ${step.is_not_applicable ? "nao-aplicavel" : step.status}`}>{step.status === "concluido" && !step.is_not_applicable ? <Check size={13} /> : step.step_order}</span>
+              <span><strong>{step.name}</strong><small>{step.is_not_applicable ? "Nao se aplica" : formatStepStatus(step.status)}</small></span>
             </button>
           ))}
         </aside>
@@ -3685,7 +3691,8 @@ function JourneyView({
               <button className={journeyMode === "execute" ? "active" : ""} type="button" onClick={() => switchJourneyMode("execute")}><CheckCircle2 size={15} /> Executar</button>
               <button className={journeyMode === "edit" ? "active" : ""} type="button" onClick={() => switchJourneyMode("edit")}><Pencil size={15} /> Editar estrutura</button>
             </div>
-            <button className="secondary-button" type="button" disabled={!completion?.canComplete} title={completion?.canComplete ? "Concluir etapa" : completion?.reasons[0]?.message ?? "Carregando condicoes de conclusao"} onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}><CheckCircle2 size={17} /> Concluir</button>
+            <button className={`secondary-button ${selectedStep.is_not_applicable ? "is-not-applicable" : ""}`} type="button" onClick={() => onUpdateStep(selectedStep.id, { is_not_applicable: !selectedStep.is_not_applicable })}>{selectedStep.is_not_applicable ? <RefreshCw size={16} /> : <X size={16} />}{selectedStep.is_not_applicable ? " Aplicar etapa" : " Nao se aplica"}</button>
+            <button className="secondary-button" type="button" disabled={Boolean(selectedStep.is_not_applicable) || !completion?.canComplete} title={selectedStep.is_not_applicable ? "Esta etapa foi marcada como nao aplicavel" : completion?.canComplete ? "Concluir etapa" : completion?.reasons[0]?.message ?? "Carregando condicoes de conclusao"} onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}><CheckCircle2 size={17} /> Concluir</button>
             {journeyMode === "edit" && (
               <>
                 <form className="quick-step-form" onSubmit={(event) => { event.preventDefault(); onAddNextStep(project.id, newStepName || "Nova etapa"); setNewStepName(""); }}>
@@ -3701,11 +3708,11 @@ function JourneyView({
             )}
           </div>
           <div className="step-auto-status">
-            <span className={`chip active ${completion?.status ?? selectedStep.status}`}>{formatStepStatus(completion?.status ?? selectedStep.status)}</span>
+            <span className={`chip active ${selectedStep.is_not_applicable ? "nao-aplicavel" : completion?.status ?? selectedStep.status}`}>{selectedStep.is_not_applicable ? "Nao se aplica" : formatStepStatus(completion?.status ?? selectedStep.status)}</span>
             <span>{completion ? `${completion.completedBlocks}/${completion.totalBlocks} blocos completos` : "Carregando blocos"}</span>
             <div className="progress-bar"><span style={{ width: `${completion?.progress ?? 0}%` }} /></div>
           </div>
-          {completion && !completion.canComplete && completion.reasons.length > 0 && (
+          {!selectedStep.is_not_applicable && completion && !completion.canComplete && completion.reasons.length > 0 && (
             <div className="step-completion-hint" role="status"><span>Para concluir esta etapa:</span> {completion.reasons[0].message}</div>
           )}
 
@@ -3799,7 +3806,7 @@ function JourneyView({
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setIsTemplateSaveOpen(false)}>
           <section className="template-save-modal glass-panel" role="dialog" aria-modal="true" aria-label="Salvar estrutura como template" onMouseDown={(event) => event.stopPropagation()}>
             <div className="modal-heading">
-              <div><span className="eyebrow">Salvar template</span><h2>Estrutura da jornada</h2><p>Checklists e prompts continuam vazios. Contextos da jornada entram no template como cards reutilizaveis.</p></div>
+              <div><span className="eyebrow">Salvar template</span><h2>Estrutura da jornada</h2><p>Checklists e confirmações continuam vazios. Apenas contextos fixados no modo Editar estrutura entram no template.</p></div>
               <button className="icon-button" type="button" title="Fechar" onClick={() => setIsTemplateSaveOpen(false)}><X size={18} /></button>
             </div>
             <div className="template-save-mode" role="group" aria-label="Destino do template">
@@ -3824,10 +3831,10 @@ function JourneyView({
             </div>
             <div className="step-manager-list">
               {[...steps].sort(byOrder).map((step, index) => (
-                <article className={`step-manager-row ${step.id === selectedStepId ? "active" : ""}`} key={step.id}>
+                <article className={`step-manager-row ${step.is_not_applicable ? "nao-aplicavel" : ""} ${step.id === selectedStepId ? "active" : ""}`} key={step.id}>
                   <button className="step-manager-select" type="button" onClick={() => { onSelectStep(step.id); setIsStepManagerOpen(false); }}>
-                    <span className={`step-dot ${step.status}`}>{step.status === "concluido" ? <Check size={13} /> : index + 1}</span>
-                    <span><strong>{step.name}</strong><small>{formatStepStatus(step.status)}</small></span>
+                    <span className={`step-dot ${step.is_not_applicable ? "nao-aplicavel" : step.status}`}>{step.status === "concluido" && !step.is_not_applicable ? <Check size={13} /> : index + 1}</span>
+                    <span><strong>{step.name}</strong><small>{step.is_not_applicable ? "Nao se aplica" : formatStepStatus(step.status)}</small></span>
                   </button>
                   <div className="step-manager-actions">
                     <button className="icon-button subtle" type="button" title="Subir etapa" disabled={index === 0} onClick={() => moveJourneyStep(step.id, -1)}>↑</button>
@@ -3923,7 +3930,7 @@ function StepBuilderBlockCard({
     ? String(block.config.description ?? linkedPrompt?.short_description ?? "").trim()
     : blockTypeText(block.type);
   return (
-    <article className={`step-builder-block ${block.type}${parentClass}`}>
+    <article className={`step-builder-block ${block.type}${parentClass} ${isCollapsed ? "is-collapsed" : ""}`}>
       <div className="block-card-heading">
         <div><Icon size={18} /><div><strong>{block.title}</strong>{(blockDetail || block.required) && <span>{blockDetail}{block.required ? `${blockDetail ? " - " : ""}obrigatorio` : ""}</span>}</div></div>
         <div className="block-card-actions">
@@ -4040,7 +4047,7 @@ function BlockBody({
   }
 
   if (block.type === "prompt") {
-    return <PromptExecutionBlock block={block} value={value} tables={tables} isStructureEditing={mode === "edit"} onSaveValue={onSaveValue} onUpdate={onUpdate} />;
+    return <PromptExecutionBlock block={block} value={value} tables={tables} stepId={selectedStep.id} currentUser={currentUser} ownerType={ownerType} isStructureEditing={mode === "edit"} onSaveValue={onSaveValue} onUpdate={onUpdate} />;
   }
 
   if (block.type === "context") {
@@ -4048,7 +4055,7 @@ function BlockBody({
   }
 
   if (block.type === "materials") {
-    return <MaterialsBlock block={block} isStructureEditing={mode === "edit"} onUpdate={onUpdate} />;
+    return <MaterialsBlock block={block} value={value} isStructureEditing={mode === "edit"} onUpdate={onUpdate} onSaveValue={onSaveValue} />;
   }
 
   if (block.type === "project_summary") {
@@ -4122,7 +4129,7 @@ function AnswerBlock({ block, value, onSaveValue }: { block: StepBuilderBlock; v
 
 type JourneyRuntimeFile = JourneyFile;
 
-function FileRuntimeBlock({ block, stepId, currentUser, ownerType }: { block: StepBuilderBlock; stepId: string; currentUser: AppUser | null; ownerType: "project" | "client" }) {
+function FileRuntimeBlock({ block, stepId, currentUser, ownerType, label = "Anexar evidencia" }: { block: StepBuilderBlock; stepId: string; currentUser: AppUser | null; ownerType: "project" | "client"; label?: string }) {
   const [files, setFiles] = useState<JourneyRuntimeFile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -4164,7 +4171,7 @@ function FileRuntimeBlock({ block, stepId, currentUser, ownerType }: { block: St
   return (
     <div className="file-runtime-block">
       <label className="secondary-button upload-runtime-button">
-        <Upload size={15} /> {isLoading ? "Enviando..." : "Anexar evidencia"}
+        <Upload size={15} /> {isLoading ? "Enviando..." : label}
         <input type="file" disabled={isLoading} onChange={(event) => { void upload(event.currentTarget.files?.[0] ?? null); event.currentTarget.value = ""; }} />
       </label>
       {message && <span className="field-error">{message}</span>}
@@ -4181,6 +4188,7 @@ type PromptBlockRuntimeValue = {
   lastCopiedAt?: string | null;
   applied?: boolean;
   appliedAt?: string | null;
+  conditionChecks?: Record<string, boolean>;
 };
 
 function PromptBlockSettings({
@@ -4198,8 +4206,12 @@ function PromptBlockSettings({
   const [draftPromptText, setDraftPromptText] = useState(String(block.config.contentSnapshot ?? selectedPrompt?.content ?? ""));
   const [draftDescription, setDraftDescription] = useState(String(block.config.description ?? selectedPrompt?.short_description ?? ""));
   const [draftExpectedOutput, setDraftExpectedOutput] = useState(String(block.config.expectedOutput ?? ""));
+  const [draftCondition, setDraftCondition] = useState("");
   const toolId = String(block.config.toolId ?? selectedPrompt?.ai_tool_id ?? "");
   const canSaveToLibrary = Boolean(draftPromptText.trim()) && !selectedPrompt;
+  const applicationConditions = Array.isArray(block.config.applicationConditions)
+    ? block.config.applicationConditions as Array<{ id: string; label: string; required?: boolean }>
+    : [];
 
   useEffect(() => {
     const nextSelectedPrompt = tables.prompts.find((prompt) => prompt.id === block.config.promptId) ?? null;
@@ -4259,6 +4271,17 @@ function PromptBlockSettings({
     });
   }
 
+  function addApplicationCondition() {
+    const label = draftCondition.trim();
+    if (!label) return;
+    onUpdate({ config: { applicationConditions: [...applicationConditions, { id: crypto.randomUUID(), label, required: true }] } });
+    setDraftCondition("");
+  }
+
+  function removeApplicationCondition(conditionId: string) {
+    onUpdate({ config: { applicationConditions: applicationConditions.filter((condition) => condition.id !== conditionId) } });
+  }
+
   return (
     <div className="prompt-block-settings">
       <SelectField
@@ -4281,6 +4304,17 @@ function PromptBlockSettings({
         <span>Resultado esperado</span>
         <input value={draftExpectedOutput} placeholder="Ex.: apresentacao por topicos gerada no NotebookLM" onChange={(event) => setDraftExpectedOutput(event.target.value)} onBlur={savePromptDraft} />
       </label>
+      <section className="prompt-condition-config" aria-label="Condições para confirmar aplicação">
+        <div className="prompt-condition-heading"><strong>Condições para confirmar aplicação</strong><span>Opcional: sem condição, a confirmação é direta.</span></div>
+        {applicationConditions.map((condition) => (
+          <div className="prompt-condition-row" key={condition.id}>
+            <CheckCircle2 size={14} />
+            <span>{condition.label}</span>
+            <button className="icon-button danger" type="button" title="Remover condição" onClick={() => removeApplicationCondition(condition.id)}><Trash2 size={14} /></button>
+          </div>
+        ))}
+        <div className="inline-form prompt-condition-add"><input value={draftCondition} placeholder="Ex.: envio junto com o projeto consolidado" onChange={(event) => setDraftCondition(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addApplicationCondition(); } }} /><button className="secondary-button" type="button" onClick={addApplicationCondition}><Plus size={15} /> Condição</button></div>
+      </section>
       <div className="inline-actions prompt-settings-actions">
         <button className="secondary-button" type="button" onClick={savePromptDraft}><Save size={15} /> Salvar alteracoes</button>
         <button className="secondary-button" type="button" disabled={!canSaveToLibrary} onClick={() => void saveToLibrary()}><Save size={15} /> Salvar na biblioteca e vincular</button>
@@ -4289,7 +4323,7 @@ function PromptBlockSettings({
   );
 }
 
-function PromptExecutionBlock({ block, value, tables, isStructureEditing, onSaveValue, onUpdate }: { block: StepBuilderBlock; value: any; tables: Tables; isStructureEditing: boolean; onSaveValue: (value: unknown) => void; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
+function PromptExecutionBlock({ block, value, tables, stepId, currentUser, ownerType, isStructureEditing, onSaveValue, onUpdate }: { block: StepBuilderBlock; value: any; tables: Tables; stepId: string; currentUser: AppUser | null; ownerType: "project" | "client"; isStructureEditing: boolean; onSaveValue: (value: unknown) => void; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
   const runtimeValue = value && typeof value === "object" && !Array.isArray(value) ? value as PromptBlockRuntimeValue : {};
   const linkedPrompt = tables.prompts.find((prompt) => prompt.id === block.config.promptId) ?? null;
   const tool = tables.ai_tools.find((item) => item.id === (block.config.toolId ?? linkedPrompt?.ai_tool_id)) ?? null;
@@ -4297,7 +4331,14 @@ function PromptExecutionBlock({ block, value, tables, isStructureEditing, onSave
   const expectedOutput = String(block.config.expectedOutput ?? "").trim();
   const copyCount = Number(runtimeValue.copyCount ?? 0);
   const isApplied = Boolean(runtimeValue.applied);
+  const conditions = Array.isArray(block.config.applicationConditions)
+    ? block.config.applicationConditions as Array<{ id: string; label: string; required?: boolean }>
+    : [];
+  const conditionChecks = runtimeValue.conditionChecks ?? {};
+  const requiredConditions = conditions.filter((condition) => condition.required !== false);
+  const canConfirm = requiredConditions.every((condition) => Boolean(conditionChecks[condition.id]));
   const [copyFeedback, setCopyFeedback] = useState(false);
+  const [isConditionsOpen, setIsConditionsOpen] = useState(false);
 
   function persist(next: PromptBlockRuntimeValue) {
     onSaveValue({ ...runtimeValue, ...next });
@@ -4313,7 +4354,25 @@ function PromptExecutionBlock({ block, value, tables, isStructureEditing, onSave
   }
 
   function toggleApplied() {
-    persist({ applied: !isApplied, appliedAt: !isApplied ? new Date().toISOString() : null });
+    if (isApplied) {
+      persist({ applied: false, appliedAt: null });
+      return;
+    }
+    if (requiredConditions.length) {
+      setIsConditionsOpen(true);
+      return;
+    }
+    persist({ applied: true, appliedAt: new Date().toISOString() });
+  }
+
+  function setCondition(conditionId: string, checked: boolean) {
+    persist({ conditionChecks: { ...conditionChecks, [conditionId]: checked } });
+  }
+
+  function confirmWithConditions() {
+    if (!canConfirm) return;
+    persist({ applied: true, appliedAt: new Date().toISOString() });
+    setIsConditionsOpen(false);
   }
 
   if (!promptText) {
@@ -4341,9 +4400,17 @@ function PromptExecutionBlock({ block, value, tables, isStructureEditing, onSave
       </div>
       <div className="prompt-execution-actions">
         <button className={`primary-button copy-feedback-button ${copyFeedback ? "copied" : ""}`} type="button" onClick={copyPrompt}><Copy size={15} /> {copyFeedback ? "Copiado!" : "Copiar prompt"}</button>
-        <button className={`secondary-button ${isApplied ? "is-applied" : ""}`} type="button" onClick={toggleApplied}><CheckCircle2 size={15} /> {isApplied ? "Aplicado" : "Confirmar aplicado"}</button>
+        <button className={`secondary-button ${isApplied ? "is-applied" : ""}`} type="button" onClick={toggleApplied}><CheckCircle2 size={15} /> {isApplied ? "Aplicado" : "Confirmar aplicação"}</button>
         {isStructureEditing && <button className="icon-button subtle" type="button" title="Atualizar titulo pelo prompt vinculado" disabled={!linkedPrompt} onClick={() => linkedPrompt && onUpdate({ title: linkedPrompt.title })}><RefreshCw size={14} /></button>}
       </div>
+      {isConditionsOpen && !isApplied && (
+        <div className="prompt-conditions-runtime" role="group" aria-label="Condições da aplicação">
+          <strong>Confirme as condições antes de aplicar</strong>
+          {conditions.map((condition) => <label className="check-item-row compact" key={condition.id}><input type="checkbox" checked={Boolean(conditionChecks[condition.id])} onChange={(event) => setCondition(condition.id, event.target.checked)} /><span className="check-item-control">{conditionChecks[condition.id] && <Check size={16} />}</span><span>{condition.label}</span></label>)}
+          <div className="inline-actions"><button className="secondary-button" type="button" onClick={() => setIsConditionsOpen(false)}>Cancelar</button><button className="primary-button" type="button" disabled={!canConfirm} onClick={confirmWithConditions}><CheckCircle2 size={15} /> Confirmar aplicação</button></div>
+        </div>
+      )}
+      <FileRuntimeBlock block={block} stepId={stepId} currentUser={currentUser} ownerType={ownerType} label="Anexar arquivo de apoio" />
     </div>
   );
 }
@@ -4387,7 +4454,12 @@ function LegacySummaryOperationalBlock({
   const [statusMenuItemId, setStatusMenuItemId] = useState<string | null>(null);
   const initializedSummaryId = useRef<string | null>(null);
 
-  const summary = summaries.find((item) => item.status === "active") ?? summaries.find((item) => item.id === block.config.summaryId) ?? summaries[0] ?? null;
+  const summary = [...summaries]
+    .filter((item) => item.status === "active" || String(item.status) === "ativo")
+    .sort((left, right) => right.version_number - left.version_number)[0]
+    ?? summaries.find((item) => item.id === block.config.summaryId)
+    ?? summaries[0]
+    ?? null;
   const items = summary ? summaryItems.filter((item) => item.summary_id === summary.id).sort(byOrder) : [];
   const selectedItems = items.filter((item) => item.is_selected);
   const visibleItems = getVisibleSummaryItems(items, collapsedTopicIds, summarySearch);
@@ -4959,20 +5031,30 @@ function ChecklistBlock({ block, value, isStructureEditing, onSaveValue, onUpdat
   );
 }
 
-function MaterialsBlock({ block, isStructureEditing, onUpdate }: { block: StepBuilderBlock; isStructureEditing: boolean; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
+function MaterialsBlock({ block, value, isStructureEditing, onUpdate, onSaveValue }: { block: StepBuilderBlock; value: any; isStructureEditing: boolean; onUpdate: (patch: Partial<StepBuilderBlock>) => void; onSaveValue: (value: unknown) => void }) {
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
-  const links = Array.isArray(block.config.links) ? block.config.links as Array<any> : [];
+  const templateLinks = Array.isArray(block.config.links) ? block.config.links as Array<any> : [];
+  const runtimeLinks = Array.isArray(value?.links) ? value.links as Array<any> : [];
+  const links = isStructureEditing ? templateLinks : [...templateLinks, ...runtimeLinks];
   const add = () => {
     if (!title.trim() || !url.trim()) return;
-    onUpdate({ config: { links: [...links, { id: crypto.randomUUID(), title: title.trim(), url: url.trim() }] } });
+    const link = { id: crypto.randomUUID(), title: title.trim(), url: url.trim() };
+    if (isStructureEditing) onUpdate({ config: { links: [...templateLinks, link] } });
+    else onSaveValue({ ...(value && typeof value === "object" ? value : {}), links: [...runtimeLinks, link] });
     setTitle("");
     setUrl("");
   };
+
+  const remove = (linkId: string) => {
+    if (isStructureEditing) onUpdate({ config: { links: templateLinks.filter((item) => item.id !== linkId) } });
+    else onSaveValue({ ...(value && typeof value === "object" ? value : {}), links: runtimeLinks.filter((item) => item.id !== linkId) });
+  };
+
   return (
     <div className="materials-block-body">
-      {links.map((link) => <div className="material-row" key={link.id}><a href={link.url} target="_blank" rel="noreferrer">{link.title}</a>{isStructureEditing && <button className="icon-button danger" onClick={() => onUpdate({ config: { links: links.filter((item) => item.id !== link.id) } })}><Trash2 size={13} /></button>}</div>)}
-      {isStructureEditing && <div className="inline-form"><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Nome" /><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://" /><button className="secondary-button" type="button" onClick={add}><Plus size={15} /> Link</button></div>}
+      {links.map((link) => <div className="material-row" key={link.id}><a href={link.url} target="_blank" rel="noreferrer">{link.title}</a><button className="icon-button" type="button" title="Copiar link" onClick={() => void copyToClipboard(String(link.url), "Link")}><Copy size={13} /></button>{(isStructureEditing || runtimeLinks.some((item) => item.id === link.id)) && <button className="icon-button danger" type="button" title="Excluir link" onClick={() => remove(link.id)}><Trash2 size={13} /></button>}</div>)}
+      <div className="inline-form materials-runtime-form"><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Nome do link" /><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://" /><button className="secondary-button" type="button" onClick={add}><Plus size={15} /> Adicionar link</button></div>
     </div>
   );
 }

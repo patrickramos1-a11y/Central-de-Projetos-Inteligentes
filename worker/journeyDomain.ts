@@ -46,7 +46,7 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
   }
 
   if (resource === "journey-steps" && isOwnerType(id) && action) {
-    return handleGenericStepRequest(request, env.DB, id, action, nested, nestedId);
+    return handleGenericStepRequest(request, env, id, action, nested, nestedId);
   }
 
   if (resource === "projects" && id && action === "journey" && request.method === "GET") {
@@ -59,7 +59,7 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
 
   if (resource === "projects" && id && action === "templates" && request.method === "POST") {
     const body = await request.json<{ name?: string; templateId?: string | null; createdBy?: string }>();
-    return json(await saveProjectAsTemplate(env.DB, id, body.name, body.createdBy ?? null, body.templateId ?? null), 201);
+    return json(await saveProjectAsTemplate(env, id, body.name, body.createdBy ?? null, body.templateId ?? null), 201);
   }
 
   if (resource === "journey-templates" && id && request.method === "PATCH") {
@@ -106,7 +106,8 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
   return null;
 }
 
-async function handleGenericStepRequest(request: Request, db: D1Database, ownerType: OwnerType, stepId: string, action?: string, nested?: string) {
+async function handleGenericStepRequest(request: Request, env: Env, ownerType: OwnerType, stepId: string, action?: string, nested?: string) {
+  const db = env.DB;
   if (request.method === "POST" && action === "initialize") {
     const body = await request.json().catch(() => ({})) as { templateStepId?: string };
     const existing = await getCurrentDocument(db, ownerType, stepId, false);
@@ -123,6 +124,7 @@ async function handleGenericStepRequest(request: Request, db: D1Database, ownerT
       ? await buildClientLegacyDocument(db, step, crypto.randomUUID())
       : await buildProjectLegacyDocument(db, step, crypto.randomUUID());
     await insertDocument(db, document, getOwnerId(ownerType, step), null);
+    if (templateRow) await copyTemplateFilesToRuntime(env, ownerType, String(templateRow.step_id), stepId, document.structureId, document.blocks);
     return json({ data: await genericPayload(db, ownerType, stepId, await getCurrentDocument(db, ownerType, stepId)) }, 201);
   }
 
@@ -332,12 +334,13 @@ async function createRuntimeContext(
 }
 
 async function saveProjectAsTemplate(
-  db: D1Database,
+  env: Env,
   projectId: string,
   requestedName?: string,
   createdBy: string | null = null,
   existingTemplateId: string | null = null,
 ) {
+  const db = env.DB;
   const project = await db.prepare("select * from projects where id = ?").bind(projectId).first<Record<string, unknown>>();
   if (!project) throw new Error("Projeto nao encontrado.");
   const now = new Date().toISOString();
@@ -380,29 +383,20 @@ async function saveProjectAsTemplate(
     const source = await getCurrentDocument(db, "project", String(projectStep.id), false);
     if (!source) continue;
     const sourceDocument = normalizeDocumentRow(source).document;
-    const templateDocument = await createProjectTemplateDocument(db, sourceDocument, String(projectStep.id), templateId, templateStepId, String(projectStep.name ?? sourceDocument.title));
+    const templateDocument = await createProjectTemplateDocument(sourceDocument, templateId, templateStepId, String(projectStep.name ?? sourceDocument.title));
     await insertDocument(db, templateDocument, templateId, createdBy);
+    await copyProjectFilesToTemplate(env, String(projectStep.id), templateStepId, templateDocument.structureId, templateDocument.blocks, createdBy);
   }
   await db.prepare("update projects set journey_template_id = ?, updated_at = ? where id = ?").bind(templateId, now, projectId).run();
   return { id: templateId, name, mode };
 }
 
 async function createProjectTemplateDocument(
-  db: D1Database,
   sourceDocument: StepDocument,
-  projectStepId: string,
   templateId: string,
   templateStepId: string,
   title: string,
 ): Promise<StepDocument> {
-  const values = await db.prepare("select block_id, value_json from journey_step_values where owner_type = 'project' and owner_step_id = ?")
-    .bind(projectStepId).all<Record<string, unknown>>();
-  const runtimeContexts = new Map<string, Array<Record<string, unknown>>>();
-  for (const row of values.results ?? []) {
-    const value = asRecord(parseJson(String(row.value_json ?? "null")));
-    if (Array.isArray(value.contexts)) runtimeContexts.set(String(row.block_id), value.contexts.map(asRecord));
-  }
-
   return {
     ...sourceDocument,
     ownerType: "template",
@@ -414,15 +408,12 @@ async function createProjectTemplateDocument(
     state: "published",
     versionNumber: 1,
     revision: 1,
-    // Contexts are the deliberate exception to runtime values: they become reusable cards in this template.
+    // Execution contexts remain with the project. Only contexts deliberately pinned in edit mode are reusable.
     blocks: sourceDocument.blocks.map((block) => {
       if (block.type !== "context") return block;
       const configured = Array.isArray(block.config?.contexts) ? (block.config?.contexts as Array<Record<string, unknown>>) : [];
-      const contexts = [...configured, ...(runtimeContexts.get(block.id) ?? [])]
-        .filter((context) => String(context.content ?? "").trim())
-        .map((context) => ({ ...context, pinned: true }));
-      const uniqueContexts = contexts.filter((context, index, all) => all.findIndex((candidate) => String(candidate.title ?? "") === String(context.title ?? "") && String(candidate.content ?? "") === String(context.content ?? "")) === index);
-      return { ...block, config: { ...(block.config ?? {}), contexts: uniqueContexts } };
+      const contexts = configured.filter((context) => Boolean(context.pinned) && String(context.content ?? "").trim());
+      return { ...block, config: { ...(block.config ?? {}), contexts } };
     }),
   };
 }
@@ -530,7 +521,7 @@ async function handleJourneyFileRequest(request: Request, env: Env, ownerType: O
   if (!isOwnerType(ownerType)) return error("Tipo de jornada invalido.");
   const documentRow = await getCurrentDocument(env.DB, ownerType, stepId);
   const document = normalizeDocumentRow(documentRow).document;
-  const block = document.blocks.find((candidate) => candidate.id === blockId && candidate.type === "file_upload");
+  const block = document.blocks.find((candidate) => candidate.id === blockId && (candidate.type === "file_upload" || candidate.type === "prompt"));
   if (!block) return error("Bloco de arquivos nao encontrado.", 404);
 
   if (request.method === "GET") {
@@ -568,6 +559,40 @@ async function handleJourneyFileRequest(request: Request, env: Env, ownerType: O
     return json({ data: [] });
   }
   return error("Metodo nao permitido.", 405);
+}
+
+async function copyProjectFilesToTemplate(env: Env, projectStepId: string, templateStepId: string, templateDocumentId: string, blocks: Block[], createdBy: string | null) {
+  const blockIds = new Set(blocks.filter((block) => block.type === "prompt" || block.type === "file_upload").map((block) => block.id));
+  if (!blockIds.size || !env.FILES) return;
+  const rows = await env.DB.prepare("select * from journey_step_files where owner_type = 'project' and owner_step_id = ? order by created_at asc").bind(projectStepId).all<Record<string, unknown>>();
+  for (const row of rows.results ?? []) {
+    const blockId = String(row.block_id ?? "");
+    if (!blockIds.has(blockId)) continue;
+    const source = await env.FILES.get(String(row.r2_key));
+    if (!source) continue;
+    const id = crypto.randomUUID();
+    const key = `journeys/template/${templateStepId}/${blockId}/${id}-${sanitizeFileName(String(row.name ?? "arquivo"))}`;
+    await env.FILES.put(key, source.body, { httpMetadata: { contentType: String(row.content_type ?? "application/octet-stream") } });
+    await env.DB.prepare("insert into journey_step_files (id, owner_type, owner_step_id, document_id, block_id, item_id, r2_key, name, content_type, size_bytes, description, created_by, created_at) values (?, 'template', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, templateStepId, templateDocumentId, blockId, row.item_id ?? null, key, row.name ?? "arquivo", row.content_type ?? null, row.size_bytes ?? 0, row.description ?? null, createdBy, new Date().toISOString()).run();
+  }
+}
+
+async function copyTemplateFilesToRuntime(env: Env, ownerType: Exclude<OwnerType, "template">, templateStepId: string, runtimeStepId: string, runtimeDocumentId: string, blocks: Block[]) {
+  const blockIds = new Set(blocks.filter((block) => block.type === "prompt" || block.type === "file_upload").map((block) => block.id));
+  if (!blockIds.size || !env.FILES) return;
+  const rows = await env.DB.prepare("select * from journey_step_files where owner_type = 'template' and owner_step_id = ? order by created_at asc").bind(templateStepId).all<Record<string, unknown>>();
+  for (const row of rows.results ?? []) {
+    const blockId = String(row.block_id ?? "");
+    if (!blockIds.has(blockId)) continue;
+    const source = await env.FILES.get(String(row.r2_key));
+    if (!source) continue;
+    const id = crypto.randomUUID();
+    const key = `journeys/${ownerType}/${runtimeStepId}/${blockId}/${id}-${sanitizeFileName(String(row.name ?? "arquivo"))}`;
+    await env.FILES.put(key, source.body, { httpMetadata: { contentType: String(row.content_type ?? "application/octet-stream") } });
+    await env.DB.prepare("insert into journey_step_files (id, owner_type, owner_step_id, document_id, block_id, item_id, r2_key, name, content_type, size_bytes, description, created_by, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, ownerType, runtimeStepId, runtimeDocumentId, blockId, row.item_id ?? null, key, row.name ?? "arquivo", row.content_type ?? null, row.size_bytes ?? 0, row.description ?? null, row.created_by ?? null, new Date().toISOString()).run();
+  }
 }
 
 async function migrateLegacyJourneyData(db: D1Database) {
@@ -679,7 +704,7 @@ async function calculateRuntimeCompletion(db: D1Database, ownerType: OwnerType, 
   const values = new Map((valueRows.results ?? []).map((row) => [String(row.block_id), parseJson(String(row.value_json ?? "null"))]));
   const fileRows = await db.prepare("select * from journey_step_files where owner_type = ? and owner_step_id = ?").bind(ownerType, stepId).all<Record<string, unknown>>();
   const files = fileRows.results ?? [];
-  const requiredBlocks = document.blocks.filter((block) => block.required && block.visible !== false && !["short_text", "long_text", "phase", "materials"].includes(block.type));
+  const requiredBlocks = document.blocks.filter((block) => block.required && block.visible !== false && !["short_text", "long_text", "phase"].includes(block.type));
   let total = 0;
   let done = 0;
   const reasons: Array<{ blockId: string; message: string }> = [];
@@ -694,9 +719,11 @@ async function calculateRuntimeCompletion(db: D1Database, ownerType: OwnerType, 
     } else if (block.type === "prompt") complete = Boolean(asRecord(value).applied);
     else if (block.type === "context") complete = Array.isArray(asRecord(value).contexts) && (asRecord(value).contexts as unknown[]).length > 0;
     else if (block.type === "file_upload") complete = files.some((file) => String(file.block_id) === block.id);
+    else if (block.type === "materials") complete = Array.isArray(asRecord(value).links) && (asRecord(value).links as unknown[]).length > 0;
+    else if (block.type === "project_summary") complete = await isProjectSummaryComplete(db, ownerType, stepId, block);
     else complete = !isEmpty(value);
     if (complete) done += 1;
-    else reasons.push({ blockId: block.id, message: `Conclua ${block.title}.` });
+    else reasons.push({ blockId: block.id, message: block.type === "project_summary" ? "Conclua todos os topicos selecionados do sumario." : `Conclua ${block.title}.` });
   }
   const progress = total === 0 ? 0 : Math.round((done / total) * 100);
   const status = reasons.length === 0 && total > 0 ? "concluido" : done > 0 || valueRows.results?.length ? "em_andamento" : "pendente";
@@ -705,12 +732,29 @@ async function calculateRuntimeCompletion(db: D1Database, ownerType: OwnerType, 
 
 async function syncStepStatus(db: D1Database, ownerType: OwnerType, stepId: string, status: string) {
   if (ownerType === "template") return;
+  if (ownerType === "project") {
+    const step = await db.prepare("select is_not_applicable from project_steps where id = ?").bind(stepId).first<Record<string, unknown>>();
+    if (Number(step?.is_not_applicable ?? 0) === 1) return;
+  }
   const table = ownerType === "project" ? "project_steps" : "client_steps";
   const fields = ownerType === "client" && status === "concluido" ? ", completed_at = ?" : "";
   const params = ownerType === "client" && status === "concluido"
     ? [status, new Date().toISOString(), new Date().toISOString(), stepId]
     : [status, new Date().toISOString(), stepId];
   await db.prepare(`update ${table} set status = ?, updated_at = ?${fields} where id = ?`).bind(...params).run();
+}
+
+async function isProjectSummaryComplete(db: D1Database, ownerType: OwnerType, stepId: string, block: Block) {
+  if (ownerType !== "project") return false;
+  const step = await db.prepare("select project_id from project_steps where id = ?").bind(stepId).first<Record<string, unknown>>();
+  const projectId = String(step?.project_id ?? "");
+  if (!projectId) return false;
+  const activeSummary = await db.prepare("select id from project_summaries where project_id = ? and status in ('active', 'ativo') order by version_number desc limit 1").bind(projectId).first<Record<string, unknown>>();
+  const summaryId = String(activeSummary?.id ?? block.config?.summaryId ?? "");
+  if (!summaryId) return false;
+  const selected = await db.prepare("select status from project_summary_items where summary_id = ? and is_selected = 1").bind(summaryId).all<Record<string, unknown>>();
+  const items = selected.results ?? [];
+  return items.length > 0 && items.every((item) => String(item.status) === "concluido");
 }
 
 async function logGenericEvent(db: D1Database, ownerType: OwnerType, stepId: string, documentId: string | null, blockId: string | null, eventType: string, payload: unknown, createdBy: string | null) {
