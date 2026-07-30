@@ -3918,10 +3918,14 @@ function StepBuilderBlockCard({
 }) {
   const Icon = blockCatalog.find((item) => item.type === block.type)?.icon ?? Layers3;
   const parentClass = block.config.parentBlockId ? " nested-block" : "";
+  const linkedPrompt = block.type === "prompt" ? tables.prompts.find((prompt) => prompt.id === block.config.promptId) ?? null : null;
+  const blockDetail = block.type === "prompt"
+    ? String(block.config.description ?? linkedPrompt?.short_description ?? "").trim()
+    : blockTypeText(block.type);
   return (
     <article className={`step-builder-block ${block.type}${parentClass}`}>
       <div className="block-card-heading">
-        <div><Icon size={18} /><div><strong>{block.title}</strong><span>{blockTypeText(block.type)}{block.required ? " - obrigatorio" : ""}</span></div></div>
+        <div><Icon size={18} /><div><strong>{block.title}</strong>{(blockDetail || block.required) && <span>{blockDetail}{block.required ? `${blockDetail ? " - " : ""}obrigatorio` : ""}</span>}</div></div>
         <div className="block-card-actions">
           <button className="icon-button" type="button" title={isCollapsed ? "Expandir bloco" : "Recolher bloco"} onClick={onToggleCollapse}>{isCollapsed ? "+" : "-"}</button>
           {mode === "edit" && (
@@ -4192,6 +4196,7 @@ function PromptBlockSettings({
 }) {
   const selectedPrompt = tables.prompts.find((prompt) => prompt.id === block.config.promptId) ?? null;
   const [draftPromptText, setDraftPromptText] = useState(String(block.config.contentSnapshot ?? selectedPrompt?.content ?? ""));
+  const [draftDescription, setDraftDescription] = useState(String(block.config.description ?? selectedPrompt?.short_description ?? ""));
   const [draftExpectedOutput, setDraftExpectedOutput] = useState(String(block.config.expectedOutput ?? ""));
   const toolId = String(block.config.toolId ?? selectedPrompt?.ai_tool_id ?? "");
   const canSaveToLibrary = Boolean(draftPromptText.trim()) && !selectedPrompt;
@@ -4199,14 +4204,15 @@ function PromptBlockSettings({
   useEffect(() => {
     const nextSelectedPrompt = tables.prompts.find((prompt) => prompt.id === block.config.promptId) ?? null;
     setDraftPromptText(String(block.config.contentSnapshot ?? nextSelectedPrompt?.content ?? ""));
+    setDraftDescription(String(block.config.description ?? nextSelectedPrompt?.short_description ?? ""));
     setDraftExpectedOutput(String(block.config.expectedOutput ?? ""));
-  }, [block.id, block.config.promptId, block.config.contentSnapshot, block.config.expectedOutput, tables.prompts]);
+  }, [block.id, block.config.promptId, block.config.contentSnapshot, block.config.description, block.config.expectedOutput, tables.prompts]);
 
   function linkPrompt(promptId: string) {
     const prompt = tables.prompts.find((item) => item.id === promptId) ?? null;
 
     if (!prompt) {
-      onUpdate({ config: { promptId: null, contentSnapshot: draftPromptText, toolId } });
+      onUpdate({ config: { promptId: null, contentSnapshot: draftPromptText, description: draftDescription, expectedOutput: draftExpectedOutput, toolId } });
       return;
     }
 
@@ -4217,6 +4223,7 @@ function PromptBlockSettings({
         promptId: prompt.id,
         contentSnapshot: prompt.content,
         toolId: prompt.ai_tool_id ?? "",
+        description: prompt.short_description ?? draftDescription,
         expectedOutput: draftExpectedOutput,
       },
     });
@@ -4225,8 +4232,8 @@ function PromptBlockSettings({
   function savePromptDraft() {
     const currentPromptText = String(block.config.contentSnapshot ?? selectedPrompt?.content ?? "");
     const currentExpectedOutput = String(block.config.expectedOutput ?? "");
-    if (draftPromptText !== currentPromptText || draftExpectedOutput !== currentExpectedOutput) {
-      onUpdate({ config: { contentSnapshot: draftPromptText, expectedOutput: draftExpectedOutput, promptId: block.config.promptId ?? null, toolId } });
+    if (draftPromptText !== currentPromptText || draftExpectedOutput !== currentExpectedOutput || draftDescription !== String(block.config.description ?? selectedPrompt?.short_description ?? "")) {
+      onUpdate({ config: { contentSnapshot: draftPromptText, description: draftDescription, expectedOutput: draftExpectedOutput, promptId: block.config.promptId ?? null, toolId } });
     }
   }
 
@@ -4235,7 +4242,7 @@ function PromptBlockSettings({
       title: block.title || "Prompt da etapa",
       content: draftPromptText,
       ai_tool_id: toolId || null,
-      short_description: `Criado no bloco ${block.title || "Prompt"}`,
+      short_description: draftDescription || `Criado no bloco ${block.title || "Prompt"}`,
     });
 
     if (!created) return;
@@ -4246,6 +4253,7 @@ function PromptBlockSettings({
         promptId: created.id,
         contentSnapshot: created.content,
         toolId: created.ai_tool_id ?? "",
+        description: created.short_description ?? draftDescription,
         expectedOutput: draftExpectedOutput,
       },
     });
@@ -4260,7 +4268,11 @@ function PromptBlockSettings({
         options={tables.prompts.filter((prompt) => prompt.status !== "arquivado").map((prompt) => ({ value: prompt.id, label: prompt.title }))}
         emptyLabel="Prompt avulso / nao vinculado"
       />
-      <SelectField label="Ferramenta" value={toolId} onChange={(nextToolId) => onUpdate({ config: { toolId: nextToolId, contentSnapshot: draftPromptText, expectedOutput: draftExpectedOutput, promptId: block.config.promptId ?? null } })} options={tables.ai_tools.map((tool) => ({ value: tool.id, label: tool.name }))} emptyLabel="Nao vinculado" />
+      <label className="field prompt-content-config">
+        <span>Orientacao breve</span>
+        <input value={draftDescription} placeholder="Ex.: envie este prompt junto com o projeto consolidado" onChange={(event) => setDraftDescription(event.target.value)} onBlur={savePromptDraft} />
+      </label>
+      <SelectField label="Ferramenta" value={toolId} onChange={(nextToolId) => onUpdate({ config: { toolId: nextToolId, contentSnapshot: draftPromptText, description: draftDescription, expectedOutput: draftExpectedOutput, promptId: block.config.promptId ?? null } })} options={tables.ai_tools.map((tool) => ({ value: tool.id, label: tool.name }))} emptyLabel="Nao vinculado" />
       <label className="field prompt-content-config">
         <span>Texto do prompt</span>
         <textarea value={draftPromptText} rows={6} placeholder="Cole o prompt ou selecione um da biblioteca" onChange={(event) => setDraftPromptText(event.target.value)} onBlur={savePromptDraft} />

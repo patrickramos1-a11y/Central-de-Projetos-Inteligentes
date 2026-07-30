@@ -6257,11 +6257,13 @@ body {
   pointer-events: none;
 }
 
-.check-item-control {
+.check-item-row .check-item-control {
   display: grid;
   width: 36px;
   height: 36px;
   flex: 0 0 36px;
+  min-width: 36px;
+  max-width: 36px;
   place-items: center;
   color: white;
   background: rgba(255,255,255,0.72);
