@@ -3929,10 +3929,11 @@ function StepBuilderBlockCard({
   const blockDetail = block.type === "prompt"
     ? String(block.config.description ?? linkedPrompt?.short_description ?? "").trim()
     : blockTypeText(block.type);
+  const blockState = getCollapsedBlockState(block, value, summaries, summaryItems);
   return (
     <article className={`step-builder-block ${block.type}${parentClass} ${isCollapsed ? "is-collapsed" : ""}`}>
       <div className="block-card-heading">
-        <div><Icon size={18} /><div><strong>{block.title}</strong>{(blockDetail || block.required) && <span>{blockDetail}{block.required ? `${blockDetail ? " - " : ""}obrigatorio` : ""}</span>}</div></div>
+        <div><Icon size={18} /><div><strong>{block.title}</strong>{(blockDetail || block.required) && <span>{blockDetail}{block.required ? `${blockDetail ? " - " : ""}obrigatorio` : ""}</span>}{isCollapsed && <div className="collapsed-block-state"><span className={`collapsed-block-status ${blockState.tone}`}>{blockState.label}</span>{blockState.detail && <span className="collapsed-block-detail">{blockState.detail}</span>}</div>}</div></div>
         <div className="block-card-actions">
           <button className="icon-button" type="button" title={isCollapsed ? "Expandir bloco" : "Recolher bloco"} onClick={onToggleCollapse}>{isCollapsed ? "+" : "-"}</button>
           {mode === "edit" && (
@@ -3951,6 +3952,50 @@ function StepBuilderBlockCard({
       {!isCollapsed && <BlockBody block={block} value={value} mode={mode} summaries={summaries} summaryItems={summaryItems} generatedPrompts={generatedPrompts} project={project} selectedStep={selectedStep} tables={tables} currentUser={currentUser} onUpdateSummaryItem={onUpdateSummaryItem} onSetSummaryItemSelection={onSetSummaryItemSelection} onDeleteSummaryItem={onDeleteSummaryItem} onSaveGeneratedPrompt={onSaveGeneratedPrompt} onArchiveGeneratedPrompt={onArchiveGeneratedPrompt} onSaveValue={onSaveValue} onOpenSummary={onOpenSummary} onUpdate={onUpdate} ownerType={ownerType} />}
     </article>
   );
+}
+
+function getCollapsedBlockState(block: StepBuilderBlock, value: any, summaries: ProjectSummary[], summaryItems: ProjectSummaryItem[]) {
+  const complete = (label: string, detail = "") => ({ tone: "complete", label, detail });
+  const pending = (label: string, detail = "") => ({ tone: "pending", label, detail });
+  const active = (label: string, detail = "") => ({ tone: "active", label, detail });
+
+  if (block.type === "checklist") {
+    const items = Array.isArray(block.config.items) ? block.config.items as Array<any> : [];
+    const requiredItems = items.filter((item) => item.required !== false);
+    const checked = value?.checked ?? Object.fromEntries(items.map((item) => [item.id, Boolean(item.done)]));
+    const done = requiredItems.filter((item) => checked[item.id]).length;
+    return requiredItems.length === 0 ? pending("Sem itens") : done === requiredItems.length ? complete("Checklist concluido", `${done}/${requiredItems.length} itens`) : active("Checklist em andamento", `${done}/${requiredItems.length} itens`);
+  }
+
+  if (block.type === "prompt") {
+    const copies = Number(value?.copyCount ?? 0);
+    return value?.applied ? complete("Aplicado", copies ? `${copies} copia(s)` : "Confirmado") : copies ? active("Copiado", `${copies} copia(s)`) : pending("Pendente", "Ainda nao copiado");
+  }
+
+  if (block.type === "context") {
+    const contexts = Array.isArray(value?.contexts) ? value.contexts : [];
+    return contexts.length ? complete("Contexto salvo", `${contexts.length} contexto(s)`) : pending("Sem contexto");
+  }
+
+  if (block.type === "materials") {
+    const links = Array.isArray(value?.links) ? value.links : [];
+    return links.length ? complete("Materiais adicionados", `${links.length} link(s)`) : pending("Sem materiais");
+  }
+
+  if (block.type === "file_upload") return pending("Aguardando arquivo");
+
+  if (block.type === "project_summary") {
+    const summary = summaries.find((item) => item.status === "active" || String(item.status) === "ativo") ?? summaries.find((item) => item.id === block.config.summaryId);
+    const items = summary ? summaryItems.filter((item) => item.summary_id === summary.id && item.is_selected) : [];
+    const done = items.filter((item) => item.status === "concluido").length;
+    if (!summary) return pending("Sem sumario vinculado");
+    return items.length && done === items.length ? complete("Sumario concluido", `${done}/${items.length} topicos`) : active("Sumario em andamento", `${done}/${items.length} topicos`);
+  }
+
+  if (block.type === "short_answer" || block.type === "long_answer") return String(value ?? "").trim() ? complete("Respondido") : pending("Aguardando resposta");
+  if (block.type === "short_text" || block.type === "long_text") return String(block.config.content ?? "").trim() ? complete("Orientacao disponivel") : pending("Sem orientacao");
+  if (block.type === "phase") return block.config.status === "concluido" ? complete("Fase concluida") : active(formatStepStatus(String(block.config.status ?? "pendente") as StepStatus));
+  return block.required ? pending("Obrigatorio") : active("Disponivel");
 }
 
 function BlockSettings({ block, tables, onUpdate, onCreatePromptFromBlock }: { block: StepBuilderBlock; tables: Tables; onUpdate: (patch: Partial<StepBuilderBlock>) => void; onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null> }) {
@@ -4509,7 +4554,10 @@ function LegacySummaryOperationalBlock({
   }, [summary?.id, summary?.prompt_config_json]);
 
   function toggleCollapsedTopic(itemId: string) {
-    setCollapsedTopicIds((current) => (current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]));
+    const branchCollapsibleIds = collectSummaryBranchIds(items, itemId).filter((id) => collapsibleIds.includes(id));
+    setCollapsedTopicIds((current) => current.includes(itemId)
+      ? current.filter((id) => !branchCollapsibleIds.includes(id))
+      : [...new Set([...current, itemId])]);
   }
 
   function selectPromptScope(ids: string[]) {
@@ -4553,6 +4601,12 @@ function LegacySummaryOperationalBlock({
     setStatusMenuItemId(null);
   }
 
+  function completeSelectedTopics() {
+    const selected = new Set(promptScopeIds);
+    const selectedRoots = items.filter((item) => selected.has(item.id) && (!item.parent_id || !selected.has(item.parent_id)));
+    selectedRoots.forEach((item) => updateSummaryItemStatus(item, "concluido"));
+  }
+
   if (!summary) {
     return (
       <div className="summary-operational-block empty-summary-operational">
@@ -4594,6 +4648,7 @@ function LegacySummaryOperationalBlock({
           <input value={summarySearch} onChange={(event) => setSummarySearch(event.target.value)} placeholder="Buscar topico" />
         </label>
         <button className="secondary-button" type="button" disabled={!allCollapsed && collapsedTopicIds.length === 0} onClick={() => setCollapsedTopicIds([])}>Ver tudo</button>
+        <button className="secondary-button summary-bulk-complete" type="button" disabled={promptScopeIds.length === 0} onClick={completeSelectedTopics}><CheckCircle2 size={15} /> Concluir selecionados</button>
         <button className="secondary-button" type="button" disabled={allCollapsed} onClick={() => setCollapsedTopicIds(collapsibleIds)}>So capitulos</button>
         <button className="secondary-button" type="button" disabled={items.length === 0} onClick={() => selectPromptScope(items.map((item) => item.id))}>Selecionar sumario inteiro</button>
         <button className="secondary-button" type="button" disabled={promptScopeIds.length === 0} onClick={() => setPromptScopeIds([])}>Limpar prompt</button>
@@ -4630,7 +4685,7 @@ function LegacySummaryOperationalBlock({
           const coveredInBranch = branchIds.filter((id) => promptCoveredItemIds.has(id)).length;
 
           return (
-            <article className={`summary-item tree-row operational-row level-${Math.min(item.level, 4)} ${item.is_selected ? "selected" : "excluded"} ${isPromptScope ? "prompt-scope" : ""}`} key={item.id} style={{ "--tree-level": Math.max(0, item.level - 1) } as CSSProperties}>
+            <article className={`summary-item tree-row operational-row level-${Math.min(item.level, 4)} ${item.is_selected ? "selected" : "excluded"} ${isPromptScope ? "prompt-scope" : ""} ${statusMenuItemId === item.id ? "status-menu-open" : ""}`} key={item.id} style={{ "--tree-level": Math.max(0, item.level - 1) } as CSSProperties}>
               <button className="summary-expand-button" disabled={childCount === 0} onClick={() => toggleCollapsedTopic(item.id)} title={collapsedTopicIds.includes(item.id) ? "Expandir topico" : "Recolher topico"}>{childCount > 0 ? (collapsedTopicIds.includes(item.id) ? "+" : "-") : ""}</button>
               {isStructureEditing ? (
                 <button className={`checkbox ${item.is_selected ? "checked" : ""}`} onClick={() => onSetSelection(summary.id, item.id, !item.is_selected)} title="Entrar no sumario consolidado">{item.is_selected && <Check size={14} />}</button>
@@ -4646,14 +4701,14 @@ function LegacySummaryOperationalBlock({
                 ) : <strong className="summary-topic-title">{item.title}</strong>}
                 <div className="summary-item-controls compact-topic-meta">
                   <div className="summary-status-control">
-                    <button className={`summary-status-trigger ${item.status}`} type="button" onClick={() => setStatusMenuItemId((current) => current === item.id ? null : item.id)}>
+                    <button className={`summary-status-trigger ${item.status}`} type="button" onClick={(event) => { event.stopPropagation(); setStatusMenuItemId((current) => current === item.id ? null : item.id); }}>
                       <span className={`summary-status-dot ${item.status}`} />
                       {formatStatus(item.status)}
                       <ChevronDown size={12} aria-hidden="true" />
                     </button>
                     {statusMenuItemId === item.id && (
                       <div className="summary-status-menu" role="menu">
-                        {summaryStatusOptions.map((status) => <button key={status} className={status === item.status ? "active" : ""} type="button" onClick={() => updateSummaryItemStatus(item, status)}>{formatStatus(status)}</button>)}
+                        {summaryStatusOptions.map((status) => <button key={status} className={status === item.status ? "active" : ""} type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); updateSummaryItemStatus(item, status); }}>{formatStatus(status)}</button>)}
                       </div>
                     )}
                   </div>
