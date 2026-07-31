@@ -45,6 +45,86 @@
 .block-canvas { display: grid; gap: var(--space-2); padding: var(--space-3); background: var(--surface-subtle); }
 .step-builder-block { border-radius: var(--radius-md); }
 
+/* Compact operational blocks: their identity is visible before any content is expanded. */
+.block-canvas { gap: 8px; padding: var(--space-2); }
+
+.step-builder-block {
+  padding: 10px;
+  border-color: rgb(24 53 47 / 12%);
+}
+
+.step-builder-block > .block-card-heading {
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.step-builder-block.is-collapsed {
+  padding: 5px 9px;
+  border-left: 3px solid rgb(89 110 104 / 42%);
+}
+
+.step-builder-block.is-collapsed .block-card-heading {
+  min-height: 36px;
+  margin: 0;
+  padding: 0;
+}
+
+.step-builder-block.is-collapsed .block-card-heading strong { font-size: 0.78rem; line-height: 1.1; }
+.step-builder-block.is-collapsed .block-card-heading span { font-size: 0.64rem; line-height: 1.1; }
+.step-builder-block.is-collapsed .collapsed-block-state { gap: 4px; margin-top: 2px; }
+.step-builder-block.is-collapsed .collapsed-block-status { padding: 1px 5px; font-size: 0.56rem !important; }
+.step-builder-block.is-collapsed .collapsed-block-detail { font-size: 0.6rem !important; }
+
+.step-builder-block.prompt { border-left-color: #4f85c3; }
+.step-builder-block.context { border-left-color: #8c63b7; }
+.step-builder-block.checklist { border-left-color: #149b82; }
+.step-builder-block.materials { border-left-color: #c78630; }
+.step-builder-block.project_summary { border-left-color: #2f7f98; }
+.step-builder-block.file_upload { border-left-color: #a76055; }
+
+.block-card-actions { gap: 5px; }
+.block-card-actions .icon-button { width: 30px; min-width: 30px; height: 30px; min-height: 30px; padding: 0; }
+.block-collapse-button { color: var(--brand-deep); background: rgb(255 255 255 / 58%); }
+
+.prompt-execution-card { gap: 8px; padding: 10px; border-radius: 10px; box-shadow: inset 0 1px rgb(255 255 255 / 78%), 0 6px 16px rgb(20 54 47 / 6%); }
+.prompt-execution-main { gap: 8px; }
+.prompt-execution-main strong { font-size: 0.84rem; }
+.prompt-execution-main span { margin-top: 1px; font-size: 0.7rem; }
+.prompt-execution-stats { min-width: 0; gap: 4px; }
+.prompt-execution-stats span { padding: 3px 6px; font-size: 0.62rem; }
+.prompt-execution-actions { gap: 6px; }
+.prompt-execution-actions .primary-button,
+.prompt-execution-actions .secondary-button { min-height: 34px; padding: 6px 9px; font-size: 0.74rem; }
+
+.checklist-block-body { gap: 5px; }
+.checklist-progress { gap: 7px; margin-bottom: 5px; font-size: 0.68rem; }
+.checklist-progress .progress-bar { height: 4px; }
+.check-item-row { min-height: 34px; gap: 7px; padding: 4px 7px; border-radius: 7px; font-size: 0.73rem; }
+.check-item-row .check-item-control { width: 28px; height: 28px; min-width: 28px; max-width: 28px; border-radius: 6px; }
+.check-item-row .check-item-control svg { width: 14px; height: 14px; }
+
+.materials-block-body { gap: 5px; }
+.materials-group { gap: 3px; }
+.materials-group-label { font-size: 0.62rem; }
+.materials-block-body .material-row { min-height: 30px; gap: 5px; padding: 3px 6px; font-size: 0.74rem; }
+.materials-block-body .material-row .icon-button { color: #9a641d; background: rgb(255 244 221 / 84%); }
+.materials-runtime-form { gap: 6px; padding-top: 1px; }
+.materials-runtime-form input { min-height: 32px; padding: 5px 8px; font-size: 0.72rem; }
+.materials-runtime-form .secondary-button { min-height: 32px; padding: 5px 8px; font-size: 0.7rem; }
+
+.step-builder-block.project_summary > .block-card-heading { margin-bottom: 5px; }
+.step-builder-block.project_summary .summary-operational-block { gap: 8px; }
+.step-builder-block.project_summary .summary-operational-tools { gap: 5px; }
+.step-builder-block.project_summary .summary-operational-tools .secondary-button { min-height: 32px; padding: 5px 8px; font-size: 0.7rem; }
+
+@media (max-width: 700px) {
+  .step-builder-block { padding: 8px; }
+  .step-builder-block.is-collapsed { padding: 5px 7px; }
+  .prompt-execution-main { display: grid; }
+  .prompt-execution-stats { justify-content: flex-start; }
+  .materials-runtime-form { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 840px) {
   .journey-context-bar { grid-template-columns: auto minmax(0, 1fr); }
   .journey-context-bar .journey-progress { grid-column: 1 / -1; }
