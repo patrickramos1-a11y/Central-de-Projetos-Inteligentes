@@ -99,8 +99,9 @@
 .checklist-block-body { gap: 5px; }
 .checklist-progress { gap: 7px; margin-bottom: 5px; font-size: 0.68rem; }
 .checklist-progress .progress-bar { height: 4px; }
+.checklist-complete-all { justify-self: end; min-height: 26px; margin: -1px 0 2px; padding: 4px 7px; font-size: 0.65rem; }
 .check-item-row { min-height: 34px; gap: 7px; padding: 4px 7px; border-radius: 7px; font-size: 0.73rem; }
-.check-item-row .check-item-control { width: 28px; height: 28px; min-width: 28px; max-width: 28px; border-radius: 6px; }
+.check-item-row .check-item-control { width: 22px; height: 22px; min-width: 22px; max-width: 22px; border-radius: 5px; }
 .check-item-row .check-item-control svg { width: 14px; height: 14px; }
 
 .materials-block-body { gap: 5px; }

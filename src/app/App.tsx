@@ -5182,18 +5182,76 @@ function ChecklistBlock({ block, value, isStructureEditing, onSaveValue, onUpdat
   const items = Array.isArray(block.config.items) ? block.config.items as Array<any> : [];
   const persistedChecked = value?.checked ?? Object.fromEntries(items.map((item) => [item.id, Boolean(item.done)]));
   const [optimisticChecked, setOptimisticChecked] = useState<Record<string, boolean>>(persistedChecked);
+  const latestCheckedRef = useRef<Record<string, boolean>>(persistedChecked);
+  const latestPersistedRef = useRef<Record<string, boolean>>(persistedChecked);
+  const saveTimerRef = useRef<number | null>(null);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingWritesRef = useRef(0);
+  const latestChangeRef = useRef(0);
+  const onSaveValueRef = useRef(onSaveValue);
 
   useEffect(() => {
-    setOptimisticChecked(persistedChecked);
+    onSaveValueRef.current = onSaveValue;
+  }, [onSaveValue]);
+
+  useEffect(() => {
+    latestPersistedRef.current = persistedChecked;
+    if (saveTimerRef.current === null && pendingWritesRef.current === 0) {
+      latestCheckedRef.current = persistedChecked;
+      setOptimisticChecked(persistedChecked);
+    }
   }, [JSON.stringify(persistedChecked)]);
+
+  function queueSave(checked: Record<string, boolean>, changeId: number) {
+    pendingWritesRef.current += 1;
+    saveQueueRef.current = saveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          await Promise.resolve(onSaveValueRef.current({ ...(value && typeof value === "object" ? value : {}), checked }));
+        } catch (error) {
+          console.error("Nao foi possivel salvar o checklist.", error);
+          if (changeId === latestChangeRef.current) {
+            latestCheckedRef.current = latestPersistedRef.current;
+            setOptimisticChecked(latestPersistedRef.current);
+          }
+        } finally {
+          pendingWritesRef.current -= 1;
+        }
+      });
+  }
+
+  function scheduleSave(checked: Record<string, boolean>) {
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    const changeId = ++latestChangeRef.current;
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      queueSave(checked, changeId);
+    }, 240);
+  }
+
+  useEffect(() => () => {
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      queueSave(latestCheckedRef.current, latestChangeRef.current);
+    }
+  }, []);
 
   const requiredItems = items.filter((item) => item.required !== false);
   const doneCount = requiredItems.filter((item) => optimisticChecked[item.id]).length;
   const progress = requiredItems.length ? Math.round((doneCount / requiredItems.length) * 100) : 0;
   const setChecked = (itemId: string, done: boolean) => {
     const next = { ...optimisticChecked, [itemId]: done };
+    latestCheckedRef.current = next;
     setOptimisticChecked(next);
-    onSaveValue({ checked: next });
+    scheduleSave(next);
+  };
+  const completeAll = () => {
+    const next = Object.fromEntries(items.map((item) => [item.id, true]));
+    latestCheckedRef.current = next;
+    setOptimisticChecked(next);
+    scheduleSave(next);
   };
   const addItem = () => {
     if (!newItem.trim()) return;
@@ -5208,8 +5266,9 @@ function ChecklistBlock({ block, value, isStructureEditing, onSaveValue, onUpdat
         <div className="progress-bar"><span style={{ width: `${progress}%` }} /></div>
         <strong>{progress}%</strong>
       </div>
+      {!isStructureEditing && items.length > 0 && doneCount < requiredItems.length && <button className="secondary-button checklist-complete-all" type="button" onClick={completeAll}><CheckCircle2 size={14} /> Concluir tudo</button>}
       {items.map((item) => (
-        <label key={item.id} className={`check-item-row ${optimisticChecked[item.id] ? "done" : ""}`}><input type="checkbox" checked={Boolean(optimisticChecked[item.id])} onChange={(event) => setChecked(item.id, event.target.checked)} /><span className="check-item-control">{optimisticChecked[item.id] && <Check size={18} />}</span><span>{item.label}</span>{isStructureEditing && <button className="icon-button danger" type="button" onClick={() => removeItem(item.id)}><Trash2 size={13} /></button>}</label>
+        <label key={item.id} className={`check-item-row ${optimisticChecked[item.id] ? "done" : ""}`}><input type="checkbox" checked={Boolean(optimisticChecked[item.id])} onChange={(event) => setChecked(item.id, event.target.checked)} /><span className="check-item-control">{optimisticChecked[item.id] && <Check size={14} />}</span><span>{item.label}</span>{isStructureEditing && <button className="icon-button danger" type="button" onClick={() => removeItem(item.id)}><Trash2 size={13} /></button>}</label>
       ))}
       {isStructureEditing && <div className="inline-form"><input value={newItem} onChange={(event) => setNewItem(event.target.value)} placeholder="Novo item" /><button className="secondary-button" type="button" onClick={addItem}><Plus size={15} /> Item</button></div>}
     </div>
