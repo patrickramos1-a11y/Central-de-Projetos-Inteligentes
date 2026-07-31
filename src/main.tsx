@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { createCloudflareApi } from "./lib/cloudflareApi";
 import { createJourneyApi, type JourneyFile } from "./api/journey";
+import { createSummaryApi } from "./api/summary";
 import { parseProjectSummary } from "./lib/summaryParser";
 import { copyText as copyToClipboard } from "./components/ui/clipboard";
 import { resolveBoundSummary } from "./features/summary/summaryBinding";
@@ -449,6 +450,7 @@ const cloudflareApiUrl = import.meta.env.PROD ? "" : configuredApiUrl;
 const hasCloudflareApi = true;
 const supabase = createCloudflareApi(cloudflareApiUrl);
 const journeyApi = createJourneyApi(cloudflareApiUrl);
+const summaryApi = createSummaryApi(cloudflareApiUrl);
 
 type UploadedFile = {
   key: string;
@@ -1587,18 +1589,12 @@ function App() {
     // The Worker consolidation is atomic: version activation and dense
     // renumbering either both succeed or the previous version stays intact.
     try {
-      const response = await fetch(`${cloudflareApiUrl}/api/summaries/${encodeURIComponent(summaryId)}/consolidate`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ createdBy: currentUser?.name ?? null }),
-      });
-      const body = await response.json() as { data?: ProjectSummary; error?: string };
-      if (response.ok && body.data) {
+      const consolidated = await summaryApi.consolidate(summaryId, currentUser?.name ?? null) as ProjectSummary;
+      if (consolidated) {
         await loadAll();
-        setNotice(`Sumario consolidado como versao ${body.data.version_number}, com numeracao atualizada.`);
-        return body.data;
+        setNotice(`Sumario consolidado como versao ${consolidated.version_number}, com numeracao atualizada.`);
+        return consolidated;
       }
-      if (body.error) setNotice(`Erro ao consolidar sumario: ${body.error}`);
     } catch {
       // Older deployments keep the legacy fallback below until the Worker is updated.
     }
@@ -1672,8 +1668,25 @@ function App() {
   }
 
   async function saveGeneratedPrompt(payload: GeneratedPromptWrite) {
-    if (!supabase || !payload.final_prompt.trim()) {
+    if (!supabase || !payload.summary_id || !payload.final_prompt.trim()) {
       return false;
+    }
+
+    try {
+      const saved = await summaryApi.savePrompt(payload.summary_id, {
+        itemIds: getGeneratedPromptItemIds(payload),
+        finalPrompt: payload.final_prompt,
+        basePromptId: payload.base_prompt_id,
+        basePromptSnapshot: payload.base_prompt_snapshot,
+        aiToolId: payload.ai_tool_id,
+        createdBy: payload.created_by || currentUser?.name || "Patrick",
+        notes: payload.notes,
+      }) as GeneratedPrompt;
+      setTables((current) => ({ ...current, generated_prompts: [...current.generated_prompts, saved] }));
+      setNotice("Prompt salvo no historico do projeto.");
+      return true;
+    } catch {
+      // Compatibility fallback while an older Worker is still serving assets.
     }
 
     const { data, error } = await supabase
@@ -5795,7 +5808,7 @@ function collectSummaryBranchIds(items: ProjectSummaryItem[], itemId: string) {
   return [...ids];
 }
 
-function getGeneratedPromptItemIds(prompt: GeneratedPrompt) {
+function getGeneratedPromptItemIds(prompt: Pick<GeneratedPrompt, "summary_item_id" | "selected_blocks_json">) {
   const ids = new Set<string>();
   if (prompt.summary_item_id) ids.add(prompt.summary_item_id);
 

@@ -227,7 +227,7 @@ Status: concluida em 2026-07-30
 
 ## 9. Fase 4 - Sumario Inteligente
 
-Status: pendente
+Status: concluida em 2026-07-30
 
 ### Execucao
 
@@ -256,6 +256,14 @@ Status: pendente
 - consolidacao gera nova versao imutavel e torna-a `Versao em uso` somente apos sucesso;
 - rascunho aparece como `Versao em edicao`;
 - nenhuma rolagem interna estreita na arvore de execucao.
+
+### Registro de execucao
+
+- o bloco usa exclusivamente `config.summaryId` para resolver a versao exibida; a vinculacao de legado e feita pela migracao idempotente da Fase 3;
+- consolidacao continua atomica no Worker, produzindo uma nova versao imutavel e preservando a anterior;
+- a composicao de prompt agora tambem usa o endpoint de dominio do Sumario, com teste de contrato para URL e payload;
+- a arvore operacional existente abre inicialmente apenas nos capitulos, tem selecao por ramo, conclusao em lote, status compacto e arquivamento individual de prompts;
+- o editor dedicado permanece separado da composicao, conservando importacao, selecao, reorganizacao e consolidacao.
 
 ## 10. Fase 5 - Templates, Clientes e confiabilidade
 
