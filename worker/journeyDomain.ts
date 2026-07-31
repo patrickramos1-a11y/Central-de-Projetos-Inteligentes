@@ -208,15 +208,24 @@ async function getJourney(db: D1Database, ownerType: OwnerType, ownerId: string)
   ]);
   if (!entity) throw new Error("Jornada nao encontrada.");
   const stepIds = (stepsResult.results ?? []).map((step) => String((step as Record<string, unknown>).id));
-  const values = stepIds.length
-    ? await db.prepare(`select * from journey_step_values where owner_type = ? and owner_step_id in (${stepIds.map(() => "?").join(",")})`).bind(ownerType, ...stepIds).all()
-    : { results: [] };
+  const [values, files] = stepIds.length
+    ? await Promise.all([
+      db.prepare(`select * from journey_step_values where owner_type = ? and owner_step_id in (${stepIds.map(() => "?").join(",")})`).bind(ownerType, ...stepIds).all(),
+      db.prepare(`select * from journey_step_files where owner_type = ? and owner_step_id in (${stepIds.map(() => "?").join(",")}) order by created_at asc`).bind(ownerType, ...stepIds).all(),
+    ])
+    : [{ results: [] }, { results: [] }];
+  const completions = await Promise.all((documentsResult.results ?? []).map(async (row) => ({
+    stepId: String((row as Record<string, unknown>).step_id),
+    completion: await calculateRuntimeCompletion(db, ownerType, String((row as Record<string, unknown>).step_id), row as Record<string, unknown>),
+  })));
   return {
     ownerType,
     entity,
     steps: stepsResult.results ?? [],
     documents: (documentsResult.results ?? []).map(normalizeDocumentRow),
     values: (values.results ?? []).map((value) => ({ ...(value as Record<string, unknown>), value: parseJson(String((value as Record<string, unknown>).value_json ?? "null")) })),
+    files: files.results ?? [],
+    completions,
   };
 }
 
@@ -589,7 +598,11 @@ async function handleJourneyFileRequest(request: Request, env: Env, ownerType: O
 }
 
 async function copyProjectFilesToTemplate(env: Env, projectStepId: string, templateStepId: string, templateDocumentId: string, blocks: Block[], createdBy: string | null) {
-  const blockIds = new Set(blocks.filter((block) => block.type === "prompt" || block.type === "file_upload").map((block) => block.id));
+  // Runtime evidence belongs to the real project. Only explicit resource packs
+  // and prompt attachments are reusable assets for a future template.
+  const blockIds = new Set(blocks
+    .filter((block) => block.type === "prompt" || (block.type === "file_upload" && block.config?.fileMode === "resource_pack"))
+    .map((block) => block.id));
   if (!blockIds.size || !env.FILES) return;
   const rows = await env.DB.prepare("select * from journey_step_files where owner_type = 'project' and owner_step_id = ? order by created_at asc").bind(projectStepId).all<Record<string, unknown>>();
   for (const row of rows.results ?? []) {
@@ -606,7 +619,9 @@ async function copyProjectFilesToTemplate(env: Env, projectStepId: string, templ
 }
 
 async function copyTemplateFilesToRuntime(env: Env, ownerType: Exclude<OwnerType, "template">, templateStepId: string, runtimeStepId: string, runtimeDocumentId: string, blocks: Block[]) {
-  const blockIds = new Set(blocks.filter((block) => block.type === "prompt" || block.type === "file_upload").map((block) => block.id));
+  const blockIds = new Set(blocks
+    .filter((block) => block.type === "prompt" || (block.type === "file_upload" && block.config?.fileMode === "resource_pack"))
+    .map((block) => block.id));
   if (!blockIds.size || !env.FILES) return;
   const rows = await env.DB.prepare("select * from journey_step_files where owner_type = 'template' and owner_step_id = ? order by created_at asc").bind(templateStepId).all<Record<string, unknown>>();
   for (const row of rows.results ?? []) {
@@ -641,7 +656,42 @@ async function migrateLegacyJourneyData(db: D1Database) {
     await insertDocument(db, document, String(step.client_id ?? ""), null);
     clientsCreated += 1;
   }
-  return { projectsCreated, clientsCreated };
+  const summariesBound = await bindUnboundProjectSummaries(db);
+  return { projectsCreated, clientsCreated, summariesBound };
+}
+
+/** Binds legacy summary blocks once so all surfaces use one summary version. */
+async function bindUnboundProjectSummaries(db: D1Database) {
+  const rows = await db.prepare("select * from journey_step_documents where owner_type = 'project' and state in ('draft', 'published') order by updated_at desc").all<Record<string, unknown>>();
+  let summariesBound = 0;
+
+  for (const row of rows.results ?? []) {
+    const document = normalizeDocumentRow(row).document;
+    const unboundBlocks = document.blocks.filter((block) => block.type === "project_summary" && !String(block.config?.summaryId ?? "").trim());
+    if (!unboundBlocks.length || !document.projectId) continue;
+
+    const summary = await db.prepare("select id from project_summaries where project_id = ? and status in ('active', 'ativo') order by version_number desc limit 1")
+      .bind(document.projectId)
+      .first<Record<string, unknown>>();
+    if (!summary?.id) continue;
+
+    const summaryId = String(summary.id);
+    const boundDocument = {
+      ...document,
+      revision: Number(row.revision ?? document.revision ?? 1) + 1,
+      blocks: document.blocks.map((block) => block.type === "project_summary" && !String(block.config?.summaryId ?? "").trim()
+        ? { ...block, config: { ...(block.config ?? {}), summaryId } }
+        : block),
+    };
+    const now = new Date().toISOString();
+    await db.prepare("update journey_step_documents set revision = ?, document_json = ?, updated_at = ? where id = ?")
+      .bind(boundDocument.revision, JSON.stringify(boundDocument), now, row.id)
+      .run();
+    await logGenericEvent(db, "project", document.stepId, String(row.id), null, "summary_bound", { summaryId }, null);
+    summariesBound += unboundBlocks.length;
+  }
+
+  return summariesBound;
 }
 
 async function buildProjectLegacyDocument(db: D1Database, step: Record<string, unknown>, structureId: string): Promise<StepDocument> {

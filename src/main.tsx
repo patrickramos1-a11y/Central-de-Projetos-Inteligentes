@@ -3412,6 +3412,7 @@ type StepBuilderPayload = {
     blocks: StepBuilderBlock[];
   };
   values: Array<{ block_id: string; value: any; completion_state: string }>;
+  files: JourneyRuntimeFile[];
   completion: { status: StepStatus; progress: number; completedBlocks: number; totalBlocks: number; canComplete: boolean; reasons: Array<{ message: string; blockId?: string }> };
 };
 
@@ -3789,6 +3790,7 @@ function JourneyView({
                 onMove={moveBlock}
                 onSaveValue={(value) => saveBlockValue(block.id, value)}
                 onOpenSummary={() => setSummaryEditorOpen(true)}
+                files={payload?.files ?? []}
               />
             ))}
           </WorkCanvas>
@@ -3910,6 +3912,7 @@ function StepBuilderBlockCard({
   onMove,
   onSaveValue,
   onOpenSummary,
+  files = [],
   ownerType = "project",
 }: {
   block: StepBuilderBlock;
@@ -3940,6 +3943,7 @@ function StepBuilderBlockCard({
   onMove: (blockId: string, direction: -1 | 1) => void;
   onSaveValue: (value: unknown) => void;
   onOpenSummary: () => void;
+  files?: JourneyRuntimeFile[];
   ownerType?: "project" | "client";
 }) {
   const Icon = blockCatalog.find((item) => item.type === block.type)?.icon ?? Layers3;
@@ -3948,7 +3952,7 @@ function StepBuilderBlockCard({
   const blockDetail = block.type === "prompt"
     ? String(block.config.description ?? linkedPrompt?.short_description ?? "").trim()
     : blockTypeText(block.type);
-  const blockState = getCollapsedBlockState(block, value, summaries, summaryItems);
+  const blockState = getCollapsedBlockState(block, value, summaries, summaryItems, files);
   return (
     <article className={`step-builder-block ${block.type}${parentClass} ${isCollapsed ? "is-collapsed" : ""}`}>
       <div className="block-card-heading">
@@ -3973,7 +3977,7 @@ function StepBuilderBlockCard({
   );
 }
 
-function getCollapsedBlockState(block: StepBuilderBlock, value: any, summaries: ProjectSummary[], summaryItems: ProjectSummaryItem[]) {
+function getCollapsedBlockState(block: StepBuilderBlock, value: any, summaries: ProjectSummary[], summaryItems: ProjectSummaryItem[], files: JourneyRuntimeFile[] = []) {
   const complete = (label: string, detail = "") => ({ tone: "complete", label, detail });
   const pending = (label: string, detail = "") => ({ tone: "pending", label, detail });
   const active = (label: string, detail = "") => ({ tone: "active", label, detail });
@@ -3988,7 +3992,9 @@ function getCollapsedBlockState(block: StepBuilderBlock, value: any, summaries: 
 
   if (block.type === "prompt") {
     const copies = Number(value?.copyCount ?? 0);
-    return value?.applied ? complete("Aplicado", copies ? `${copies} copia(s)` : "Confirmado") : copies ? active("Copiado", `${copies} copia(s)`) : pending("Pendente", "Ainda nao copiado");
+    const attachmentCount = files.filter((file) => file.block_id === block.id).length;
+    const attachmentDetail = Boolean(block.config.attachmentsRequired) ? ` - ${attachmentCount} arquivo(s)` : "";
+    return value?.applied ? complete("Aplicado", `${copies ? `${copies} copia(s)` : "Confirmado"}${attachmentDetail}`) : copies ? active("Copiado", `${copies} copia(s)${attachmentDetail}`) : pending("Pendente", "Ainda nao copiado");
   }
 
   if (block.type === "context") {
@@ -4001,7 +4007,10 @@ function getCollapsedBlockState(block: StepBuilderBlock, value: any, summaries: 
     return links.length ? complete("Materiais adicionados", `${links.length} link(s)`) : pending("Sem materiais");
   }
 
-  if (block.type === "file_upload") return pending("Aguardando arquivo");
+  if (block.type === "file_upload") {
+    const attached = files.filter((file) => file.block_id === block.id);
+    return attached.length ? complete("Arquivo anexado", `${attached.length} arquivo(s)`) : pending("Aguardando arquivo");
+  }
 
   if (block.type === "project_summary") {
     const summary = resolveBoundSummary(summaries, String(block.config.summaryId ?? ""));

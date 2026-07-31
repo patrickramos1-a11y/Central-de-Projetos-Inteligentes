@@ -195,7 +195,7 @@ Status: concluida em 2026-07-30
 
 ## 8. Fase 3 - Motor de blocos e conclusao
 
-Status: pendente
+Status: concluida em 2026-07-30
 
 ### Escopo
 
@@ -217,6 +217,13 @@ Status: pendente
 - condicoes cadastradas bloqueiam ate serem atendidas;
 - template nao recebe valores reais; recursos-modelo sao copiados somente quando configurados;
 - nao ha tela em branco ao expandir bloco, adicionar evidencia ou editar prompt.
+
+### Registro de execucao
+
+- a leitura de jornada por dominio agora devolve documentos, valores, arquivos e conclusoes em uma unica resposta, sem depender do carregamento administrativo de tabelas;
+- a migracao idempotente vincula apenas blocos de sumario legados sem `summaryId` a versao ativa do proprio projeto, garantindo uma unica fonte de verdade entre editor, execucao e conclusao;
+- anexos de evidencia continuam exclusivos do projeto real; somente pacotes de recursos e anexos de prompt configurados podem ser levados ao template;
+- o estado recolhido informa arquivo anexado e quantidade de anexos obrigatorios do prompt.
 
 ## 9. Fase 4 - Sumario Inteligente
 
