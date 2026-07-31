@@ -44,6 +44,8 @@ import "./styles.css";
 import "./styles/tokens.css";
 import "./styles/layout.css";
 import "./styles/components.css";
+import "./styles/journey.css";
+import "./styles/admin.css";
 
 type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
 type ProjectStatus = "planejado" | "em_andamento" | "concluido" | "bloqueado" | "arquivado";
@@ -2607,9 +2609,15 @@ function ProjectsView({
         <div className="project-grid">
           {filteredProjects.map((project) => {
             const steps = tables.project_steps.filter((step) => step.project_id === project.id);
-  const hasProjectSummary = tables.project_summaries.some((summary) => summary.project_id === project.id && summary.status !== "archived");
-            const done = steps.filter((step) => step.status === "concluido" && (hasProjectSummary || !isProjectSummaryStep(step))).length;
-            const progress = steps.length ? Math.round((done / steps.length) * 100) : 0;
+            const applicableSteps = steps.filter((step) => !step.is_not_applicable);
+            const hasProjectSummary = tables.project_summaries.some((summary) => summary.project_id === project.id && summary.status !== "archived");
+            const done = applicableSteps.filter((step) => step.status === "concluido" && (hasProjectSummary || !isProjectSummaryStep(step))).length;
+            const progress = applicableSteps.length ? Math.round((done / applicableSteps.length) * 100) : 0;
+            const displayStatus = project.status === "bloqueado" || project.status === "arquivado"
+              ? project.status
+              : progress === 100 && applicableSteps.length > 0
+                ? "concluido"
+                : progress > 0 ? "em_andamento" : project.status;
 
             return (
               <article className="project-card" key={project.id}>
@@ -2622,13 +2630,13 @@ function ProjectsView({
                       <strong>{project.name}</strong>
                       <span>{project.company || "Sem empresa definida"}</span>
                     </div>
-                    <StatusPill status={project.status} />
+                    <StatusPill status={displayStatus} />
                   </div>
                   <div className="progress-bar">
                     <span style={{ width: `${progress}%` }} />
                   </div>
                   <small>
-                    {progress}% concluido - {steps.length} etapas
+                    {progress}% concluido - {applicableSteps.length} etapas aplicaveis
                   </small>
                 </button>
                 <div className="project-card-actions">

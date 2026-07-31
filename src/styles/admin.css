@@ -1,0 +1,14 @@
+.module-layout, .config-crud-layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+.config-form-panel { order: -1; width: 100%; }
+.config-form-content { padding: var(--space-3); }
+.record-list { gap: var(--space-2); }
+.record-row { min-height: 56px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); }
+.record-row:hover { border-color: rgb(40 120 212 / 26%); background: var(--surface-info); }
+.template-grid, .project-grid { gap: var(--space-2); }
+.project-card, .template-card { border-radius: var(--radius-md); }
+
+@media (max-width: 760px) {
+  .panel-heading, .topbar { gap: var(--space-2); padding: var(--space-3); }
+  .panel-tools { width: 100%; }
+  .search-field { flex: 1; }
+}

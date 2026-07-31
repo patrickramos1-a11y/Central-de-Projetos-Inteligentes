@@ -147,7 +147,7 @@ Status: concluida em 2026-07-30
 
 ## 7. Fase 2 - Arquitetura de telas
 
-Status: pendente
+Status: concluida em 2026-07-30
 
 ### 7.1 Projetos
 
@@ -185,6 +185,13 @@ Status: pendente
 - apenas uma rolagem vertical domina cada tela;
 - nenhuma barra fixa oculta conteudo;
 - desktop e mobile funcionam sem sobreposicao.
+
+### Registro de conclusao
+
+- Projetos passaram a calcular progresso somente com etapas aplicaveis e apresentam estado coerente com a conclusao calculada;
+- a jornada usa faixa de contexto, trilha horizontal, superficie operacional e barra de comandos compactas;
+- administracao recebeu o mesmo padrao de lista densa com formulario superior;
+- os estilos da jornada e da administracao foram isolados em `src/styles/journey.css` e `src/styles/admin.css`.
 
 ## 8. Fase 3 - Motor de blocos e conclusao
 

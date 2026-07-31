@@ -1,0 +1,54 @@
+.block-journey-layout { gap: var(--space-2); }
+.block-work-surface { min-width: 0; overflow: clip; }
+
+.journey-context-bar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(170px, 260px);
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+.journey-context-copy h1 { margin: 0; font-size: clamp(1.05rem, 1.6vw, 1.38rem); }
+.journey-context-copy p { margin: 2px 0 0; color: var(--color-muted); font-size: .76rem; }
+
+.step-rail.collapsible-rail {
+  display: flex;
+  min-width: 0;
+  max-width: none;
+  min-height: 70px;
+  padding: var(--space-2);
+  overflow-x: auto;
+  background: var(--surface-glass);
+  border: var(--border-subtle);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: var(--blur-glass);
+}
+.collapsible-rail .rail-heading { position: sticky; left: 0; z-index: 2; min-width: 132px; padding-right: var(--space-2); background: inherit; }
+.step-rail .step-item { min-width: 150px; min-height: 50px; border-radius: var(--radius-sm); }
+
+.journey-command-bar {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  min-height: 66px;
+  padding: var(--space-2) var(--space-3);
+  box-shadow: 0 1px 0 rgb(24 53 47 / 10%);
+}
+.journey-step-identity { flex: 1 1 190px; min-width: 0; }
+.journey-step-title { display: block; overflow: hidden; font-size: 1rem; text-overflow: ellipsis; white-space: nowrap; }
+.journey-mode-switch { flex: 0 0 auto; }
+.step-auto-status { display: grid; grid-template-columns: auto auto minmax(100px, 1fr); align-items: center; padding: 7px var(--space-3); background: var(--surface-subtle); border-bottom: var(--border-subtle); }
+.step-auto-status .ui-progress { min-width: 100px; }
+.block-canvas { display: grid; gap: var(--space-2); padding: var(--space-3); background: var(--surface-subtle); }
+.step-builder-block { border-radius: var(--radius-md); }
+
+@media (max-width: 840px) {
+  .journey-context-bar { grid-template-columns: auto minmax(0, 1fr); }
+  .journey-context-bar .journey-progress { grid-column: 1 / -1; }
+  .journey-command-bar { position: static; flex-wrap: wrap; }
+  .step-auto-status { grid-template-columns: auto 1fr; }
+  .step-auto-status .ui-progress { grid-column: 1 / -1; }
+}
