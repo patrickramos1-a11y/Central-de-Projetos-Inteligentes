@@ -3570,7 +3570,7 @@ function JourneyView({
     try {
       const next = await stepRequest("/structure");
       setPayload(next);
-      setCollapsedBlockIds(new Set(next.document.blocks.map((block) => block.id)));
+      setCollapsedBlockIds(defaultCollapsedBlockIds(next));
       if (!selectedStep.is_not_applicable && next.completion.status !== selectedStep.status) {
         void onUpdateStep(selectedStep.id, { status: next.completion.status });
       }
@@ -3590,7 +3590,9 @@ function JourneyView({
   }
 
   async function updateBlock(blockId: string, patch: Partial<StepBuilderBlock>) {
-    setPayload(await stepRequest(`/blocks/${encodeURIComponent(blockId)}`, { method: "PATCH", body: JSON.stringify(patch) }));
+    const next = await stepRequest(`/blocks/${encodeURIComponent(blockId)}`, { method: "PATCH", body: JSON.stringify(patch) });
+    setPayload(next);
+    updateBlockPresentation(next, blockId);
   }
 
   async function deleteBlock(blockId: string) {
@@ -3643,7 +3645,63 @@ function JourneyView({
   async function saveBlockValue(blockId: string, value: unknown) {
     const next = await stepRequest(`/block-values/${encodeURIComponent(blockId)}`, { method: "PATCH", body: JSON.stringify({ value, updatedBy: currentUser?.name ?? "Patrick" }) });
     setPayload(next);
+    updateBlockPresentation(next, blockId);
     if (!selectedStep.is_not_applicable && next.completion.status !== selectedStep.status) onUpdateStep(selectedStep.id, { status: next.completion.status });
+  }
+
+  function blockShouldCollapse(block: StepBuilderBlock, next: StepBuilderPayload) {
+    const value = next.values.find((item) => item.block_id === block.id)?.value;
+    const state = getCollapsedBlockState(block, value, summaries, summaryItems, next.files);
+
+    // Informative texts remain available on arrival. They are guidance, not a finished task.
+    if (block.type === "short_text" || block.type === "long_text") return false;
+    // An empty context stays compact; once it contains useful material it stays visible for reuse.
+    if (block.type === "context") {
+      const runtimeContexts = Array.isArray(value?.contexts) ? value.contexts : [];
+      const templateContexts = Array.isArray(block.config.contexts) ? block.config.contexts.filter((item: { pinned?: boolean }) => item.pinned) : [];
+      return runtimeContexts.length + templateContexts.length === 0;
+    }
+    // Template resource packs are support material, not an execution task.
+    if (block.type === "file_upload" && block.config.fileMode === "resource_pack") return true;
+
+    return state.tone === "complete";
+  }
+
+  function defaultCollapsedBlockIds(next: StepBuilderPayload) {
+    return new Set(next.document.blocks.filter((block) => blockShouldCollapse(block, next)).map((block) => block.id));
+  }
+
+  function updateBlockPresentation(next: StepBuilderPayload, blockId: string) {
+    const block = next.document.blocks.find((item) => item.id === blockId);
+    if (!block) return;
+    setCollapsedBlockIds((current) => {
+      const collapsed = new Set(current);
+      if (blockShouldCollapse(block, next)) collapsed.add(blockId);
+      else collapsed.delete(blockId);
+      return collapsed;
+    });
+  }
+
+  function expandActionRequiredBlocks() {
+    if (!payload) return;
+    setCollapsedBlockIds((current) => {
+      const next = new Set(current);
+      payload.document.blocks.forEach((block) => {
+        if (!blockShouldCollapse(block, payload)) next.delete(block.id);
+      });
+      return next;
+    });
+  }
+
+  function collapseResolvedBlocks() {
+    if (!payload) return;
+    setCollapsedBlockIds((current) => {
+      const next = new Set(current);
+      payload.document.blocks.forEach((block) => {
+        if (blockShouldCollapse(block, payload)) next.add(block.id);
+      });
+      return next;
+    });
   }
 
   const blocks = payload?.document.blocks ?? [];
@@ -3723,6 +3781,10 @@ function JourneyView({
             <div className="journey-mode-switch" role="group" aria-label="Modo da jornada">
               <button className={journeyMode === "execute" ? "active" : ""} type="button" onClick={() => switchJourneyMode("execute")}><CheckCircle2 size={15} /> Executar</button>
               <button className={journeyMode === "edit" ? "active" : ""} type="button" onClick={() => switchJourneyMode("edit")}><Pencil size={15} /> Editar estrutura</button>
+            </div>
+            <div className="journey-block-view-actions" role="group" aria-label="Visibilidade dos blocos">
+              <button className="secondary-button" type="button" onClick={expandActionRequiredBlocks} title="Abrir os blocos que ainda exigem ação"><ChevronDown size={16} /> Abrir pendentes</button>
+              <button className="secondary-button" type="button" onClick={collapseResolvedBlocks} title="Recolher os blocos já concluídos"><ChevronUp size={16} /> Recolher concluídos</button>
             </div>
             <button className={`secondary-button ${selectedStep.is_not_applicable ? "is-not-applicable" : ""}`} type="button" onClick={() => onUpdateStep(selectedStep.id, { is_not_applicable: !selectedStep.is_not_applicable })}>{selectedStep.is_not_applicable ? <RefreshCw size={16} /> : <X size={16} />}{selectedStep.is_not_applicable ? " Aplicar etapa" : " Nao se aplica"}</button>
             <button className="secondary-button" type="button" disabled={Boolean(selectedStep.is_not_applicable) || !completion?.canComplete} title={selectedStep.is_not_applicable ? "Esta etapa foi marcada como nao aplicavel" : completion?.canComplete ? "Concluir etapa" : completion?.reasons[0]?.message ?? "Carregando condicoes de conclusao"} onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}><CheckCircle2 size={17} /> Concluir</button>
@@ -4011,17 +4073,22 @@ function getCollapsedBlockState(block: StepBuilderBlock, value: any, summaries: 
   }
 
   if (block.type === "context") {
-    const contexts = Array.isArray(value?.contexts) ? value.contexts : [];
+    const runtimeContexts = Array.isArray(value?.contexts) ? value.contexts : [];
+    const templateContexts = Array.isArray(block.config.contexts) ? block.config.contexts.filter((item: { pinned?: boolean }) => item.pinned) : [];
+    const contexts = [...templateContexts, ...runtimeContexts];
     return contexts.length ? complete("Contexto salvo", `${contexts.length} contexto(s)`) : pending("Sem contexto");
   }
 
   if (block.type === "materials") {
-    const links = Array.isArray(value?.links) ? value.links : [];
+    const templateLinks = Array.isArray(block.config.links) ? block.config.links : [];
+    const runtimeLinks = Array.isArray(value?.links) ? value.links : [];
+    const links = [...templateLinks, ...runtimeLinks];
     return links.length ? complete("Materiais adicionados", `${links.length} link(s)`) : pending("Sem materiais");
   }
 
   if (block.type === "file_upload") {
     const attached = files.filter((file) => file.block_id === block.id);
+    if (block.config.fileMode === "resource_pack") return complete("Materiais de apoio", attached.length ? `${attached.length} arquivo(s)` : "Disponivel no template");
     return attached.length ? complete("Arquivo anexado", `${attached.length} arquivo(s)`) : pending("Aguardando arquivo");
   }
 
@@ -4512,7 +4579,11 @@ function PromptExecutionBlock({ block, value, tables, stepId, currentUser, owner
   const conditionsComplete = requiredConditions.every((condition) => Boolean(conditionChecks[condition.id]));
   const canConfirm = conditionsComplete && (!attachmentsRequired || attachedFiles.length > 0);
   const [copyFeedback, setCopyFeedback] = useState(false);
-  const [isConditionsOpen, setIsConditionsOpen] = useState(false);
+  const [isConditionsOpen, setIsConditionsOpen] = useState(() => !isApplied && (requiredConditions.length > 0 || attachmentsRequired));
+
+  useEffect(() => {
+    if (!isApplied && (requiredConditions.length > 0 || attachmentsRequired)) setIsConditionsOpen(true);
+  }, [isApplied, requiredConditions.length, attachmentsRequired]);
 
   function persist(next: PromptBlockRuntimeValue) {
     onSaveValue({ ...runtimeValue, ...next });
@@ -4580,7 +4651,7 @@ function PromptExecutionBlock({ block, value, tables, stepId, currentUser, owner
       {isConditionsOpen && !isApplied && (
         <div className="prompt-conditions-runtime" role="group" aria-label="Condições da aplicação">
           <strong>Confirme as condições antes de aplicar</strong>
-          {conditions.map((condition) => <label className="check-item-row compact" key={condition.id}><input type="checkbox" checked={Boolean(conditionChecks[condition.id])} onChange={(event) => setCondition(condition.id, event.target.checked)} /><span className="check-item-control">{conditionChecks[condition.id] && <Check size={16} />}</span><span>{condition.label}</span></label>)}
+          {conditions.map((condition) => <label className={`check-item-row compact ${conditionChecks[condition.id] ? "done" : ""}`} key={condition.id}><input type="checkbox" checked={Boolean(conditionChecks[condition.id])} onChange={(event) => setCondition(condition.id, event.target.checked)} /><span className="check-item-control">{conditionChecks[condition.id] && <Check size={14} />}</span><span>{condition.label}</span></label>)}
           {attachmentsRequired && <div className={`prompt-attachment-requirement ${attachedFiles.length ? "complete" : "pending"}`}><FileText size={14} /><span>{attachedFiles.length ? `${attachedFiles.length} arquivo(s) de apoio anexado(s)` : "Anexe pelo menos um arquivo de apoio"}</span></div>}
           <div className="inline-actions"><button className="secondary-button" type="button" onClick={() => setIsConditionsOpen(false)}>Cancelar</button><button className="primary-button" type="button" disabled={!canConfirm} onClick={confirmWithConditions}><CheckCircle2 size={15} /> Confirmar aplicação</button></div>
         </div>

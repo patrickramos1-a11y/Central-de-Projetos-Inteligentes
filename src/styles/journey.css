@@ -40,6 +40,8 @@
 .journey-step-identity { flex: 1 1 190px; min-width: 0; }
 .journey-step-title { display: block; overflow: hidden; font-size: 1rem; text-overflow: ellipsis; white-space: nowrap; }
 .journey-mode-switch { flex: 0 0 auto; }
+.journey-block-view-actions { display: inline-flex; flex: 0 1 auto; gap: 5px; }
+.journey-block-view-actions .secondary-button { min-height: 32px; padding: 5px 8px; font-size: .7rem; white-space: nowrap; }
 .step-auto-status { display: grid; grid-template-columns: auto auto minmax(100px, 1fr); align-items: center; padding: 7px var(--space-3); background: var(--surface-subtle); border-bottom: var(--border-subtle); }
 .step-auto-status .ui-progress { min-width: 100px; }
 .block-canvas { display: grid; gap: var(--space-2); padding: var(--space-3); background: var(--surface-subtle); }
@@ -103,6 +105,9 @@
 .check-item-row { min-height: 34px; gap: 7px; padding: 4px 7px; border-radius: 7px; font-size: 0.73rem; }
 .check-item-row .check-item-control { width: 22px; height: 22px; min-width: 22px; max-width: 22px; border-radius: 5px; }
 .check-item-row .check-item-control svg { width: 14px; height: 14px; }
+.prompt-conditions-runtime .check-item-row.compact { min-height: 30px; padding: 3px 7px; font-size: .7rem; }
+.prompt-conditions-runtime .check-item-row.compact .check-item-control { width: 18px; height: 18px; min-width: 18px; max-width: 18px; border-radius: 4px; }
+.prompt-conditions-runtime .check-item-row.compact.done { background: rgb(43 201 134 / 16%); border-color: rgb(23 174 105 / 42%); }
 
 .materials-block-body { gap: 5px; }
 .materials-group { gap: 3px; }
