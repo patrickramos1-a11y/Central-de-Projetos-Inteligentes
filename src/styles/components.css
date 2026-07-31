@@ -1,0 +1,41 @@
+.ui-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+.ui-status-badge.pending { color: #586863; background: #edf2ef; border-color: #d9e2dc; }
+.ui-status-badge.active { color: #075b78; background: #e4f6fc; border-color: #b9e2ee; }
+.ui-status-badge.complete { color: #075c48; background: #e2f9eb; border-color: #aae8c7; }
+.ui-status-badge.warning { color: #7c5310; background: #fff4d9; border-color: #f1d597; }
+.ui-status-badge.danger { color: #842c35; background: #ffedef; border-color: #f2b8bf; }
+
+.ui-progress { display: grid; gap: 5px; min-width: 0; }
+.ui-progress-header { display: flex; justify-content: space-between; gap: var(--space-2); color: var(--color-muted); font-size: 0.7rem; font-weight: 700; }
+.ui-progress-track { height: 6px; overflow: hidden; border-radius: 999px; background: #dce6e1; }
+.ui-progress-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--color-green), var(--color-progress)); transition: width var(--transition); }
+
+.ui-toast-stack { position: fixed; right: 18px; bottom: 18px; z-index: 100; display: grid; gap: 8px; width: min(360px, calc(100vw - 36px)); pointer-events: none; }
+.ui-toast { padding: 11px 13px; border: 1px solid rgb(255 255 255 / 42%); border-radius: var(--radius-sm); color: white; background: rgb(24 53 47 / 94%); box-shadow: var(--shadow-md); font-size: 0.8rem; font-weight: 700; }
+.ui-toast.info { background: rgb(40 120 212 / 94%); }
+.ui-toast.warning { background: rgb(165 107 12 / 94%); }
+.ui-toast.error { background: rgb(166 51 62 / 94%); }
+
+.step-builder-block.is-collapsed {
+  border-color: rgb(24 53 47 / 10%);
+  background: var(--surface-solid);
+  box-shadow: none;
+}
+.step-builder-block.is-collapsed:hover { border-color: rgb(11 155 104 / 34%); box-shadow: var(--shadow-sm); }
+.step-builder-block.is-collapsed .block-card-heading { min-height: 46px; }
+
+.journey-command-bar, .step-auto-status { gap: var(--space-2); }
+.journey-command-bar { background: var(--surface-solid); border-bottom: var(--border-subtle); }
+.journey-context-bar { min-height: 62px; }

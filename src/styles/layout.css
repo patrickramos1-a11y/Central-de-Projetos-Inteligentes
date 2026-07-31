@@ -1,0 +1,45 @@
+html { min-width: 320px; background: var(--surface-page); }
+
+body {
+  min-width: 320px;
+  color: var(--color-ink);
+  font-family: var(--font-ui);
+  background:
+    radial-gradient(circle at 0 0, rgb(37 213 138 / 18%), transparent 28rem),
+    radial-gradient(circle at 100% 0, rgb(40 120 212 / 10%), transparent 30rem),
+    linear-gradient(145deg, #e7eeea 0%, var(--surface-page) 42%, #c9d7d1 100%);
+}
+
+button, input, select, textarea { font: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.app-shell {
+  width: 100%;
+  max-width: none;
+  min-height: 100vh;
+  padding: var(--space-2) var(--space-3) var(--space-4);
+}
+
+.workspace { width: 100%; max-width: none; }
+
+/* Glass is reserved for navigation and context. Operational areas stay dense. */
+.sidebar, .journey-context-bar, .topbar {
+  background: var(--surface-glass);
+  border: var(--border-subtle);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: var(--blur-glass);
+}
+
+.block-work-surface, .list-panel, .form-panel, .summary-modal {
+  background: var(--surface-solid);
+  border: var(--border-subtle);
+  box-shadow: var(--shadow-md);
+}
+
+@media (max-width: 760px) {
+  .app-shell { padding: var(--space-1); }
+  .workspace { padding-inline: 0; }
+}

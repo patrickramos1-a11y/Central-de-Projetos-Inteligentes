@@ -120,7 +120,7 @@ Status: concluida em 2026-07-30
 
 ## 6. Fase 1 - Fundacao visual e componentes base
 
-Status: pendente
+Status: concluida em 2026-07-30
 
 ### Escopo
 
@@ -137,6 +137,13 @@ Status: pendente
 - uma tela piloto de jornada usa exclusivamente os componentes base;
 - contraste, foco de teclado e textos em botoes estao legiveis;
 - nao ha regressao da navegacao, copia, checklist ou uploads.
+
+### Registro de conclusao
+
+- tokens aprovados, tipografia Inter e JetBrains Mono e superficies por funcao adicionados em `src/styles/`;
+- componentes base de shell, contexto, trilha, barra de comandos, progresso, estado e toast criados;
+- jornada de Projeto migrou para os primitivos de layout sem alterar os contratos de dados;
+- notificacoes de acao agora se encerram automaticamente; a faixa de conexao nao reutiliza mais mensagens temporarias.
 
 ## 7. Fase 2 - Arquitetura de telas
 

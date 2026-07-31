@@ -1,0 +1,61 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap");
+
+:root {
+  --font-ui: "Inter", "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+
+  --color-ink: #18352f;
+  --color-muted: #61736d;
+  --color-canvas: #fbfdfc;
+  --color-sage: #dce6e1;
+  --color-border: #c6d4ce;
+  --color-green: #0b9b68;
+  --color-progress: #25d58a;
+  --color-blue: #2878d4;
+  --color-violet: #7057d9;
+  --color-amber: #d99518;
+  --color-red: #c9555d;
+  --color-metal: #6b7b75;
+
+  --surface-page: #dce6e1;
+  --surface-glass: rgb(251 253 252 / 78%);
+  --surface-solid: #fbfdfc;
+  --surface-subtle: #f0f5f2;
+  --surface-selected: #e7f8ef;
+  --surface-info: #eaf3ff;
+  --surface-ai: #f0edff;
+  --surface-warning: #fff7e8;
+  --surface-danger: #fff0f1;
+
+  --border-subtle: 1px solid rgb(24 53 47 / 12%);
+  --border-strong: 1px solid rgb(24 53 47 / 20%);
+  --shadow-sm: 0 2px 8px rgb(25 52 45 / 8%);
+  --shadow-md: 0 12px 28px rgb(25 52 45 / 13%);
+  --shadow-focus: 0 0 0 3px rgb(40 120 212 / 22%);
+  --blur-glass: blur(18px) saturate(115%);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --transition-fast: 140ms ease;
+  --transition: 180ms ease;
+
+  /* Legacy aliases retained while the product moves screen by screen. */
+  --brand-green: var(--color-progress);
+  --deep-teal: var(--color-green);
+  --brand-gray: var(--color-metal);
+  --text: var(--color-ink);
+  --muted: var(--color-muted);
+  --text-soft: var(--color-muted);
+  --glass: var(--surface-glass);
+  --radius-panel: var(--radius-md);
+  --radius-card: var(--radius-md);
+  --radius-control: var(--radius-sm);
+}

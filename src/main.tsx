@@ -36,7 +36,14 @@ import { createJourneyApi, type JourneyFile } from "./api/journey";
 import { parseProjectSummary } from "./lib/summaryParser";
 import { copyText as copyToClipboard } from "./components/ui/clipboard";
 import { resolveBoundSummary } from "./features/summary/summaryBinding";
+import { Toast } from "./components/ui/Toast";
+import { ProgressBar } from "./components/ui/ProgressBar";
+import { StatusBadge, type StatusTone } from "./components/ui/StatusBadge";
+import { AppShell, CommandBar, JourneyContextBar, StepRail, WorkCanvas } from "./components/ui/LayoutPrimitives";
 import "./styles.css";
+import "./styles/tokens.css";
+import "./styles/layout.css";
+import "./styles/components.css";
 
 type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
 type ProjectStatus = "planejado" | "em_andamento" | "concluido" | "bloqueado" | "arquivado";
@@ -585,12 +592,6 @@ function App() {
     window.addEventListener("ramos:toast", showToast);
     return () => window.removeEventListener("ramos:toast", showToast);
   }, []);
-
-  useEffect(() => {
-    if (!notice) return;
-    const timeoutId = window.setTimeout(() => setNotice(null), 4000);
-    return () => window.clearTimeout(timeoutId);
-  }, [notice]);
 
   useEffect(() => {
     if (!selectedProjectId && tables.projects.length > 0) {
@@ -2322,7 +2323,7 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
+    <AppShell>
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark">
@@ -2375,14 +2376,14 @@ function App() {
       <main className="workspace">
         <div className={`setup-alert ${hasCloudflareApi ? "connected" : ""}`}>
           {isLoading ? <Loader2 className="spin" size={18} /> : <Database size={18} />}
-          <span>{notice}</span>
+          <span>{isLoading ? "Sincronizando dados..." : tableErrors.length > 0 ? "Existem pendencias de dados para revisar." : hasCloudflareApi ? "Dados conectados ao Cloudflare." : "Configure a API Cloudflare para conectar ao banco D1."}</span>
           {tableErrors.length > 0 && <span className="table-error-count">{tableErrors.length} pendencia(s)</span>}
           <button className="ghost-button" onClick={() => void loadAll()}>
             <RefreshCw size={16} />
             Sincronizar
           </button>
         </div>
-        {notice && <div className="global-toast" aria-live="polite" role="status">{notice}</div>}
+        {notice && <div className="ui-toast-stack"><Toast message={notice} tone={notice.startsWith("Erro") || notice.startsWith("Falha") || notice.startsWith("Nao foi") ? "error" : "success"} onDismiss={() => setNotice(null)} /></div>}
 
         {view === "projects" && (
           <ProjectsView
@@ -2486,7 +2487,7 @@ function App() {
           />
         )}
       </main>
-    </div>
+    </AppShell>
   );
 }
 
@@ -3252,11 +3253,11 @@ function ClientBlockJourneyView({
 
   return (
     <>
-      <section className="journey-hero journey-context-bar">
+      <JourneyContextBar>
         <button className="ghost-button" onClick={onBack}><PanelLeft size={17} /> Clientes</button>
         <div className="journey-context-copy"><span className="eyebrow">Ramos Jornadas</span><h1>{client.name}</h1><p>{client.company || "Jornada do cliente"}</p></div>
         <div className="journey-progress"><strong>{progress}%</strong><div className="progress-bar"><span style={{ width: `${progress}%` }} /></div></div>
-      </section>
+      </JourneyContextBar>
       <section className="journey-layout block-journey-layout">
         <aside className="step-rail collapsible-rail"><div className="rail-heading"><strong>Etapas</strong><span>{done} concluidas</span></div>{steps.map((step) => <button key={step.id} className={`step-item ${step.id === selectedStep.id ? "active" : ""}`} onClick={() => onSelectStep(step.id)}><span className={`step-dot ${step.status}`}>{step.status === "concluido" ? <Check size={13} /> : step.step_order}</span><span><strong>{step.name}</strong><small>{formatStepStatus(step.status)}</small></span></button>)}</aside>
         <section className="work-surface block-work-surface">
@@ -3673,14 +3674,11 @@ function JourneyView({
           <h1>{project.name}</h1>
           <p>{project.company || "Projeto sem empresa definida"}</p>
         </div>
-        <div className="journey-progress">
-          <strong>{progress}%</strong>
-          <div className="progress-bar"><span style={{ width: `${progress}%` }} /></div>
-        </div>
+        <div className="journey-progress"><ProgressBar value={progress} label="Progresso" detail={`${progress}%`} /></div>
       </section>
 
       <section className="journey-layout block-journey-layout">
-        <aside className="step-rail collapsible-rail">
+        <StepRail>
           <div className="rail-heading"><div><strong>Etapas</strong><span>{doneSteps} concluidas</span></div><button className="rail-edit-button" type="button" title="Organizar etapas" onClick={() => setIsStepManagerOpen(true)}><Pencil size={14} /> Editar</button></div>
           {steps.map((step) => (
             <button key={step.id} className={`step-item ${step.is_not_applicable ? "nao-aplicavel" : ""} ${selectedStepId === step.id ? "active" : ""}`} onClick={() => onSelectStep(step.id)}>
@@ -3688,10 +3686,10 @@ function JourneyView({
               <span><strong>{step.name}</strong><small>{step.is_not_applicable ? "Nao se aplica" : formatStepStatus(step.status)}</small></span>
             </button>
           ))}
-        </aside>
+        </StepRail>
 
         <section className="work-surface block-work-surface">
-          <div className={`journey-command-bar mode-${journeyMode}`}>
+          <CommandBar mode={journeyMode}>
             <div className="journey-step-identity">
               <span className="eyebrow">Etapa selecionada</span>
               {journeyMode === "edit" ? (
@@ -3719,11 +3717,11 @@ function JourneyView({
                 <button className="secondary-button" type="button" onClick={openTemplateSave}><Save size={17} /> Salvar template</button>
               </>
             )}
-          </div>
+          </CommandBar>
           <div className="step-auto-status">
-            <span className={`chip active ${selectedStep.is_not_applicable ? "nao-aplicavel" : completion?.status ?? selectedStep.status}`}>{selectedStep.is_not_applicable ? "Nao se aplica" : formatStepStatus(completion?.status ?? selectedStep.status)}</span>
+            <StatusBadge tone={selectedStep.is_not_applicable ? "pending" : statusTone(completion?.status ?? selectedStep.status)}>{selectedStep.is_not_applicable ? "Nao se aplica" : formatStepStatus(completion?.status ?? selectedStep.status)}</StatusBadge>
             <span>{completion ? `${completion.completedBlocks}/${completion.totalBlocks} blocos completos` : "Carregando blocos"}</span>
-            <div className="progress-bar"><span style={{ width: `${completion?.progress ?? 0}%` }} /></div>
+            <ProgressBar value={completion?.progress ?? 0} />
           </div>
           {!selectedStep.is_not_applicable && completion && !completion.canComplete && completion.reasons.length > 0 && (
             <div className="step-completion-hint" role="status"><span>Para concluir esta etapa:</span> {completion.reasons[0].message}</div>
@@ -3744,7 +3742,7 @@ function JourneyView({
             </div>
           )}
 
-          <div className="block-canvas">
+          <WorkCanvas>
             {blocks.map((block, index) => (
               <StepBuilderBlockCard
                 key={block.id}
@@ -3785,7 +3783,7 @@ function JourneyView({
                 onOpenSummary={() => setSummaryEditorOpen(true)}
               />
             ))}
-          </div>
+          </WorkCanvas>
         </section>
       </section>
 
@@ -7005,6 +7003,13 @@ function formatStatus(status: string) {
 
 function formatStepStatus(status: StepStatus) {
   return formatStatus(status);
+}
+
+function statusTone(status: string): StatusTone {
+  if (status === "concluido" || status === "ativo" || status === "active") return "complete";
+  if (status === "em_andamento" || status === "em_implantacao" || status === "desenvolvido" || status === "em_revisao") return "active";
+  if (status === "bloqueado") return "danger";
+  return "pending";
 }
 
 function formatPromptStatus(status: ProjectStepPrompt["prompt_status"], content: string) {
