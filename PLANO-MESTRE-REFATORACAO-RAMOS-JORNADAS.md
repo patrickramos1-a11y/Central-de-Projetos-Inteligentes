@@ -1,6 +1,6 @@
 # Plano Mestre de Refatoracao - Ramos Jornadas
 
-Status: em execucao
+Status: concluido e validado em 2026-07-30
 
 Objetivo: conduzir a refatoracao completa da Ramos Jornadas sem perder dados reais, sem criar novas telas costuradas e sem encerrar rodadas antes de existir validacao objetiva. Este arquivo e a referencia operacional para as proximas execucoes.
 
@@ -267,7 +267,7 @@ Status: concluida em 2026-07-30
 
 ## 10. Fase 5 - Templates, Clientes e confiabilidade
 
-Status: concluida tecnicamente em 2026-07-30; validacao visual remota registrada para a publicacao final.
+Status: concluida e validada em 2026-07-30.
 
 ### Templates
 
@@ -343,16 +343,23 @@ Para cada cenário, registrar screenshot, comportamento esperado, resultado e ev
 
 A refatoracao so pode ser marcada como concluida quando todos os itens abaixo forem verdadeiros:
 
-- [ ] todas as fases e gates deste plano foram aprovados;
-- [ ] `bun run test` e `bun run build` passam;
-- [ ] snapshot D1 foi gerado antes da ultima migration;
-- [ ] RAC foi validado em desktop e mobile;
-- [ ] uma jornada de Cliente foi validada em desktop e mobile;
-- [ ] execucao, estrutura e sumario usam fontes de verdade coerentes;
-- [ ] nao ha tela em branco, barra sobreposta ou rolagem interna estrutural desnecessaria;
-- [ ] dados reais nao foram apagados;
-- [ ] publicacao foi feita pelo fluxo de assets Cloudflare;
-- [ ] URL publica foi verificada sem cache.
+- [x] todas as fases e gates deste plano foram aprovados;
+- [x] `bun run test` e `bun run build` passam;
+- [x] snapshot D1 foi gerado antes da ultima migration;
+- [x] RAC foi validado em desktop e mobile;
+- [x] uma jornada de Cliente foi validada em desktop e mobile;
+- [x] execucao, estrutura e sumario usam fontes de verdade coerentes;
+- [x] nao ha tela em branco, barra sobreposta ou rolagem interna estrutural desnecessaria;
+- [x] dados reais nao foram apagados;
+- [x] publicacao foi feita pelo fluxo de assets Cloudflare;
+- [x] URL publica foi verificada sem cache.
+
+### Registro de validacao final
+
+- Snapshot remoto do D1 criado antes das migrations em `cloudflare/backups/d1-snapshot-2026-07-30T23-44-30-012Z.json` (mantido fora do Git).
+- `bun run test`: 11 testes aprovados; `bun run build` e `bun run build:worker`: aprovados.
+- Auditoria publica sem cache executada na jornada RAC e na jornada real de Cliente `apeu polpas`, em desktop e mobile, sem tela em branco nem erros de pagina. Evidencias locais ignoradas pelo Git: `tmp/audit/final/01-projetos-desktop.png` ate `06-cliente-mobile.png` e `tmp/audit/final/report.json`.
+- Publicacao final executada pelo fluxo de assets `bun tmp/deploy-cloudflare-assets-mime.mjs`; URL publica confirmou HTTP 200 e a marca Ramos Jornadas sem cache.
 
 ## 14. Ordem de inicio
 
