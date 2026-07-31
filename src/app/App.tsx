@@ -4785,8 +4785,13 @@ function LegacySummaryOperationalBlock({
           <div className="prompt-option-grid mini-options">
             {promptAdditions.length ? promptAdditions.map((addition, index) => {
               const AdditionIcon = summaryAdditionIcon(addition.label);
+              const labelDensity = addition.label.trim().length <= 12
+                ? "label-short"
+                : addition.label.trim().length >= 23
+                  ? "label-long"
+                  : "label-medium";
               return (
-                <label className={`summary-option-card tone-${index % 5} ${selectedPromptOptions.includes(addition.id) ? "selected" : ""}`} key={addition.id}>
+                <label className={`summary-option-card ${labelDensity} tone-${index % 5} ${selectedPromptOptions.includes(addition.id) ? "selected" : ""}`} key={addition.id}>
                   <input type="checkbox" checked={selectedPromptOptions.includes(addition.id)} onChange={() => togglePromptOption(addition.id)} />
                   <AdditionIcon size={14} aria-hidden="true" />
                   <span>{addition.label}</span>

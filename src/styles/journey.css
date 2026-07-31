@@ -215,6 +215,24 @@
   overflow-wrap: anywhere;
 }
 
+.step-builder-block.project_summary .summary-floating-composer .summary-option-card.label-short span {
+  align-self: center;
+  font-size: clamp(0.72rem, 0.78vw, 0.88rem);
+  font-weight: 900;
+  line-height: 1;
+}
+
+.step-builder-block.project_summary .summary-floating-composer .summary-option-card.label-medium span {
+  align-self: center;
+  font-size: clamp(0.64rem, 0.69vw, 0.76rem);
+  font-weight: 850;
+}
+
+.step-builder-block.project_summary .summary-floating-composer .summary-option-card.label-long span {
+  font-size: clamp(0.56rem, 0.6vw, 0.65rem);
+  line-height: 1.07;
+}
+
 .step-builder-block.project_summary .summary-floating-composer .summary-option-card.tone-0 { color: #087c65; background: linear-gradient(145deg, #effdf6, #aee8ca); }
 .step-builder-block.project_summary .summary-floating-composer .summary-option-card.tone-1 { color: #236b8a; background: linear-gradient(145deg, #effaff, #addcf3); }
 .step-builder-block.project_summary .summary-floating-composer .summary-option-card.tone-2 { color: #93621c; background: linear-gradient(145deg, #fffbed, #f3d991); }
