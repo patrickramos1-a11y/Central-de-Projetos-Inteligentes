@@ -1385,19 +1385,16 @@ button {
   position: relative;
   overflow: hidden;
   border-radius: 12px;
-  background:
-    radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.45), transparent 34%),
-    linear-gradient(135deg, var(--brand-green), var(--deep-teal));
+  display: grid;
+  place-items: center;
+  background: var(--deep-teal);
   box-shadow: 0 14px 32px rgba(var(--deep-teal-rgb), 0.22), 0 0 26px rgba(var(--brand-green-rgb), 0.28);
 }
 
-.brand-mark::after {
-  position: absolute;
-  inset: 7px;
-  border: 1px solid rgba(255, 255, 255, 0.44);
-  border-left-color: transparent;
-  border-radius: 999px;
-  content: "";
+.brand-mark-image {
+  width: 31px;
+  height: 31px;
+  display: block;
 }
 
 .nav-item,

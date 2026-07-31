@@ -267,7 +267,7 @@ Status: concluida em 2026-07-30
 
 ## 10. Fase 5 - Templates, Clientes e confiabilidade
 
-Status: pendente
+Status: concluida tecnicamente em 2026-07-30; validacao visual remota registrada para a publicacao final.
 
 ### Templates
 
@@ -293,6 +293,14 @@ Status: pendente
 - R2 responde para arquivo unico, multiplos arquivos e pacote de recursos;
 - templates recriam estruturas sem valores de execucao;
 - historico basico e acessivel para diagnostico.
+
+### Registro de execucao
+
+- o salvamento de template permite criar ou atualizar o modelo escolhido, recusa nome vazio e preserva apenas estrutura, contextos fixados e recursos-modelo deliberados;
+- a jornada de Cliente reutiliza o mesmo `StepDocument`, renderizadores de bloco, valores, anexos, links e calculo de conclusao;
+- R2 aceita multiplos arquivos em blocos de evidencia e em anexos de prompt habilitados, e os pacotes de recursos permitem download em conjunto;
+- eventos de jornada registram alteracoes de blocos, valores, checklist, anexos, contexto, consolidacao e migracao;
+- os arquivos de marca, manifest e metadados da aplicacao foram incluidos para que o shell publicado nao dependa de artefatos locais.
 
 ## 11. Arquitetura alvo de codigo
 
