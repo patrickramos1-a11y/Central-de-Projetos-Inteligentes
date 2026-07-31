@@ -2336,7 +2336,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark">
-            <img className="brand-mark-image" src="/brand/ramos-jornadas-mark-white.svg" alt="" />
+            <img className="brand-mark-image" src="/brand/ramos-jornadas-brand.png" alt="" />
           </span>
           <span>Ramos Jornadas</span>
         </div>
@@ -5939,7 +5939,7 @@ function UserEntryScreen({
       <section className="user-entry-panel">
         <div className="brand">
           <span className="brand-mark">
-            <Sparkles size={20} />
+            <img className="brand-mark-image" src="/brand/ramos-jornadas-brand.png" alt="" />
           </span>
           <span>Ramos Jornadas</span>
         </div>
