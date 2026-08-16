@@ -48,7 +48,7 @@ const jsonHeaders = {
   "content-type": "application/json",
 };
 
-export async function handleProjectStepRequest(request: Request, env: Env, stepId: string, parts: string[]) {
+export async function handleProjectStepRequest(request: Request, env: Env, stepId: string, parts: string[], url?: URL) {
   if (request.method === "POST" && parts[0] === "initialize") {
     const body = await request.json().catch(() => ({})) as { templateStepId?: string };
     const structure = await ensureDraftStructure(env.DB, stepId, body.templateStepId ?? null);
@@ -57,7 +57,25 @@ export async function handleProjectStepRequest(request: Request, env: Env, stepI
 
   if (request.method === "GET" && parts[0] === "structure") {
     const structure = await getCurrentStructure(env.DB, stepId);
-    return json({ data: await buildPayload(env.DB, stepId, structure) });
+    return json({ data: await buildPayload(env.DB, stepId, structure, url?.searchParams.get("userId")) });
+  }
+
+  if (request.method === "PATCH" && parts[0] === "presentation") {
+    const body = (await request.json()) as { userId?: string; collapsedBlockIds?: string[]; reset?: boolean };
+    const userId = String(body.userId ?? "").trim();
+    if (!userId) return jsonError("Informe o usuario da preferencia visual.", 400);
+    const structure = await getCurrentStructure(env.DB, stepId);
+    const document = parseDocument(structure);
+    const validIds = new Set(document.blocks.map((block) => block.id));
+    const collapsedBlockIds = Array.from(new Set((body.collapsedBlockIds ?? []).filter((blockId): blockId is string => typeof blockId === "string" && validIds.has(blockId))));
+    if (body.reset) {
+      await env.DB.prepare("delete from journey_step_view_preferences where user_id = ? and owner_type = 'project' and owner_step_id = ?").bind(userId, stepId).run();
+    } else {
+      const now = new Date().toISOString();
+      await env.DB.prepare("insert into journey_step_view_preferences (id, user_id, owner_type, owner_step_id, collapsed_block_ids_json, created_at, updated_at) values (?, ?, 'project', ?, ?, ?, ?) on conflict(user_id, owner_type, owner_step_id) do update set collapsed_block_ids_json = excluded.collapsed_block_ids_json, updated_at = excluded.updated_at")
+        .bind(crypto.randomUUID(), userId, stepId, JSON.stringify(collapsedBlockIds), now, now).run();
+    }
+    return json({ data: await buildPayload(env.DB, stepId, structure, userId) });
   }
 
   if (request.method === "GET" && parts[0] === "completion") {
@@ -111,6 +129,7 @@ export async function handleProjectStepRequest(request: Request, env: Env, stepI
     const document = parseDocument(structure);
     document.blocks = normalizeBlocks(document.blocks.filter((block) => block.id !== blockId && block.config.parentBlockId !== blockId));
     await env.DB.prepare("delete from journey_step_values where owner_type = 'project' and owner_step_id = ? and block_id = ?").bind(stepId, blockId).run();
+    await removeBlockFromPresentationPreferences(env.DB, "project", stepId, blockId);
     await saveDocument(env.DB, structure, document, "block_deleted", blockId, {});
     return json({ data: await buildPayload(env.DB, stepId, await getStructureById(env.DB, structure.id)) });
   }
@@ -379,7 +398,7 @@ async function getStructureById(db: D1Database, id: string) {
   return row;
 }
 
-async function buildPayload(db: D1Database, stepId: string, structure: StructureRow) {
+async function buildPayload(db: D1Database, stepId: string, structure: StructureRow, userId?: string | null) {
   const document = parseDocument(structure);
   const [values, files, summaries] = await Promise.all([
     db.prepare("select * from journey_step_values where owner_type = 'project' and owner_step_id = ?").bind(stepId).all<Record<string, unknown>>(),
@@ -391,7 +410,34 @@ async function buildPayload(db: D1Database, stepId: string, structure: Structure
   const parsedValues = (values.results ?? []).map((row) => ({ ...row, value: safeJson(String(row.value_json ?? "null")) }));
   const validSummaryIds = new Set((summaries.results ?? []).map((summary) => String(summary.id)));
   const completion = calculateCompletion(document, parsedValues, files.results ?? [], validSummaryIds);
-  return { structure, document, values: parsedValues, files: files.results ?? [], completion };
+  const presentation = await getPresentationPreference(db, stepId, userId, document.blocks);
+  return { structure, document, values: parsedValues, files: files.results ?? [], completion, presentation };
+}
+
+async function getPresentationPreference(db: D1Database, stepId: string, userId: string | null | undefined, blocks: StepBlock[]) {
+  if (!userId) return { collapsedBlockIds: [], customized: false };
+  const row = await db.prepare("select collapsed_block_ids_json from journey_step_view_preferences where user_id = ? and owner_type = 'project' and owner_step_id = ?")
+    .bind(userId, stepId).first<{ collapsed_block_ids_json?: string }>();
+  if (!row) return { collapsedBlockIds: [], customized: false };
+  const validIds = new Set(blocks.map((block) => block.id));
+  const saved = safeJson(String(row.collapsed_block_ids_json ?? "[]"));
+  return {
+    collapsedBlockIds: Array.isArray(saved) ? saved.filter((blockId): blockId is string => typeof blockId === "string" && validIds.has(blockId)) : [],
+    customized: true,
+  };
+}
+
+async function removeBlockFromPresentationPreferences(db: D1Database, ownerType: "project", stepId: string, blockId: string) {
+  const rows = await db.prepare("select id, collapsed_block_ids_json from journey_step_view_preferences where owner_type = ? and owner_step_id = ?")
+    .bind(ownerType, stepId).all<{ id: string; collapsed_block_ids_json?: string }>();
+  const now = new Date().toISOString();
+  for (const row of rows.results ?? []) {
+    const saved = safeJson(String(row.collapsed_block_ids_json ?? "[]"));
+    const next = Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string" && id !== blockId) : [];
+    if (Array.isArray(saved) && next.length === saved.length) continue;
+    await db.prepare("update journey_step_view_preferences set collapsed_block_ids_json = ?, updated_at = ? where id = ?")
+      .bind(JSON.stringify(next), now, row.id).run();
+  }
 }
 
 async function upsertBlockValue(db: D1Database, stepId: string, structureId: string, blockId: string, value: unknown, completionState: string, updatedBy: string | null) {

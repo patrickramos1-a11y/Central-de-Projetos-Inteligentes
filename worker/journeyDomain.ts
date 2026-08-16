@@ -46,7 +46,7 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
   }
 
   if (resource === "journey-steps" && isOwnerType(id) && action) {
-    return handleGenericStepRequest(request, env, id, action, nested, nestedId);
+    return handleGenericStepRequest(request, env, id, action, nested, nestedId, url);
   }
 
   if (resource === "projects" && id && action === "journey" && request.method === "GET") {
@@ -106,7 +106,7 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
   return null;
 }
 
-async function handleGenericStepRequest(request: Request, env: Env, ownerType: OwnerType, stepId: string, action?: string, nested?: string) {
+async function handleGenericStepRequest(request: Request, env: Env, ownerType: OwnerType, stepId: string, action?: string, nested?: string, url?: URL) {
   const db = env.DB;
   if (request.method === "POST" && action === "initialize") {
     const body = await request.json().catch(() => ({})) as { templateStepId?: string };
@@ -130,7 +130,26 @@ async function handleGenericStepRequest(request: Request, env: Env, ownerType: O
 
   if (request.method === "GET" && action === "structure") {
     const document = await getCurrentDocument(db, ownerType, stepId);
-    return json({ data: await genericPayload(db, ownerType, stepId, document) });
+    return json({ data: await genericPayload(db, ownerType, stepId, document, url?.searchParams.get("userId")) });
+  }
+
+  if (request.method === "PATCH" && action === "presentation") {
+    if (ownerType === "template") return error("Templates nao possuem preferencias visuais.", 400);
+    const body = await request.json() as { userId?: string; collapsedBlockIds?: string[]; reset?: boolean };
+    const userId = String(body.userId ?? "").trim();
+    if (!userId) return error("Informe o usuario da preferencia visual.", 400);
+    const documentRow = await getCurrentDocument(db, ownerType, stepId);
+    const document = normalizeDocumentRow(documentRow).document;
+    const validIds = new Set(document.blocks.map((block) => block.id));
+    const collapsedBlockIds = Array.from(new Set((body.collapsedBlockIds ?? []).filter((blockId): blockId is string => typeof blockId === "string" && validIds.has(blockId))));
+    if (body.reset) {
+      await db.prepare("delete from journey_step_view_preferences where user_id = ? and owner_type = ? and owner_step_id = ?").bind(userId, ownerType, stepId).run();
+    } else {
+      const now = new Date().toISOString();
+      await db.prepare("insert into journey_step_view_preferences (id, user_id, owner_type, owner_step_id, collapsed_block_ids_json, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?) on conflict(user_id, owner_type, owner_step_id) do update set collapsed_block_ids_json = excluded.collapsed_block_ids_json, updated_at = excluded.updated_at")
+        .bind(crypto.randomUUID(), userId, ownerType, stepId, JSON.stringify(collapsedBlockIds), now, now).run();
+    }
+    return json({ data: await genericPayload(db, ownerType, stepId, documentRow, userId) });
   }
 
   if (request.method === "POST" && action === "blocks" && !nested) {
@@ -176,6 +195,7 @@ async function handleGenericStepRequest(request: Request, env: Env, ownerType: O
     const normalized = normalizeDocumentRow(documentRow).document;
     normalized.blocks = normalizeBlocks(normalized.blocks.filter((block) => block.id !== nested && block.config?.parentBlockId !== nested));
     await db.prepare("delete from journey_step_values where owner_type = ? and owner_step_id = ? and block_id = ?").bind(ownerType, stepId, nested).run();
+    await removeBlockFromPresentationPreferences(db, ownerType, stepId, nested);
     await saveGenericDocument(db, documentRow, normalized, "block_deleted", nested, {}, null);
     return json({ data: await genericPayload(db, ownerType, stepId, await getCurrentDocument(db, ownerType, stepId)) });
   }
@@ -229,13 +249,41 @@ async function getJourney(db: D1Database, ownerType: OwnerType, ownerId: string)
   };
 }
 
-async function genericPayload(db: D1Database, ownerType: OwnerType, stepId: string, documentRow: Record<string, unknown>) {
+async function genericPayload(db: D1Database, ownerType: OwnerType, stepId: string, documentRow: Record<string, unknown>, userId?: string | null) {
   const document = normalizeDocumentRow(documentRow).document;
   const values = await db.prepare("select * from journey_step_values where owner_type = ? and owner_step_id = ?").bind(ownerType, stepId).all<Record<string, unknown>>();
   const files = await db.prepare("select * from journey_step_files where owner_type = ? and owner_step_id = ?").bind(ownerType, stepId).all<Record<string, unknown>>();
   const parsedValues = (values.results ?? []).map((value) => ({ ...value, value: parseJson(String(value.value_json ?? "null")) }));
   const completion = await calculateRuntimeCompletion(db, ownerType, stepId, documentRow);
-  return { document, values: parsedValues, files: files.results ?? [], completion };
+  const presentation = await getPresentationPreference(db, ownerType, stepId, userId, document.blocks);
+  return { document, values: parsedValues, files: files.results ?? [], completion, presentation };
+}
+
+async function getPresentationPreference(db: D1Database, ownerType: OwnerType, stepId: string, userId: string | null | undefined, blocks: Block[]) {
+  if (!userId || ownerType === "template") return { collapsedBlockIds: [], customized: false };
+  const row = await db.prepare("select collapsed_block_ids_json from journey_step_view_preferences where user_id = ? and owner_type = ? and owner_step_id = ?")
+    .bind(userId, ownerType, stepId).first<Record<string, unknown>>();
+  if (!row) return { collapsedBlockIds: [], customized: false };
+  const validIds = new Set(blocks.map((block) => block.id));
+  const collapsedBlockIds = parseJson(String(row.collapsed_block_ids_json ?? "[]"));
+  return {
+    collapsedBlockIds: Array.isArray(collapsedBlockIds) ? collapsedBlockIds.filter((blockId): blockId is string => typeof blockId === "string" && validIds.has(blockId)) : [],
+    customized: true,
+  };
+}
+
+async function removeBlockFromPresentationPreferences(db: D1Database, ownerType: OwnerType, stepId: string, blockId: string) {
+  if (ownerType === "template") return;
+  const rows = await db.prepare("select id, collapsed_block_ids_json from journey_step_view_preferences where owner_type = ? and owner_step_id = ?")
+    .bind(ownerType, stepId).all<{ id: string; collapsed_block_ids_json?: string }>();
+  const now = new Date().toISOString();
+  for (const row of rows.results ?? []) {
+    const saved = parseJson(String(row.collapsed_block_ids_json ?? "[]"));
+    const next = Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string" && id !== blockId) : [];
+    if (Array.isArray(saved) && next.length === saved.length) continue;
+    await db.prepare("update journey_step_view_preferences set collapsed_block_ids_json = ?, updated_at = ? where id = ?")
+      .bind(JSON.stringify(next), now, row.id).run();
+  }
 }
 
 async function getStepRow(db: D1Database, ownerType: OwnerType, stepId: string) {

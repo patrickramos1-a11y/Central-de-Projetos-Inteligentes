@@ -69,7 +69,7 @@ export default {
       }
 
       if (parts[0] === "api" && parts[1] === "project-steps" && parts[2]) {
-        return handleProjectStepRequest(request, env, parts[2], parts.slice(3));
+        return handleProjectStepRequest(request, env, parts[2], parts.slice(3), url);
       }
 
       if (parts[0] === "api" && parts[1] === "tables") {

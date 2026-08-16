@@ -37,6 +37,7 @@ import { createSummaryApi } from "../api/summary";
 import { parseProjectSummary } from "../lib/summaryParser";
 import { copyText as copyToClipboard } from "../components/ui/clipboard";
 import { resolveBoundSummary } from "../features/summary/summaryBinding";
+import { collapseAllBlockIds, toggleCollapsedBlockIds } from "../features/journey/blockPresentation";
 import { Toast } from "../components/ui/Toast";
 import { ProgressBar } from "../components/ui/ProgressBar";
 import { StatusBadge, type StatusTone } from "../components/ui/StatusBadge";
@@ -3209,6 +3210,7 @@ function ClientBlockJourneyView({
   const [isAdding, setIsAdding] = useState(false);
   const [newStepName, setNewStepName] = useState("");
   const [collapsedBlockIds, setCollapsedBlockIds] = useState<Set<string>>(() => new Set());
+  const presentationSaveQueueRef = useRef(Promise.resolve());
   const done = steps.filter((step) => step.status === "concluido").length;
   const progress = steps.length ? Math.round((done / steps.length) * 100) : 0;
   const base = `${cloudflareApiUrl}/api/journey-steps/client/${encodeURIComponent(selectedStep.id)}`;
@@ -3227,7 +3229,7 @@ function ClientBlockJourneyView({
 
   async function loadStructure() {
     try {
-      let response = await fetch(`${base}/structure`);
+      let response = await fetch(`${base}/structure?userId=${encodeURIComponent(currentUser?.id ?? "")}`);
       if (response.status === 404 || response.status === 500) response = await fetch(`${base}/initialize`, { method: "POST" });
       const body = await response.json() as { data?: StepBuilderPayload | { data?: StepBuilderPayload }; error?: string };
       const payload = (body.data && typeof body.data === "object" && "data" in body.data
@@ -3235,6 +3237,7 @@ function ClientBlockJourneyView({
         : body.data) as StepBuilderPayload | undefined;
       if (!response.ok || !payload) throw new Error(body.error ?? "Nao foi possivel carregar a jornada.");
       setPayload(payload);
+      setCollapsedBlockIds(new Set(payload.presentation?.collapsedBlockIds ?? []));
     } catch (error) {
       window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Falha ao carregar a jornada do cliente." } }));
     }
@@ -3256,6 +3259,28 @@ function ClientBlockJourneyView({
     const next = await request(`/block-values/${encodeURIComponent(blockId)}`, { method: "PATCH", body: JSON.stringify({ value, updatedBy: currentUser?.name ?? null }) });
     setPayload(next);
     if (next.completion.status !== selectedStep.status) onUpdateStep(selectedStep.id, { status: next.completion.status });
+  }
+
+  function updatePresentation(update: (current: Set<string>) => Set<string>, reset = false) {
+    setCollapsedBlockIds((current) => {
+      const previous = new Set(current);
+      const next = update(new Set(current));
+      presentationSaveQueueRef.current = presentationSaveQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          const saved = await request("/presentation", {
+            method: "PATCH",
+            body: JSON.stringify({ userId: currentUser?.id, collapsedBlockIds: [...next], reset }),
+          });
+          setPayload(saved);
+          setCollapsedBlockIds(new Set(saved.presentation?.collapsedBlockIds ?? []));
+        })
+        .catch((error) => {
+          setCollapsedBlockIds(previous);
+          window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Nao foi possivel salvar a visualizacao da etapa." } }));
+        });
+      return next;
+    });
   }
 
   function move(blockId: string, direction: -1 | 1) {
@@ -3285,13 +3310,14 @@ function ClientBlockJourneyView({
           <div className={`journey-command-bar mode-${mode}`}>
             <div className="journey-step-identity"><span className="eyebrow">Etapa do cliente</span>{mode === "edit" ? <InlineText defaultValue={selectedStep.name} className="inline-title" onSave={(name) => onUpdateStep(selectedStep.id, { name })} /> : <strong className="journey-step-title">{selectedStep.name}</strong>}</div>
             <div className="journey-mode-switch"><button className={mode === "execute" ? "active" : ""} onClick={() => setMode("execute")}><CheckCircle2 size={15} /> Executar</button><button className={mode === "edit" ? "active" : ""} onClick={() => setMode("edit")}><Pencil size={15} /> Editar estrutura</button></div>
+            <div className="journey-block-view-actions" role="group" aria-label="Visibilidade dos blocos"><button className="secondary-button" type="button" onClick={() => updatePresentation(() => new Set())}><ChevronDown size={16} /> Abrir todos</button><button className="secondary-button" type="button" onClick={() => updatePresentation(() => collapseAllBlockIds(blocks.map((block) => block.id)))}><ChevronUp size={16} /> Recolher todos</button><button className="ghost-button" type="button" onClick={() => updatePresentation(() => new Set(), true)} title="Abrir todos e esquecer esta preferencia"><RefreshCw size={15} /> Restaurar</button></div>
             <button className="secondary-button" disabled={!payload?.completion.canComplete} onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}><CheckCircle2 size={16} /> Concluir</button>
             {mode === "edit" && <><form className="quick-step-form" onSubmit={(event) => { event.preventDefault(); onAddNextStep(client.id, newStepName || "Nova etapa"); setNewStepName(""); }}><input value={newStepName} onChange={(event) => setNewStepName(event.target.value)} placeholder="Nova etapa" /><button className="secondary-button"><Plus size={16} /> Adicionar etapa</button></form><div className="block-add-wrap"><button className="primary-button" onClick={() => setIsAdding((open) => !open)}><Plus size={17} /> Adicionar bloco</button>{isAdding && <BlockTypeMenu onSelect={addBlock} />}</div><button className="secondary-button" onClick={() => onSaveTemplate(client)}><Save size={16} /> Salvar template</button></>}
           </div>
           <div className="step-auto-status"><span className={`chip active ${payload?.completion.status ?? selectedStep.status}`}>{formatStepStatus(payload?.completion.status ?? selectedStep.status)}</span><span>{payload ? `${payload.completion.completedBlocks}/${payload.completion.totalBlocks} blocos completos` : "Carregando blocos"}</span><div className="progress-bar"><span style={{ width: `${payload?.completion.progress ?? 0}%` }} /></div></div>
           {!payload && <div className="empty-state compact"><Loader2 className="spin" size={23} /> Carregando jornada...</div>}
           {payload && !blocks.length && <div className="empty-block-canvas"><Sparkles size={30} /><strong>Etapa limpa</strong><span>{mode === "edit" ? "Adicione apenas os blocos necessarios." : "Esta etapa ainda nao possui conteudo para executar."}</span>{mode === "edit" && <button className="primary-button" onClick={() => setIsAdding(true)}><Plus size={16} /> Adicionar primeiro bloco</button>}</div>}
-          <div className="block-canvas">{blocks.map((block, index) => <StepBuilderBlockCard key={block.id} block={block} index={index} total={blocks.length} value={payload?.values.find((value) => value.block_id === block.id)?.value} tables={tables} summaries={[]} summaryItems={[]} generatedPrompts={[]} project={projectLike} selectedStep={stepLike} currentUser={currentUser} onUpdateSummaryItem={() => undefined} onSetSummaryItemSelection={() => undefined} onDeleteSummaryItem={() => undefined} onSaveGeneratedPrompt={async () => false} onArchiveGeneratedPrompt={() => undefined} onCreatePromptFromBlock={onCreatePromptFromBlock} mode={mode} isEditing={mode === "edit" && editingBlockId === block.id} isCollapsed={collapsedBlockIds.has(block.id)} onToggleCollapse={() => setCollapsedBlockIds((current) => { const next = new Set(current); next.has(block.id) ? next.delete(block.id) : next.add(block.id); return next; })} onDuplicate={() => void addBlock(block.type)} onEdit={() => setEditingBlockId((current) => current === block.id ? null : block.id)} onUpdate={(patch) => void updateBlock(block.id, patch)} onDelete={() => void request(`/blocks/${encodeURIComponent(block.id)}`, { method: "DELETE" }).then(setPayload)} onMove={move} onSaveValue={(value) => void saveValue(block.id, value)} onOpenSummary={() => undefined} ownerType="client" />)}</div>
+          <div className="block-canvas">{blocks.map((block, index) => <StepBuilderBlockCard key={block.id} block={block} index={index} total={blocks.length} value={payload?.values.find((value) => value.block_id === block.id)?.value} tables={tables} summaries={[]} summaryItems={[]} generatedPrompts={[]} project={projectLike} selectedStep={stepLike} currentUser={currentUser} onUpdateSummaryItem={() => undefined} onSetSummaryItemSelection={() => undefined} onDeleteSummaryItem={() => undefined} onSaveGeneratedPrompt={async () => false} onArchiveGeneratedPrompt={() => undefined} onCreatePromptFromBlock={onCreatePromptFromBlock} mode={mode} isEditing={mode === "edit" && editingBlockId === block.id} isCollapsed={collapsedBlockIds.has(block.id)} onToggleCollapse={() => updatePresentation((current) => toggleCollapsedBlockIds(current, block.id))} onDuplicate={() => void addBlock(block.type)} onEdit={() => setEditingBlockId((current) => current === block.id ? null : block.id)} onUpdate={(patch) => void updateBlock(block.id, patch)} onDelete={() => void request(`/blocks/${encodeURIComponent(block.id)}`, { method: "DELETE" }).then(setPayload)} onMove={move} onSaveValue={(value) => void saveValue(block.id, value)} onOpenSummary={() => undefined} ownerType="client" />)}</div>
         </section>
       </section>
     </>
@@ -3427,6 +3453,7 @@ type StepBuilderPayload = {
   values: Array<{ block_id: string; value: any; completion_state: string }>;
   files: JourneyRuntimeFile[];
   completion: { status: StepStatus; progress: number; completedBlocks: number; totalBlocks: number; canComplete: boolean; reasons: Array<{ message: string; blockId?: string }> };
+  presentation?: { collapsedBlockIds: string[]; customized: boolean };
 };
 
 type BlockCatalogItem = { key: string; type: string; label: string; icon: typeof Layers3; title?: string; config?: Record<string, unknown> };
@@ -3545,6 +3572,7 @@ function JourneyView({
   const [summaryEditorOpen, setSummaryEditorOpen] = useState(false);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [collapsedBlockIds, setCollapsedBlockIds] = useState<Set<string>>(() => new Set());
+  const presentationSaveQueueRef = useRef(Promise.resolve());
   const [journeyMode, setJourneyMode] = useState<JourneyMode>("execute");
   const summaries = tables.project_summaries.filter((summary) => summary.project_id === project.id);
   const summaryItems = tables.project_summary_items.filter((item) => item.project_id === project.id).sort(byOrder);
@@ -3568,9 +3596,9 @@ function JourneyView({
   async function loadStepStructure() {
     setIsLoadingBlocks(true);
     try {
-      const next = await stepRequest("/structure");
+      const next = await stepRequest(`/structure?userId=${encodeURIComponent(currentUser?.id ?? "")}`);
       setPayload(next);
-      setCollapsedBlockIds(defaultCollapsedBlockIds(next));
+      setCollapsedBlockIds(new Set(next.presentation?.collapsedBlockIds ?? []));
       if (!selectedStep.is_not_applicable && next.completion.status !== selectedStep.status) {
         void onUpdateStep(selectedStep.id, { status: next.completion.status });
       }
@@ -3592,7 +3620,6 @@ function JourneyView({
   async function updateBlock(blockId: string, patch: Partial<StepBuilderBlock>) {
     const next = await stepRequest(`/blocks/${encodeURIComponent(blockId)}`, { method: "PATCH", body: JSON.stringify(patch) });
     setPayload(next);
-    updateBlockPresentation(next, blockId);
   }
 
   async function deleteBlock(blockId: string) {
@@ -3623,15 +3650,6 @@ function JourneyView({
     }));
   }
 
-  function toggleBlockCollapsed(blockId: string) {
-    setCollapsedBlockIds((current) => {
-      const next = new Set(current);
-      if (next.has(blockId)) next.delete(blockId);
-      else next.add(blockId);
-      return next;
-    });
-  }
-
   async function moveBlock(blockId: string, direction: -1 | 1) {
     if (!payload) return;
     const ids = payload.document.blocks.map((block) => block.id);
@@ -3645,61 +3663,27 @@ function JourneyView({
   async function saveBlockValue(blockId: string, value: unknown) {
     const next = await stepRequest(`/block-values/${encodeURIComponent(blockId)}`, { method: "PATCH", body: JSON.stringify({ value, updatedBy: currentUser?.name ?? "Patrick" }) });
     setPayload(next);
-    updateBlockPresentation(next, blockId);
     if (!selectedStep.is_not_applicable && next.completion.status !== selectedStep.status) onUpdateStep(selectedStep.id, { status: next.completion.status });
   }
 
-  function blockShouldCollapse(block: StepBuilderBlock, next: StepBuilderPayload) {
-    const value = next.values.find((item) => item.block_id === block.id)?.value;
-    const state = getCollapsedBlockState(block, value, summaries, summaryItems, next.files);
-
-    // Informative texts remain available on arrival. They are guidance, not a finished task.
-    if (block.type === "short_text" || block.type === "long_text") return false;
-    // An empty context stays compact; once it contains useful material it stays visible for reuse.
-    if (block.type === "context") {
-      const runtimeContexts = Array.isArray(value?.contexts) ? value.contexts : [];
-      const templateContexts = Array.isArray(block.config.contexts) ? block.config.contexts.filter((item: { pinned?: boolean }) => item.pinned) : [];
-      return runtimeContexts.length + templateContexts.length === 0;
-    }
-    // Template resource packs are support material, not an execution task.
-    if (block.type === "file_upload" && block.config.fileMode === "resource_pack") return true;
-
-    return state.tone === "complete";
-  }
-
-  function defaultCollapsedBlockIds(next: StepBuilderPayload) {
-    return new Set(next.document.blocks.filter((block) => blockShouldCollapse(block, next)).map((block) => block.id));
-  }
-
-  function updateBlockPresentation(next: StepBuilderPayload, blockId: string) {
-    const block = next.document.blocks.find((item) => item.id === blockId);
-    if (!block) return;
+  function updatePresentation(update: (current: Set<string>) => Set<string>, reset = false) {
     setCollapsedBlockIds((current) => {
-      const collapsed = new Set(current);
-      if (blockShouldCollapse(block, next)) collapsed.add(blockId);
-      else collapsed.delete(blockId);
-      return collapsed;
-    });
-  }
-
-  function expandActionRequiredBlocks() {
-    if (!payload) return;
-    setCollapsedBlockIds((current) => {
-      const next = new Set(current);
-      payload.document.blocks.forEach((block) => {
-        if (!blockShouldCollapse(block, payload)) next.delete(block.id);
-      });
-      return next;
-    });
-  }
-
-  function collapseResolvedBlocks() {
-    if (!payload) return;
-    setCollapsedBlockIds((current) => {
-      const next = new Set(current);
-      payload.document.blocks.forEach((block) => {
-        if (blockShouldCollapse(block, payload)) next.add(block.id);
-      });
+      const previous = new Set(current);
+      const next = update(new Set(current));
+      presentationSaveQueueRef.current = presentationSaveQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          const saved = await stepRequest("/presentation", {
+            method: "PATCH",
+            body: JSON.stringify({ userId: currentUser?.id, collapsedBlockIds: [...next], reset }),
+          });
+          setPayload(saved);
+          setCollapsedBlockIds(new Set(saved.presentation?.collapsedBlockIds ?? []));
+        })
+        .catch((error) => {
+          setCollapsedBlockIds(previous);
+          window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Nao foi possivel salvar a visualizacao da etapa." } }));
+        });
       return next;
     });
   }
@@ -3783,8 +3767,9 @@ function JourneyView({
               <button className={journeyMode === "edit" ? "active" : ""} type="button" onClick={() => switchJourneyMode("edit")}><Pencil size={15} /> Editar estrutura</button>
             </div>
             <div className="journey-block-view-actions" role="group" aria-label="Visibilidade dos blocos">
-              <button className="secondary-button" type="button" onClick={expandActionRequiredBlocks} title="Abrir os blocos que ainda exigem ação"><ChevronDown size={16} /> Abrir pendentes</button>
-              <button className="secondary-button" type="button" onClick={collapseResolvedBlocks} title="Recolher os blocos já concluídos"><ChevronUp size={16} /> Recolher concluídos</button>
+              <button className="secondary-button" type="button" onClick={() => updatePresentation(() => new Set())} title="Abrir todos os blocos desta etapa"><ChevronDown size={16} /> Abrir todos</button>
+              <button className="secondary-button" type="button" onClick={() => updatePresentation(() => collapseAllBlockIds(blocks.map((block) => block.id)))} title="Recolher todos os blocos desta etapa"><ChevronUp size={16} /> Recolher todos</button>
+              <button className="ghost-button" type="button" onClick={() => updatePresentation(() => new Set(), true)} title="Restaurar o visual padrão e abrir todos os blocos"><RefreshCw size={16} /> Restaurar</button>
             </div>
             <button className={`secondary-button ${selectedStep.is_not_applicable ? "is-not-applicable" : ""}`} type="button" onClick={() => onUpdateStep(selectedStep.id, { is_not_applicable: !selectedStep.is_not_applicable })}>{selectedStep.is_not_applicable ? <RefreshCw size={16} /> : <X size={16} />}{selectedStep.is_not_applicable ? " Aplicar etapa" : " Nao se aplica"}</button>
             <button className="secondary-button" type="button" disabled={Boolean(selectedStep.is_not_applicable) || !completion?.canComplete} title={selectedStep.is_not_applicable ? "Esta etapa foi marcada como nao aplicavel" : completion?.canComplete ? "Concluir etapa" : completion?.reasons[0]?.message ?? "Carregando condicoes de conclusao"} onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}><CheckCircle2 size={17} /> Concluir</button>
@@ -3850,15 +3835,11 @@ function JourneyView({
                 mode={journeyMode}
                 isEditing={journeyMode === "edit" && editingBlockId === block.id}
                 isCollapsed={collapsedBlockIds.has(block.id)}
-                onToggleCollapse={() => toggleBlockCollapsed(block.id)}
+                onToggleCollapse={() => updatePresentation((current) => toggleCollapsedBlockIds(current, block.id))}
                 onDuplicate={() => duplicateBlock(block)}
                 onEdit={() => {
                   setEditingBlockId(editingBlockId === block.id ? null : block.id);
-                  setCollapsedBlockIds((current) => {
-                    const next = new Set(current);
-                    next.delete(block.id);
-                    return next;
-                  });
+                  updatePresentation((current) => { current.delete(block.id); return current; });
                 }}
                 onUpdate={(patch) => updateBlock(block.id, patch)}
                 onDelete={() => deleteBlock(block.id)}
