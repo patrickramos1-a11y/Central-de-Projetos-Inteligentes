@@ -51,4 +51,34 @@ describe("modelo canonico de etapa", () => {
     expect(result.canComplete).toBe(true);
     expect(result.progress).toBe(0);
   });
+
+  test("ignora blocos opcionais e aceita link fixo em material obrigatorio", () => {
+    const material = createBlock("materials", 1);
+    material.required = true;
+    material.config.links = [{ id: "guia", title: "Guia", url: "https://example.com/guia" }];
+    const optionalPrompt = createBlock("prompt", 2);
+    optionalPrompt.config.contentSnapshot = "Prompt que nao bloqueia a etapa.";
+
+    const result = calculateCompletion(documentWith([material, optionalPrompt]), [], []);
+
+    expect(result.canComplete).toBe(true);
+    expect(result.progress).toBe(100);
+  });
+
+  test("exige todas as condicoes e a quantidade minima de arquivos nos blocos obrigatorios", () => {
+    const prompt = createBlock("prompt", 1);
+    prompt.required = true;
+    prompt.config.applicationConditions = [{ id: "enviado", label: "Enviado junto ao projeto", required: true }];
+    prompt.config.attachmentsEnabled = true;
+    prompt.config.attachmentsRequired = true;
+    const upload = createBlock("file_upload", 2);
+    upload.required = true;
+    upload.config.minFiles = 2;
+
+    const incomplete = calculateCompletion(documentWith([prompt, upload]), [{ blockKey: prompt.id, value: { applied: true, conditionChecks: { enviado: true } } }], [{ blockKey: prompt.id }]);
+    const complete = calculateCompletion(documentWith([prompt, upload]), [{ blockKey: prompt.id, value: { applied: true, conditionChecks: { enviado: true } } }], [{ blockKey: prompt.id }, { blockKey: upload.id }, { blockKey: upload.id }]);
+
+    expect(incomplete.canComplete).toBe(false);
+    expect(complete.canComplete).toBe(true);
+  });
 });

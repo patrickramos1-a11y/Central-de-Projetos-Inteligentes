@@ -99,6 +99,7 @@ export type StepBlockConfig = {
   items?: ChecklistItemDefinition[];
   completionMode?: "all_required" | "all" | "partial";
   acceptedFileTypes?: string[];
+  minFiles?: number;
   maxFiles?: number;
   maxFileSizeMb?: number;
   allowMultipleFiles?: boolean;
@@ -323,6 +324,7 @@ export function createBlock(type: StepBlockType, order: number): StepBlock {
       config: {
         // An empty list means that this evidence block accepts every file type.
         acceptedFileTypes: [],
+        minFiles: 1,
         maxFiles: 20,
         maxFileSizeMb: 25,
         allowMultipleFiles: true,
@@ -566,7 +568,7 @@ export function calculateCompletion(
   let completed = 0;
 
   for (const block of visibleBlocks) {
-    if (!isProgressBlock(block)) {
+    if (!block.required || !isProgressBlock(block)) {
       continue;
     }
 
@@ -676,12 +678,29 @@ function isProgressBlock(block: StepBlock) {
 
 function isBlockComplete(block: StepBlock, value: unknown, files: StepFileRecord[]) {
   if (block.type === "file_upload") {
-    return files.some((file) => file.blockKey === block.id);
+    const minimum = Math.max(1, Number(block.config.minFiles ?? 1));
+    return files.filter((file) => file.blockKey === block.id).length >= minimum;
   }
 
   if (block.type === "prompt") {
     const runtime = asObject(value);
-    return Boolean(runtime.applied ?? runtime.completed);
+    const conditions = Array.isArray(block.config.applicationConditions) ? block.config.applicationConditions : [];
+    const checks = asObject(runtime.conditionChecks);
+    const conditionsComplete = conditions.filter((condition) => condition.required !== false)
+      .every((condition) => Boolean(checks[String(condition.id ?? "")]));
+    const needsFiles = Boolean(block.config.attachmentsEnabled) && Boolean(block.config.attachmentsRequired);
+    return Boolean(runtime.applied ?? runtime.completed)
+      && conditionsComplete
+      && (!needsFiles || files.some((file) => file.blockKey === block.id));
+  }
+
+  if (block.type === "materials") {
+    const fixedLinks = Array.isArray(block.config.links) ? block.config.links : [];
+    const runtimeLinks = Array.isArray(asObject(value).links) ? asObject(value).links as unknown[] : [];
+    return [...fixedLinks, ...runtimeLinks].some((link) => {
+      const item = asObject(link);
+      return String(item.url ?? "").trim().length > 0;
+    });
   }
 
   if (block.type === "approval") {

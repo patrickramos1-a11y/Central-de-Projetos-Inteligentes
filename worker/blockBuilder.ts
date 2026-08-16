@@ -404,7 +404,7 @@ async function buildPayload(db: D1Database, stepId: string, structure: Structure
     db.prepare("select * from journey_step_values where owner_type = 'project' and owner_step_id = ?").bind(stepId).all<Record<string, unknown>>(),
     db.prepare("select *, r2_key as url from journey_step_files where owner_type = 'project' and owner_step_id = ?").bind(stepId).all<Record<string, unknown>>(),
     document.projectId
-      ? db.prepare("select id from project_summaries where project_id = ? and status != 'arquivado'").bind(document.projectId).all<{ id: string }>()
+      ? db.prepare("select id from project_summaries where project_id = ? and status in ('active', 'ativo')").bind(document.projectId).all<{ id: string }>()
       : Promise.resolve({ results: [] as Array<{ id: string }> }),
   ]);
   const parsedValues = (values.results ?? []).map((row) => ({ ...row, value: safeJson(String(row.value_json ?? "null")) }));
@@ -415,10 +415,11 @@ async function buildPayload(db: D1Database, stepId: string, structure: Structure
 }
 
 async function getPresentationPreference(db: D1Database, stepId: string, userId: string | null | undefined, blocks: StepBlock[]) {
-  if (!userId) return { collapsedBlockIds: [], customized: false };
+  const defaults = blocks.filter((block) => Boolean(block.collapsedByDefault)).map((block) => block.id);
+  if (!userId) return { collapsedBlockIds: defaults, customized: false };
   const row = await db.prepare("select collapsed_block_ids_json from journey_step_view_preferences where user_id = ? and owner_type = 'project' and owner_step_id = ?")
     .bind(userId, stepId).first<{ collapsed_block_ids_json?: string }>();
-  if (!row) return { collapsedBlockIds: [], customized: false };
+  if (!row) return { collapsedBlockIds: defaults, customized: false };
   const validIds = new Set(blocks.map((block) => block.id));
   const saved = safeJson(String(row.collapsed_block_ids_json ?? "[]"));
   return {
@@ -459,24 +460,36 @@ function calculateCompletion(document: StepDocument, valueRows: Array<Record<str
   const valueMap = new Map(valueRows.map((row) => [String(row.block_id), row.value]));
   const progressBlocks = document.blocks.filter((block) => block.visible && !["section", "short_text", "long_text", "phase", "comment"].includes(block.type));
   const requiredBlocks = progressBlocks.filter((block) => block.required);
-  const measuredBlocks = requiredBlocks.length ? requiredBlocks : progressBlocks;
+  const measuredBlocks = requiredBlocks;
   const completed = measuredBlocks.filter((block) => isBlockComplete(block, valueMap.get(block.id), fileRows, validSummaryIds));
   const reasons = measuredBlocks.filter((block) => !isBlockComplete(block, valueMap.get(block.id), fileRows, validSummaryIds)).map((block) => ({ code: "required_block_incomplete", message: `Preencha o bloco ${block.title}.`, blockId: block.id }));
   const total = measuredBlocks.length;
   const progress = total ? Math.round((completed.length / total) * 100) : 0;
   const anyContent = progressBlocks.some((block) => isBlockComplete(block, valueMap.get(block.id), fileRows, validSummaryIds) || !isEmpty(valueMap.get(block.id)) || !isEmpty(block.config.content) || !isEmpty(block.config.contentSnapshot) || !isEmpty(block.config.contexts));
   const status = total > 0 && completed.length === total ? "concluido" : anyContent ? "em_andamento" : "pendente";
-  return { status, progress, completedBlocks: completed.length, totalBlocks: total, canComplete: total > 0 && completed.length === total, reasons };
+  return { status, progress, completedBlocks: completed.length, totalBlocks: total, canComplete: completed.length === total, reasons };
 }
 
 function isBlockComplete(block: StepBlock, value: unknown, fileRows: Array<Record<string, unknown>>, validSummaryIds: Set<string> = new Set()) {
-  if (block.type === "file_upload") return fileRows.some((file) => file.block_id === block.id);
-  if (block.type === "project_summary") return validSummaryIds.has(String(block.config.summaryId ?? ""));
-  if (block.type === "materials") return Array.isArray(block.config.links) && block.config.links.length > 0;
+  if (block.type === "file_upload") return fileRows.filter((file) => file.block_id === block.id).length >= Math.max(1, Number(block.config.minFiles ?? 1));
+  if (block.type === "project_summary") {
+    const runtime = typeof value === "object" && value ? value as { completed?: boolean; summaryId?: string } : {};
+    const summaryId = String(block.config.summaryId ?? "");
+    return Boolean(runtime.completed) && runtime.summaryId === summaryId && validSummaryIds.has(summaryId);
+  }
+  if (block.type === "materials") {
+    const fixedLinks = Array.isArray(block.config.links) ? block.config.links : [];
+    const runtimeLinks = typeof value === "object" && value && Array.isArray((value as { links?: unknown[] }).links) ? (value as { links: unknown[] }).links : [];
+    return [...fixedLinks, ...runtimeLinks].some((link) => typeof link === "object" && link !== null && String((link as { url?: unknown }).url ?? "").trim().length > 0);
+  }
   if (block.type === "context") return Array.isArray(block.config.contexts) ? block.config.contexts.length > 0 : !isEmpty(block.config.content);
   if (block.type === "prompt") {
     const runtime = typeof value === "object" && value ? value as { applied?: boolean; completed?: boolean } : {};
-    return Boolean(runtime.applied ?? runtime.completed);
+    const conditions = Array.isArray(block.config.applicationConditions) ? block.config.applicationConditions : [];
+    const checks = runtime.conditionChecks && typeof runtime.conditionChecks === "object" ? runtime.conditionChecks as Record<string, boolean> : {};
+    const conditionsComplete = conditions.filter((condition) => condition.required !== false).every((condition) => Boolean(checks[String(condition.id)]));
+    const needsFiles = Boolean(block.config.attachmentsEnabled) && Boolean(block.config.attachmentsRequired);
+    return Boolean(runtime.applied ?? runtime.completed) && conditionsComplete && (!needsFiles || fileRows.some((file) => file.block_id === block.id));
   }
   if (block.type === "checklist") {
     const items = Array.isArray(block.config.items) ? (block.config.items as Array<Record<string, unknown>>) : [];

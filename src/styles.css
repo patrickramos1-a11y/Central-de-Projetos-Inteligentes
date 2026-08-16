@@ -8488,6 +8488,15 @@ body {
   min-height: 38px;
   padding: 5px 7px;
   border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid rgba(25, 105, 91, 0.14);
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.prompt-conditions-runtime .check-item-row.compact.done {
+  background: rgba(13, 211, 117, 0.14);
+  border-color: rgba(0, 163, 99, 0.55);
+  color: var(--text-strong);
 }
 
 .prompt-execution-card > .file-runtime-block {

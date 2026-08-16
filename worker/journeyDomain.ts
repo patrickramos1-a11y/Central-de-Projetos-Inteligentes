@@ -58,8 +58,8 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
   }
 
   if (resource === "projects" && id && action === "templates" && request.method === "POST") {
-    const body = await request.json<{ name?: string; templateId?: string | null; createdBy?: string }>();
-    return json(await saveProjectAsTemplate(env, id, body.name, body.createdBy ?? null, body.templateId ?? null), 201);
+    const body = await request.json<{ name?: string; templateId?: string | null; createdBy?: string; presentationDefaults?: Record<string, string[]> }>();
+    return json(await saveProjectAsTemplate(env, id, body.name, body.createdBy ?? null, body.templateId ?? null, body.presentationDefaults ?? {}), 201);
   }
 
   if (resource === "journey-templates" && id && request.method === "PATCH") {
@@ -260,10 +260,11 @@ async function genericPayload(db: D1Database, ownerType: OwnerType, stepId: stri
 }
 
 async function getPresentationPreference(db: D1Database, ownerType: OwnerType, stepId: string, userId: string | null | undefined, blocks: Block[]) {
-  if (!userId || ownerType === "template") return { collapsedBlockIds: [], customized: false };
+  const defaults = blocks.filter((block) => Boolean(block.collapsedByDefault)).map((block) => block.id);
+  if (!userId || ownerType === "template") return { collapsedBlockIds: defaults, customized: false };
   const row = await db.prepare("select collapsed_block_ids_json from journey_step_view_preferences where user_id = ? and owner_type = ? and owner_step_id = ?")
     .bind(userId, ownerType, stepId).first<Record<string, unknown>>();
-  if (!row) return { collapsedBlockIds: [], customized: false };
+  if (!row) return { collapsedBlockIds: defaults, customized: false };
   const validIds = new Set(blocks.map((block) => block.id));
   const collapsedBlockIds = parseJson(String(row.collapsed_block_ids_json ?? "[]"));
   return {
@@ -338,6 +339,7 @@ function createGenericBlock(type: string, order: number, title?: string, parentB
   if (type === "file_upload") Object.assign(config, {
     // An empty acceptedFileTypes array means every format is accepted.
     acceptedFileTypes: [],
+    minFiles: 1,
     allowMultipleFiles: true,
     maxFiles: 20,
     maxFileSizeMb: 25,
@@ -414,6 +416,7 @@ async function saveProjectAsTemplate(
   requestedName?: string,
   createdBy: string | null = null,
   existingTemplateId: string | null = null,
+  presentationDefaults: Record<string, string[]> = {},
 ) {
   const db = env.DB;
   const project = await db.prepare("select * from projects where id = ?").bind(projectId).first<Record<string, unknown>>();
@@ -458,7 +461,12 @@ async function saveProjectAsTemplate(
     const source = await getCurrentDocument(db, "project", String(projectStep.id), false);
     if (!source) continue;
     const sourceDocument = normalizeDocumentRow(source).document;
-    const templateDocument = await createProjectTemplateDocument(sourceDocument, templateId, templateStepId, String(projectStep.name ?? sourceDocument.title));
+    const stepId = String(projectStep.id);
+    const hasPresentationDefault = Object.prototype.hasOwnProperty.call(presentationDefaults, stepId);
+    const documentWithPresentation = hasPresentationDefault
+      ? { ...sourceDocument, blocks: sourceDocument.blocks.map((block) => ({ ...block, collapsedByDefault: (presentationDefaults[stepId] ?? []).includes(block.id) })) }
+      : sourceDocument;
+    const templateDocument = await createProjectTemplateDocument(documentWithPresentation, templateId, templateStepId, String(projectStep.name ?? sourceDocument.title));
     await insertDocument(db, templateDocument, templateId, createdBy);
     await copyProjectFilesToTemplate(env, String(projectStep.id), templateStepId, templateDocument.structureId, templateDocument.blocks, createdBy);
   }
@@ -829,7 +837,7 @@ async function calculateRuntimeCompletion(db: D1Database, ownerType: OwnerType, 
   const values = new Map((valueRows.results ?? []).map((row) => [String(row.block_id), parseJson(String(row.value_json ?? "null"))]));
   const fileRows = await db.prepare("select * from journey_step_files where owner_type = ? and owner_step_id = ?").bind(ownerType, stepId).all<Record<string, unknown>>();
   const files = fileRows.results ?? [];
-  const requiredBlocks = document.blocks.filter((block) => block.required && block.visible !== false && !["short_text", "long_text", "phase"].includes(block.type));
+  const requiredBlocks = document.blocks.filter((block) => block.required && block.visible !== false && !["section", "short_text", "long_text", "phase", "comment"].includes(block.type));
   let total = 0;
   let done = 0;
   const reasons: Array<{ blockId: string; message: string }> = [];
@@ -840,7 +848,8 @@ async function calculateRuntimeCompletion(db: D1Database, ownerType: OwnerType, 
     if (block.type === "checklist") {
       const checked = asRecord(asRecord(value).checked);
       const items = Array.isArray(block.config?.items) ? block.config?.items as Array<Record<string, unknown>> : [];
-      complete = items.filter((item) => item.required !== false).every((item) => Boolean(checked[String(item.id)]));
+      const requiredItems = items.filter((item) => item.required !== false);
+      complete = requiredItems.length > 0 && requiredItems.every((item) => Boolean(checked[String(item.id)] ?? item.done));
     } else if (block.type === "prompt") {
       const promptValue = asRecord(value);
       const conditions = Array.isArray(block.config?.applicationConditions)
@@ -855,9 +864,13 @@ async function calculateRuntimeCompletion(db: D1Database, ownerType: OwnerType, 
       complete = Boolean(promptValue.applied) && conditionsComplete && (!requiresAttachment || hasAttachment);
     }
     else if (block.type === "context") complete = Array.isArray(asRecord(value).contexts) && (asRecord(value).contexts as unknown[]).length > 0;
-    else if (block.type === "file_upload") complete = files.some((file) => String(file.block_id) === block.id);
-    else if (block.type === "materials") complete = Array.isArray(asRecord(value).links) && (asRecord(value).links as unknown[]).length > 0;
-    else if (block.type === "project_summary") complete = await isProjectSummaryComplete(db, ownerType, stepId, block);
+    else if (block.type === "file_upload") complete = files.filter((file) => String(file.block_id) === block.id).length >= Math.max(1, Number(block.config?.minFiles ?? 1));
+    else if (block.type === "materials") {
+      const fixedLinks = Array.isArray(block.config?.links) ? block.config.links as Array<Record<string, unknown>> : [];
+      const runtimeLinks = Array.isArray(asRecord(value).links) ? asRecord(value).links as Array<Record<string, unknown>> : [];
+      complete = [...fixedLinks, ...runtimeLinks].some((link) => String(link.url ?? "").trim().length > 0);
+    }
+    else if (block.type === "project_summary") complete = await isProjectSummaryComplete(db, ownerType, stepId, block, value);
     else complete = !isEmpty(value);
     if (complete) done += 1;
     else reasons.push({ blockId: block.id, message: block.type === "project_summary" ? "Conclua todos os topicos selecionados do sumario." : `Conclua ${block.title}.` });
@@ -881,10 +894,14 @@ async function syncStepStatus(db: D1Database, ownerType: OwnerType, stepId: stri
   await db.prepare(`update ${table} set status = ?, updated_at = ?${fields} where id = ?`).bind(...params).run();
 }
 
-async function isProjectSummaryComplete(db: D1Database, ownerType: OwnerType, stepId: string, block: Block) {
+async function isProjectSummaryComplete(db: D1Database, ownerType: OwnerType, stepId: string, block: Block, value: unknown) {
   if (ownerType !== "project") return false;
+  const runtime = asRecord(value);
+  if (!Boolean(runtime.completed)) return false;
   const summaryId = String(block.config?.summaryId ?? "").trim();
-  if (!summaryId) return false;
+  if (!summaryId || String(runtime.summaryId ?? "") !== summaryId) return false;
+  const summary = await db.prepare("select status from project_summaries where id = ?").bind(summaryId).first<Record<string, unknown>>();
+  if (!summary || !["active", "ativo"].includes(String(summary.status))) return false;
   const selected = await db.prepare("select status from project_summary_items where summary_id = ? and is_selected = 1").bind(summaryId).all<Record<string, unknown>>();
   const items = selected.results ?? [];
   return items.length > 0 && items.every((item) => String(item.status) === "concluido");

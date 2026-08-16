@@ -19,6 +19,7 @@ import {
   ListChecks,
   Loader2,
   PanelLeft,
+  PanelTop,
   Pencil,
   Plus,
   RefreshCw,
@@ -108,6 +109,7 @@ type ProjectTemplateSaveRequest = {
   mode: "update" | "create";
   templateId?: string;
   name: string;
+  presentationDefaults?: Record<string, string[]>;
 };
 
 type JourneyStep = {
@@ -1826,6 +1828,7 @@ export default function App() {
           name: request.name.trim(),
           templateId: request.mode === "update" ? request.templateId ?? null : null,
           createdBy: currentUser?.name ?? null,
+          presentationDefaults: request.presentationDefaults,
         }),
       });
       const body = await response.json() as { data?: { id: string; name: string; mode?: "created" | "updated" }; error?: string };
@@ -3569,6 +3572,7 @@ function JourneyView({
   const [templateSaveMode, setTemplateSaveMode] = useState<"update" | "create">("create");
   const [templateTargetId, setTemplateTargetId] = useState("");
   const [templateNameDraft, setTemplateNameDraft] = useState("");
+  const [templatePresentationDefaults, setTemplatePresentationDefaults] = useState<Record<string, string[]>>({});
   const [summaryEditorOpen, setSummaryEditorOpen] = useState(false);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [collapsedBlockIds, setCollapsedBlockIds] = useState<Set<string>>(() => new Set());
@@ -3723,6 +3727,7 @@ function JourneyView({
       mode: templateSaveMode,
       templateId: templateSaveMode === "update" ? target?.id : undefined,
       name: templateNameDraft.trim() || target?.name || `${project.name} - template`,
+      presentationDefaults: templatePresentationDefaults,
     });
     if (saved) setIsTemplateSaveOpen(false);
   }
@@ -3783,6 +3788,10 @@ function JourneyView({
                   <button className="primary-button" type="button" onClick={() => setIsAddMenuOpen((value) => !value)}><Plus size={17} /> Adicionar bloco</button>
                   {isAddMenuOpen && <BlockTypeMenu onSelect={addBlock} />}
                 </div>
+                <button className="secondary-button" type="button" onClick={() => {
+                  setTemplatePresentationDefaults((current) => ({ ...current, [selectedStep.id]: [...collapsedBlockIds] }));
+                  window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: "Visual inicial desta etapa sera salvo com o template." } }));
+                }}><PanelTop size={17} /> Salvar visual inicial</button>
                 <button className="secondary-button" type="button" onClick={openTemplateSave}><Save size={17} /> Salvar template</button>
               </>
             )}
@@ -4012,7 +4021,7 @@ function StepBuilderBlockCard({
   return (
     <article className={`step-builder-block ${block.type}${parentClass} ${isCollapsed ? "is-collapsed" : ""}`}>
       <div className="block-card-heading">
-        <div><Icon size={18} /><div><strong>{block.title}</strong>{(blockDetail || block.required) && <span>{blockDetail}{block.required ? `${blockDetail ? " - " : ""}obrigatorio` : ""}</span>}{isCollapsed && <div className="collapsed-block-state"><span className={`collapsed-block-status ${blockState.tone}`}>{blockState.label}</span>{blockState.detail && <span className="collapsed-block-detail">{blockState.detail}</span>}</div>}</div></div>
+        <div><Icon size={18} /><div><strong>{block.title}</strong>{(blockDetail || block.required) && <span>{blockDetail}{block.required ? `${blockDetail ? " - " : ""}obrigatorio` : ""}</span>}{isCollapsed && blockState.label && <div className="collapsed-block-state"><span className={`collapsed-block-status ${blockState.tone}`}>{blockState.label}</span>{blockState.detail && <span className="collapsed-block-detail">{blockState.detail}</span>}</div>}</div></div>
         <div className="block-card-actions">
           <button className="icon-button block-collapse-button" type="button" title={isCollapsed ? "Expandir bloco" : "Recolher bloco"} aria-label={isCollapsed ? "Expandir bloco" : "Recolher bloco"} onClick={onToggleCollapse}>{isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}</button>
           {mode === "edit" && (
@@ -4050,27 +4059,29 @@ function getCollapsedBlockState(block: StepBuilderBlock, value: any, summaries: 
     const copies = Number(value?.copyCount ?? 0);
     const attachmentCount = files.filter((file) => file.block_id === block.id).length;
     const attachmentDetail = Boolean(block.config.attachmentsRequired) ? ` - ${attachmentCount} arquivo(s)` : "";
-    return value?.applied ? complete("Aplicado", `${copies ? `${copies} copia(s)` : "Confirmado"}${attachmentDetail}`) : copies ? active("Copiado", `${copies} copia(s)${attachmentDetail}`) : pending("Pendente", "Ainda nao copiado");
+    if (value?.applied) return complete("Aplicado", `${copies ? `${copies} copia(s)` : "Confirmado"}${attachmentDetail}`);
+    if (copies) return active("Copiado", `${copies} copia(s)${attachmentDetail}`);
+    return block.required ? pending("Pendente", "Ainda nao copiado") : { tone: "", label: "", detail: "" };
   }
 
   if (block.type === "context") {
     const runtimeContexts = Array.isArray(value?.contexts) ? value.contexts : [];
     const templateContexts = Array.isArray(block.config.contexts) ? block.config.contexts.filter((item: { pinned?: boolean }) => item.pinned) : [];
     const contexts = [...templateContexts, ...runtimeContexts];
-    return contexts.length ? complete("Contexto salvo", `${contexts.length} contexto(s)`) : pending("Sem contexto");
+    return contexts.length ? complete("Contexto salvo", `${contexts.length} contexto(s)`) : block.required ? pending("Sem contexto") : { tone: "", label: "", detail: "" };
   }
 
   if (block.type === "materials") {
     const templateLinks = Array.isArray(block.config.links) ? block.config.links : [];
     const runtimeLinks = Array.isArray(value?.links) ? value.links : [];
     const links = [...templateLinks, ...runtimeLinks];
-    return links.length ? complete("Materiais adicionados", `${links.length} link(s)`) : pending("Sem materiais");
+    return links.length ? complete("Materiais adicionados", `${links.length} link(s)`) : block.required ? pending("Sem materiais") : { tone: "", label: "", detail: "" };
   }
 
   if (block.type === "file_upload") {
     const attached = files.filter((file) => file.block_id === block.id);
     if (block.config.fileMode === "resource_pack") return complete("Materiais de apoio", attached.length ? `${attached.length} arquivo(s)` : "Disponivel no template");
-    return attached.length ? complete("Arquivo anexado", `${attached.length} arquivo(s)`) : pending("Aguardando arquivo");
+    return attached.length ? complete("Arquivo anexado", `${attached.length} arquivo(s)`) : block.required ? pending("Aguardando arquivo") : { tone: "", label: "", detail: "" };
   }
 
   if (block.type === "project_summary") {
@@ -4082,9 +4093,9 @@ function getCollapsedBlockState(block: StepBuilderBlock, value: any, summaries: 
   }
 
   if (block.type === "short_answer" || block.type === "long_answer") return String(value ?? "").trim() ? complete("Respondido") : pending("Aguardando resposta");
-  if (block.type === "short_text" || block.type === "long_text") return String(block.config.content ?? "").trim() ? complete("Orientacao disponivel") : pending("Sem orientacao");
-  if (block.type === "phase") return block.config.status === "concluido" ? complete("Fase concluida") : active(formatStepStatus(String(block.config.status ?? "pendente") as StepStatus));
-  return block.required ? pending("Obrigatorio") : active("Disponivel");
+  if (block.type === "short_text" || block.type === "long_text") return String(block.config.content ?? "").trim() ? complete("Orientacao disponivel") : { tone: "", label: "", detail: "" };
+  if (block.type === "phase") return block.config.status === "concluido" ? complete("Fase concluida") : { tone: "", label: "", detail: "" };
+  return block.required ? pending("Obrigatorio") : { tone: "", label: "", detail: "" };
 }
 
 function BlockSettings({ block, tables, onUpdate, onCreatePromptFromBlock }: { block: StepBuilderBlock; tables: Tables; onUpdate: (patch: Partial<StepBuilderBlock>) => void; onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null> }) {
@@ -4137,6 +4148,7 @@ function FileUploadBlockSettings({ block, onUpdate }: { block: StepBuilderBlock;
   const fileMode = block.config.fileMode === "resource_pack" ? "resource_pack" : "evidence";
   const allowMultiple = block.config.allowMultipleFiles !== false;
   const maxFiles = Math.max(1, Number(block.config.maxFiles ?? 20));
+  const minFiles = Math.max(1, Number(block.config.minFiles ?? 1));
   const maxFileSizeMb = Math.max(1, Number(block.config.maxFileSizeMb ?? 25));
 
   return (
@@ -4155,6 +4167,7 @@ function FileUploadBlockSettings({ block, onUpdate }: { block: StepBuilderBlock;
       </div>
       {fileMode === "resource_pack" && <p className="file-mode-help">Adicione os arquivos abaixo. Ao salvar ou atualizar o template, este conjunto sera disponibilizado nas novas jornadas criadas a partir dele.</p>}
       <div className="file-limit-grid">
+        <label className="field"><span>Quantidade minima</span><input type="number" min="1" max={maxFiles} value={minFiles} onChange={(event) => onUpdate({ config: { minFiles: Math.min(maxFiles, Math.max(1, Number(event.target.value) || 1)) } })} /></label>
         <label className="field"><span>Quantidade maxima</span><input type="number" min="1" max="100" value={maxFiles} onChange={(event) => onUpdate({ config: { maxFiles: Math.max(1, Number(event.target.value) || 1) } })} /></label>
         <label className="field"><span>Limite por arquivo (MB)</span><input type="number" min="1" max="500" value={maxFileSizeMb} onChange={(event) => onUpdate({ config: { maxFileSizeMb: Math.max(1, Number(event.target.value) || 1) } })} /></label>
         <label className="checkline"><input type="checkbox" checked={allowMultiple} onChange={(event) => onUpdate({ config: { allowMultipleFiles: event.target.checked } })} /> Permitir varios arquivos de uma vez</label>
@@ -4227,6 +4240,7 @@ function BlockBody({
     return (
       <LegacySummaryOperationalBlock
         block={block}
+        value={value}
         project={project}
         selectedStep={selectedStep}
         tables={tables}
@@ -4239,6 +4253,7 @@ function BlockBody({
         onDeleteItem={onDeleteSummaryItem}
         onSaveGeneratedPrompt={onSaveGeneratedPrompt}
         onArchiveGeneratedPrompt={onArchiveGeneratedPrompt}
+        onSaveValue={onSaveValue}
         onOpenSummary={onOpenSummary}
         isStructureEditing={mode === "edit"}
       />
@@ -4560,11 +4575,7 @@ function PromptExecutionBlock({ block, value, tables, stepId, currentUser, owner
   const conditionsComplete = requiredConditions.every((condition) => Boolean(conditionChecks[condition.id]));
   const canConfirm = conditionsComplete && (!attachmentsRequired || attachedFiles.length > 0);
   const [copyFeedback, setCopyFeedback] = useState(false);
-  const [isConditionsOpen, setIsConditionsOpen] = useState(() => !isApplied && (requiredConditions.length > 0 || attachmentsRequired));
-
-  useEffect(() => {
-    if (!isApplied && (requiredConditions.length > 0 || attachmentsRequired)) setIsConditionsOpen(true);
-  }, [isApplied, requiredConditions.length, attachmentsRequired]);
+  const hasConditions = requiredConditions.length > 0 || attachmentsRequired;
 
   function persist(next: PromptBlockRuntimeValue) {
     onSaveValue({ ...runtimeValue, ...next });
@@ -4584,21 +4595,12 @@ function PromptExecutionBlock({ block, value, tables, stepId, currentUser, owner
       persist({ applied: false, appliedAt: null });
       return;
     }
-    if (requiredConditions.length || attachmentsRequired) {
-      setIsConditionsOpen(true);
-      return;
-    }
+    if (!canConfirm) return;
     persist({ applied: true, appliedAt: new Date().toISOString() });
   }
 
   function setCondition(conditionId: string, checked: boolean) {
     persist({ conditionChecks: { ...conditionChecks, [conditionId]: checked } });
-  }
-
-  function confirmWithConditions() {
-    if (!canConfirm) return;
-    persist({ applied: true, appliedAt: new Date().toISOString() });
-    setIsConditionsOpen(false);
   }
 
   if (!promptText) {
@@ -4621,20 +4623,20 @@ function PromptExecutionBlock({ block, value, tables, stepId, currentUser, owner
         </div>
         <div className="prompt-execution-stats">
           <span>{copyCount} copia(s)</span>
-          <span>{isApplied ? "Aplicado" : "Pendente"}</span>
+          {(block.required || isApplied) && <span>{isApplied ? "Aplicado" : "Pendente"}</span>}
         </div>
       </div>
       <div className="prompt-execution-actions">
         <button className={`primary-button copy-feedback-button ${copyFeedback ? "copied" : ""}`} type="button" onClick={copyPrompt}><Copy size={15} /> {copyFeedback ? "Copiado!" : "Copiar prompt"}</button>
-        <button className={`secondary-button ${isApplied ? "is-applied" : ""}`} type="button" onClick={toggleApplied}><CheckCircle2 size={15} /> {isApplied ? "Aplicado" : "Confirmar aplicação"}</button>
+        <button className={`secondary-button ${isApplied ? "is-applied" : ""}`} type="button" disabled={!isApplied && !canConfirm} onClick={toggleApplied}><CheckCircle2 size={15} /> {isApplied ? "Aplicado" : "Confirmar aplicação"}</button>
         {isStructureEditing && <button className="icon-button subtle" type="button" title="Atualizar titulo pelo prompt vinculado" disabled={!linkedPrompt} onClick={() => linkedPrompt && onUpdate({ title: linkedPrompt.title })}><RefreshCw size={14} /></button>}
       </div>
-      {isConditionsOpen && !isApplied && (
+      {hasConditions && !isApplied && (
         <div className="prompt-conditions-runtime" role="group" aria-label="Condições da aplicação">
           <strong>Confirme as condições antes de aplicar</strong>
           {conditions.map((condition) => <label className={`check-item-row compact ${conditionChecks[condition.id] ? "done" : ""}`} key={condition.id}><input type="checkbox" checked={Boolean(conditionChecks[condition.id])} onChange={(event) => setCondition(condition.id, event.target.checked)} /><span className="check-item-control">{conditionChecks[condition.id] && <Check size={14} />}</span><span>{condition.label}</span></label>)}
           {attachmentsRequired && <div className={`prompt-attachment-requirement ${attachedFiles.length ? "complete" : "pending"}`}><FileText size={14} /><span>{attachedFiles.length ? `${attachedFiles.length} arquivo(s) de apoio anexado(s)` : "Anexe pelo menos um arquivo de apoio"}</span></div>}
-          <div className="inline-actions"><button className="secondary-button" type="button" onClick={() => setIsConditionsOpen(false)}>Cancelar</button><button className="primary-button" type="button" disabled={!canConfirm} onClick={confirmWithConditions}><CheckCircle2 size={15} /> Confirmar aplicação</button></div>
+          <span className="prompt-conditions-help">Marque todas as condições para habilitar a confirmação acima.</span>
         </div>
       )}
       {attachmentsEnabled && <FileRuntimeBlock block={block} stepId={stepId} currentUser={currentUser} ownerType={ownerType} label="Anexar arquivos de apoio" onFilesChange={setAttachedFiles} />}
@@ -4643,6 +4645,7 @@ function PromptExecutionBlock({ block, value, tables, stepId, currentUser, owner
 }
 function LegacySummaryOperationalBlock({
   block,
+  value,
   project,
   selectedStep,
   tables,
@@ -4655,10 +4658,12 @@ function LegacySummaryOperationalBlock({
   onDeleteItem,
   onSaveGeneratedPrompt,
   onArchiveGeneratedPrompt,
+  onSaveValue,
   onOpenSummary,
   isStructureEditing,
 }: {
   block: StepBuilderBlock;
+  value: any;
   project: Project;
   selectedStep: ProjectStep;
   tables: Tables;
@@ -4671,6 +4676,7 @@ function LegacySummaryOperationalBlock({
   onDeleteItem: (summaryId: string, itemId: string) => void;
   onSaveGeneratedPrompt: (payload: GeneratedPromptWrite) => Promise<boolean>;
   onArchiveGeneratedPrompt: (promptId: string, summaryItemId?: string) => void;
+  onSaveValue: (value: unknown) => void;
   onOpenSummary: () => void;
   isStructureEditing: boolean;
 }) {
@@ -4807,6 +4813,7 @@ function LegacySummaryOperationalBlock({
         </div>
         <div className="inline-actions">
           <button className="secondary-button" type="button" disabled={!summary.consolidated_text} onClick={() => void copyToClipboard(summary.consolidated_text ?? "", "Sumario consolidado")}><Copy size={15} /> Copiar sumario</button>
+          <button className={`secondary-button ${value?.completed ? "is-applied" : ""}`} type="button" disabled={selectedItems.length === 0 || !selectedItems.every((item) => item.status === "concluido")} onClick={() => onSaveValue({ ...(value && typeof value === "object" ? value : {}), completed: true, summaryId: summary.id, summaryVersion: summary.version_number, completedAt: new Date().toISOString() })}><CheckCircle2 size={15} /> {value?.completed ? "Sumario concluido" : "Concluir sumario"}</button>
           <button className="primary-button" type="button" onClick={onOpenSummary}><GitBranch size={15} /> Editar estrutura do sumario</button>
         </div>
       </div>
