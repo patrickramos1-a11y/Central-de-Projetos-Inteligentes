@@ -2253,7 +2253,7 @@ export default function App() {
     }
   }
 
-  async function saveClientAsTemplate(client: Client) {
+  async function saveClientAsTemplate(client: Client, request?: { presentationDefaults?: Record<string, string[]> }) {
     if (!supabase) {
       return;
     }
@@ -2262,7 +2262,7 @@ export default function App() {
       const response = await fetch(`${cloudflareApiUrl}/api/clients/${encodeURIComponent(client.id)}/templates`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ createdBy: currentUser?.name ?? null }),
+        body: JSON.stringify({ createdBy: currentUser?.name ?? null, presentationDefaults: request?.presentationDefaults ?? {} }),
       });
       const body = await response.json() as { data?: { name: string }; error?: string };
       if (response.ok && body.data) {
@@ -3075,7 +3075,7 @@ function ClientJourneyView({
   onUploadFile: (stepId: string, file: File) => void;
   onDeleteLink: (id: string) => void;
   onAddNextStep: (clientId: string, name: string) => void;
-  onSaveTemplate: (client: Client) => void;
+  onSaveTemplate: (client: Client, request?: { presentationDefaults?: Record<string, string[]> }) => void | Promise<void>;
 }) {
   const doneSteps = steps.filter((step) => step.status === "concluido").length;
   const progress = steps.length ? Math.round((doneSteps / steps.length) * 100) : 0;
@@ -3204,7 +3204,7 @@ function ClientBlockJourneyView({
   onBack: () => void;
   onUpdateStep: (id: string, patch: Partial<ClientStep>) => void;
   onAddNextStep: (clientId: string, name: string) => void;
-  onSaveTemplate: (client: Client) => void;
+  onSaveTemplate: (client: Client, request?: { presentationDefaults?: Record<string, string[]> }) => void | Promise<void>;
   onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
 }) {
   const [payload, setPayload] = useState<StepBuilderPayload | null>(null);
@@ -3212,6 +3212,7 @@ function ClientBlockJourneyView({
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [newStepName, setNewStepName] = useState("");
+  const [templatePresentationDefaults, setTemplatePresentationDefaults] = useState<Record<string, string[]>>({});
   const [collapsedBlockIds, setCollapsedBlockIds] = useState<Set<string>>(() => new Set());
   const presentationSaveQueueRef = useRef(Promise.resolve());
   const done = steps.filter((step) => step.status === "concluido").length;
@@ -3315,7 +3316,7 @@ function ClientBlockJourneyView({
             <div className="journey-mode-switch"><button className={mode === "execute" ? "active" : ""} onClick={() => setMode("execute")}><CheckCircle2 size={15} /> Executar</button><button className={mode === "edit" ? "active" : ""} onClick={() => setMode("edit")}><Pencil size={15} /> Editar estrutura</button></div>
             <div className="journey-block-view-actions" role="group" aria-label="Visibilidade dos blocos"><button className="secondary-button" type="button" onClick={() => updatePresentation(() => new Set())}><ChevronDown size={16} /> Abrir todos</button><button className="secondary-button" type="button" onClick={() => updatePresentation(() => collapseAllBlockIds(blocks.map((block) => block.id)))}><ChevronUp size={16} /> Recolher todos</button><button className="ghost-button" type="button" onClick={() => updatePresentation(() => new Set(), true)} title="Abrir todos e esquecer esta preferencia"><RefreshCw size={15} /> Restaurar</button></div>
             <button className="secondary-button" disabled={!payload?.completion.canComplete} onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}><CheckCircle2 size={16} /> Concluir</button>
-            {mode === "edit" && <><form className="quick-step-form" onSubmit={(event) => { event.preventDefault(); onAddNextStep(client.id, newStepName || "Nova etapa"); setNewStepName(""); }}><input value={newStepName} onChange={(event) => setNewStepName(event.target.value)} placeholder="Nova etapa" /><button className="secondary-button"><Plus size={16} /> Adicionar etapa</button></form><div className="block-add-wrap"><button className="primary-button" onClick={() => setIsAdding((open) => !open)}><Plus size={17} /> Adicionar bloco</button>{isAdding && <BlockTypeMenu onSelect={addBlock} />}</div><button className="secondary-button" onClick={() => onSaveTemplate(client)}><Save size={16} /> Salvar template</button></>}
+            {mode === "edit" && <><form className="quick-step-form" onSubmit={(event) => { event.preventDefault(); onAddNextStep(client.id, newStepName || "Nova etapa"); setNewStepName(""); }}><input value={newStepName} onChange={(event) => setNewStepName(event.target.value)} placeholder="Nova etapa" /><button className="secondary-button"><Plus size={16} /> Adicionar etapa</button></form><div className="block-add-wrap"><button className="primary-button" onClick={() => setIsAdding((open) => !open)}><Plus size={17} /> Adicionar bloco</button>{isAdding && <BlockTypeMenu onSelect={addBlock} />}</div><button className="secondary-button" type="button" onClick={() => { const next = { ...templatePresentationDefaults, [selectedStep.id]: [...collapsedBlockIds] }; setTemplatePresentationDefaults(next); window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: "Visual inicial desta etapa sera salvo no template." } })); }}><PanelTop size={16} /> Salvar visual inicial</button><button className="secondary-button" onClick={() => onSaveTemplate(client, { presentationDefaults: templatePresentationDefaults })}><Save size={16} /> Salvar template</button></>}
           </div>
           <div className="step-auto-status"><span className={`chip active ${payload?.completion.status ?? selectedStep.status}`}>{formatStepStatus(payload?.completion.status ?? selectedStep.status)}</span><span>{payload ? `${payload.completion.completedBlocks}/${payload.completion.totalBlocks} blocos completos` : "Carregando blocos"}</span><div className="progress-bar"><span style={{ width: `${payload?.completion.progress ?? 0}%` }} /></div></div>
           {!payload && <div className="empty-state compact"><Loader2 className="spin" size={23} /> Carregando jornada...</div>}
@@ -7543,4 +7544,3 @@ function getDefaultClientTemplate(templates: JourneyTemplate[]) {
     templates.find((template) => template.context === "cliente")
   );
 }
-

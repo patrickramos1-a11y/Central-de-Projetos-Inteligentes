@@ -72,8 +72,8 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
   }
 
   if (resource === "clients" && id && action === "templates" && request.method === "POST") {
-    const body = await request.json() as { name?: string; createdBy?: string };
-    return json({ data: await saveClientAsTemplate(env.DB, id, body.name, body.createdBy ?? null) }, 201);
+    const body = await request.json() as { name?: string; createdBy?: string; presentationDefaults?: Record<string, string[]> };
+    return json({ data: await saveClientAsTemplate(env.DB, id, body.name, body.createdBy ?? null, body.presentationDefaults ?? {}) }, 201);
   }
 
   if ((resource === "project-steps" || resource === "client-steps") && id && action === "checklists" && nested && nestedId && request.method === "PATCH") {
@@ -527,7 +527,13 @@ async function deleteJourneyTemplate(db: D1Database, templateId: string) {
   return { id: templateId, name: String(template.name ?? "Template") };
 }
 
-async function saveClientAsTemplate(db: D1Database, clientId: string, requestedName?: string, createdBy: string | null = null) {
+async function saveClientAsTemplate(
+  db: D1Database,
+  clientId: string,
+  requestedName?: string,
+  createdBy: string | null = null,
+  presentationDefaults: Record<string, string[]> = {},
+) {
   const client = await db.prepare("select * from clients where id = ?").bind(clientId).first<Record<string, unknown>>();
   if (!client) throw new Error("Cliente nao encontrado.");
   const templateId = crypto.randomUUID();
@@ -543,8 +549,19 @@ async function saveClientAsTemplate(db: D1Database, clientId: string, requestedN
     const source = await getCurrentDocument(db, "client", String(clientStep.id), false);
     if (!source) continue;
     const sourceDocument = normalizeDocumentRow(source).document;
+    const sourceStepId = String(clientStep.id);
+    const hasPresentationDefault = Object.prototype.hasOwnProperty.call(presentationDefaults, sourceStepId);
+    const documentWithPresentation = hasPresentationDefault
+      ? {
+        ...sourceDocument,
+        blocks: sourceDocument.blocks.map((block) => ({
+          ...block,
+          collapsedByDefault: (presentationDefaults[sourceStepId] ?? []).includes(block.id),
+        })),
+      }
+      : sourceDocument;
     const templateDocument: StepDocument = {
-      ...sourceDocument,
+      ...documentWithPresentation,
       ownerType: "template",
       clientId: undefined,
       stepId: templateStepId,
@@ -553,7 +570,7 @@ async function saveClientAsTemplate(db: D1Database, clientId: string, requestedN
       state: "published",
       versionNumber: 1,
       revision: 1,
-      blocks: sourceDocument.blocks.map((block) => block.type === "context"
+      blocks: documentWithPresentation.blocks.map((block) => block.type === "context"
         ? { ...block, config: { ...(block.config ?? {}), contexts: Array.isArray(block.config?.contexts) ? (block.config?.contexts as Array<Record<string, unknown>>).filter((context) => Boolean(context.pinned)) : [] } }
         : block),
     };
