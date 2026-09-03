@@ -630,6 +630,32 @@ export default function App() {
     }
   }, [currentUserId, tables.app_users]);
 
+  useEffect(() => {
+    if (window.parent === window) {
+      return;
+    }
+
+    const viewLabels: Record<ViewMode, string> = {
+      projects: "Projetos",
+      journey: selectedProject?.name ?? "Projeto",
+      projectTemplates: "Templates",
+      clients: "Clientes",
+      clientJourney: selectedClient?.name ?? "Cliente",
+      settings: "Configuracoes",
+    };
+    const context = viewLabels[view] ?? "Ramos Jornadas";
+    const title = context === "Projetos" ? "Ramos Jornadas" : `Ramos Jornadas · ${context}`;
+
+    window.parent.postMessage(
+      {
+        appId: "ramos-jornadas",
+        title,
+        type: "central-ramos-apps:title",
+      },
+      "*",
+    );
+  }, [selectedClient?.name, selectedProject?.name, view]);
+
   async function loadAll() {
     if (!supabase) {
       setNotice("Configure a API Cloudflare para conectar ao banco D1.");
