@@ -88,7 +88,7 @@ export type TableColumn = {
 };
 
 export type StepBlockConfig = {
-  mode?: "display" | "input";
+  mode?: "display" | "input" | "info";
   content?: string;
   placeholder?: string;
   helpText?: string;
@@ -151,6 +151,18 @@ export type StepBlockConfig = {
   };
   [key: string]: unknown;
 };
+
+/**
+ * A library-linked prompt is intentionally live. The snapshot remains only as
+ * the content for standalone prompts or as the value kept when it is unlinked.
+ */
+export function resolvePromptContent(config: Pick<StepBlockConfig, "promptId" | "contentSnapshot">, libraryContent?: string | null) {
+  if (config.promptId && libraryContent !== undefined && libraryContent !== null) {
+    return String(libraryContent);
+  }
+
+  return String(config.contentSnapshot ?? "");
+}
 
 export type StepBlock = {
   id: string;
@@ -406,6 +418,9 @@ export function blockTypeLabel(type: StepBlockType) {
     checklist: "Checklist",
     file_upload: "Arquivos",
     prompt: "Prompt de IA",
+    context: "Contexto",
+    project_summary: "Sumario inteligente",
+    materials: "Materiais e links",
     date: "Data",
     due_date: "Prazo",
     select: "Selecao",

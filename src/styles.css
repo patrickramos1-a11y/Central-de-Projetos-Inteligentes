@@ -5922,8 +5922,22 @@ body {
 }
 
 .prompt-block-settings .prompt-content-config,
-.prompt-block-settings .prompt-settings-actions {
+.prompt-block-settings .prompt-settings-actions,
+.prompt-library-link-note {
   grid-column: 1 / -1;
+}
+
+.prompt-library-link-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.prompt-library-link-note .secondary-button {
+  flex: 0 0 auto;
 }
 
 .prompt-block-settings textarea {
@@ -6031,6 +6045,11 @@ body {
 @media (max-width: 760px) {
   .prompt-block-settings {
     grid-template-columns: 1fr;
+  }
+
+  .prompt-library-link-note {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .prompt-execution-main {

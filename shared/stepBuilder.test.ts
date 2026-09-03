@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { calculateCompletion, createBlock, type StepDocument } from "./stepBuilder";
+import { calculateCompletion, createBlock, resolvePromptContent, type StepDocument } from "./stepBuilder";
 
 function documentWith(blocks: StepDocument["blocks"]): StepDocument {
   return {
@@ -19,6 +19,21 @@ function documentWith(blocks: StepDocument["blocks"]): StepDocument {
 }
 
 describe("modelo canonico de etapa", () => {
+  test("usa a biblioteca como fonte viva para prompts vinculados", () => {
+    const prompt = createBlock("prompt", 1);
+    prompt.config.promptId = "prompt-formatar-texto";
+    prompt.config.contentSnapshot = "Texto antigo guardado na jornada.";
+
+    expect(resolvePromptContent(prompt.config, "Texto atualizado na biblioteca.")).toBe("Texto atualizado na biblioteca.");
+  });
+
+  test("mantem o snapshot somente para prompts desvinculados", () => {
+    const prompt = createBlock("prompt", 1);
+    prompt.config.contentSnapshot = "Texto personalizado para esta jornada.";
+
+    expect(resolvePromptContent(prompt.config, "Texto da biblioteca.")).toBe("Texto personalizado para esta jornada.");
+  });
+
   test("reconhece o checklist legado e calcula sua conclusao", () => {
     const checklist = createBlock("checklist", 1);
     checklist.required = true;

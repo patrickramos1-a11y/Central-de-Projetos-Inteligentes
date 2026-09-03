@@ -39,6 +39,7 @@ import { parseProjectSummary } from "../lib/summaryParser";
 import { copyText as copyToClipboard } from "../components/ui/clipboard";
 import { resolveBoundSummary } from "../features/summary/summaryBinding";
 import { collapseAllBlockIds, toggleCollapsedBlockIds } from "../features/journey/blockPresentation";
+import { resolvePromptContent } from "../../shared/stepBuilder";
 import { Toast } from "../components/ui/Toast";
 import { ProgressBar } from "../components/ui/ProgressBar";
 import { StatusBadge, type StatusTone } from "../components/ui/StatusBadge";
@@ -4418,7 +4419,7 @@ function PromptBlockSettings({
   onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
 }) {
   const selectedPrompt = tables.prompts.find((prompt) => prompt.id === block.config.promptId) ?? null;
-  const [draftPromptText, setDraftPromptText] = useState(String(block.config.contentSnapshot ?? selectedPrompt?.content ?? ""));
+  const [draftPromptText, setDraftPromptText] = useState(resolvePromptContent(block.config, selectedPrompt?.content));
   const [draftDescription, setDraftDescription] = useState(String(block.config.description ?? selectedPrompt?.short_description ?? ""));
   const [draftExpectedOutput, setDraftExpectedOutput] = useState(String(block.config.expectedOutput ?? ""));
   const [draftCondition, setDraftCondition] = useState("");
@@ -4430,7 +4431,7 @@ function PromptBlockSettings({
 
   useEffect(() => {
     const nextSelectedPrompt = tables.prompts.find((prompt) => prompt.id === block.config.promptId) ?? null;
-    setDraftPromptText(String(block.config.contentSnapshot ?? nextSelectedPrompt?.content ?? ""));
+    setDraftPromptText(resolvePromptContent(block.config, nextSelectedPrompt?.content));
     setDraftDescription(String(block.config.description ?? nextSelectedPrompt?.short_description ?? ""));
     setDraftExpectedOutput(String(block.config.expectedOutput ?? ""));
   }, [block.id, block.config.promptId, block.config.contentSnapshot, block.config.description, block.config.expectedOutput, tables.prompts]);
@@ -4457,11 +4458,23 @@ function PromptBlockSettings({
   }
 
   function savePromptDraft() {
-    const currentPromptText = String(block.config.contentSnapshot ?? selectedPrompt?.content ?? "");
+    const currentPromptText = resolvePromptContent(block.config, selectedPrompt?.content);
     const currentExpectedOutput = String(block.config.expectedOutput ?? "");
     if (draftPromptText !== currentPromptText || draftExpectedOutput !== currentExpectedOutput || draftDescription !== String(block.config.description ?? selectedPrompt?.short_description ?? "")) {
       onUpdate({ config: { contentSnapshot: draftPromptText, description: draftDescription, expectedOutput: draftExpectedOutput, promptId: block.config.promptId ?? null, toolId } });
     }
+  }
+
+  function unlinkPrompt() {
+    onUpdate({
+      config: {
+        promptId: null,
+        contentSnapshot: resolvePromptContent(block.config, selectedPrompt?.content),
+        description: draftDescription,
+        expectedOutput: draftExpectedOutput,
+        toolId,
+      },
+    });
   }
 
   async function saveToLibrary() {
@@ -4506,6 +4519,7 @@ function PromptBlockSettings({
         options={tables.prompts.filter((prompt) => prompt.status !== "arquivado").map((prompt) => ({ value: prompt.id, label: prompt.title }))}
         emptyLabel="Prompt avulso / nao vinculado"
       />
+      {selectedPrompt && <div className="prompt-library-link-note"><span>Este texto acompanha automaticamente as atualizações da biblioteca.</span><button className="secondary-button" type="button" onClick={unlinkPrompt}>Desvincular para personalizar</button></div>}
       <label className="field prompt-content-config">
         <span>Orientacao breve</span>
         <input value={draftDescription} placeholder="Ex.: envie este prompt junto com o projeto consolidado" onChange={(event) => setDraftDescription(event.target.value)} onBlur={savePromptDraft} />
@@ -4513,7 +4527,7 @@ function PromptBlockSettings({
       <SelectField label="Ferramenta" value={toolId} onChange={(nextToolId) => onUpdate({ config: { toolId: nextToolId, contentSnapshot: draftPromptText, description: draftDescription, expectedOutput: draftExpectedOutput, promptId: block.config.promptId ?? null } })} options={tables.ai_tools.map((tool) => ({ value: tool.id, label: tool.name }))} emptyLabel="Nao vinculado" />
       <label className="field prompt-content-config">
         <span>Texto do prompt</span>
-        <textarea value={draftPromptText} rows={6} placeholder="Cole o prompt ou selecione um da biblioteca" onChange={(event) => setDraftPromptText(event.target.value)} onBlur={savePromptDraft} />
+        <textarea value={draftPromptText} rows={6} placeholder="Cole o prompt ou selecione um da biblioteca" disabled={Boolean(selectedPrompt)} onChange={(event) => setDraftPromptText(event.target.value)} onBlur={savePromptDraft} />
       </label>
       <label className="field prompt-content-config">
         <span>Resultado esperado</span>
@@ -4560,8 +4574,8 @@ function PromptBlockSettings({
 function PromptExecutionBlock({ block, value, tables, stepId, currentUser, ownerType, isStructureEditing, onSaveValue, onUpdate }: { block: StepBuilderBlock; value: any; tables: Tables; stepId: string; currentUser: AppUser | null; ownerType: "project" | "client"; isStructureEditing: boolean; onSaveValue: (value: unknown) => void; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
   const runtimeValue = value && typeof value === "object" && !Array.isArray(value) ? value as PromptBlockRuntimeValue : {};
   const linkedPrompt = tables.prompts.find((prompt) => prompt.id === block.config.promptId) ?? null;
-  const tool = tables.ai_tools.find((item) => item.id === (block.config.toolId ?? linkedPrompt?.ai_tool_id)) ?? null;
-  const promptText = String(block.config.contentSnapshot ?? linkedPrompt?.content ?? "").trim();
+  const tool = tables.ai_tools.find((item) => item.id === (linkedPrompt?.ai_tool_id ?? block.config.toolId)) ?? null;
+  const promptText = resolvePromptContent(block.config, linkedPrompt?.content).trim();
   const expectedOutput = String(block.config.expectedOutput ?? "").trim();
   const copyCount = Number(runtimeValue.copyCount ?? 0);
   const isApplied = Boolean(runtimeValue.applied);
