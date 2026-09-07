@@ -8586,3 +8586,122 @@ body {
   border-color: hsl(var(--summary-prompt-hue) 62% 58%);
   background: hsl(var(--summary-prompt-hue) 75% 91%);
 }
+
+/* The journey rail stays available on desktop without taking the canvas width. */
+@media (min-width: 981px) {
+  .block-journey-layout { grid-template-columns: 76px minmax(0, 1fr); gap: 12px; }
+
+  .block-journey-layout > .step-rail.collapsible-rail,
+  .step-rail.collapsible-rail {
+    position: sticky;
+    top: 92px;
+    z-index: 45;
+    width: 76px;
+    min-height: calc(100vh - 116px);
+    max-height: calc(100vh - 108px);
+    margin: 0;
+    padding: 10px 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    overflow: visible;
+    transition: width 180ms ease, box-shadow 180ms ease, background 180ms ease;
+  }
+
+  .block-journey-layout > .step-rail.collapsible-rail:hover,
+  .block-journey-layout > .step-rail.collapsible-rail:focus-within,
+  .step-rail.collapsible-rail:hover,
+  .step-rail.collapsible-rail:focus-within {
+    width: 272px;
+    box-shadow: 0 14px 34px rgba(20, 64, 53, 0.16);
+  }
+
+  .collapsible-rail .rail-heading {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    margin: 0 0 4px;
+    padding: 0 0 8px;
+    border: 0;
+    border-bottom: 1px solid rgba(25, 92, 76, 0.14);
+  }
+
+  .collapsible-rail .rail-heading > div { min-width: 0; }
+  .collapsible-rail .rail-heading strong { display: block; color: var(--brand-deep); font-size: 0.66rem; text-align: center; white-space: nowrap; }
+  .collapsible-rail .rail-heading span,
+  .collapsible-rail .rail-edit-button { display: none; }
+
+  .collapsible-rail .step-item {
+    flex: 0 0 auto;
+    width: 60px;
+    min-width: 0;
+    max-width: none;
+    min-height: 58px;
+    margin: 0;
+    padding: 6px 3px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    overflow: hidden;
+  }
+
+  .collapsible-rail .step-item::after,
+  .collapsible-rail .step-item::before { display: none; }
+
+  .collapsible-rail .step-rail-short-label {
+    display: -webkit-box;
+    max-width: 54px;
+    overflow: hidden;
+    color: var(--text-soft);
+    font-size: 0.57rem;
+    font-weight: 800;
+    line-height: 1.05;
+    text-align: center;
+    text-transform: uppercase;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .collapsible-rail .step-rail-details { display: none; }
+  .collapsible-rail:hover .rail-heading,
+  .collapsible-rail:focus-within .rail-heading { justify-content: space-between; }
+  .collapsible-rail:hover .rail-heading strong,
+  .collapsible-rail:focus-within .rail-heading strong { font-size: 0.78rem; text-align: left; }
+  .collapsible-rail:hover .rail-heading span,
+  .collapsible-rail:focus-within .rail-heading span,
+  .collapsible-rail:hover .rail-edit-button,
+  .collapsible-rail:focus-within .rail-edit-button { display: inline-flex; }
+
+  .collapsible-rail:hover .step-item,
+  .collapsible-rail:focus-within .step-item {
+    width: 100%;
+    min-height: 46px;
+    padding: 8px 10px;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 9px;
+  }
+
+  .collapsible-rail:hover .step-rail-short-label,
+  .collapsible-rail:focus-within .step-rail-short-label { display: none; }
+
+  .collapsible-rail:hover .step-rail-details,
+  .collapsible-rail:focus-within .step-rail-details { display: grid; min-width: 0; gap: 2px; }
+
+  .collapsible-rail:hover .step-rail-details strong,
+  .collapsible-rail:hover .step-rail-details small,
+  .collapsible-rail:focus-within .step-rail-details strong,
+  .collapsible-rail:focus-within .step-rail-details small {
+    display: block;
+    overflow: hidden;
+    opacity: 1;
+    transform: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

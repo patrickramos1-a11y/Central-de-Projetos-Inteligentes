@@ -53,6 +53,10 @@ type StepStatus = "pendente" | "em_andamento" | "concluido" | "bloqueado";
 type ViewMode = "projects" | "journey" | "projectTemplates" | "clients" | "clientJourney" | "settings";
 type JourneyMode = "execute" | "edit";
 
+function compactStepLabel(name: string) {
+  return name.trim().split(/\s+/).slice(0, 2).join(" ");
+}
+
 type AppUser = {
   id: string;
   name: string;
@@ -3132,7 +3136,7 @@ function ClientJourneyView({
       </section>
 
       <section className="journey-layout client-journey-layout">
-        <aside className="step-rail">
+        <aside className="step-rail collapsible-rail">
           <div className="rail-heading">
             <strong>Jornada</strong>
             <span>{doneSteps} concluidas</span>
@@ -3142,7 +3146,8 @@ function ClientJourneyView({
               <span className={`step-dot ${step.status}`}>
                 {step.status === "concluido" ? <Check size={13} /> : step.step_order}
               </span>
-              <span>
+              <span className="step-rail-short-label" aria-hidden="true">{compactStepLabel(step.name)}</span>
+              <span className="step-rail-details">
                 <strong>{step.name}</strong>
                 <small>{formatStepStatus(step.status)}</small>
               </span>
@@ -3809,7 +3814,8 @@ function JourneyView({
           {steps.map((step) => (
             <button key={step.id} className={`step-item ${step.is_not_applicable ? "nao-aplicavel" : ""} ${selectedStepId === step.id ? "active" : ""}`} onClick={() => onSelectStep(step.id)}>
               <span className={`step-dot ${step.is_not_applicable ? "nao-aplicavel" : step.status}`}>{step.status === "concluido" && !step.is_not_applicable ? <Check size={13} /> : step.step_order}</span>
-              <span><strong>{step.name}</strong><small>{step.is_not_applicable ? "Nao se aplica" : formatStepStatus(step.status)}</small></span>
+              <span className="step-rail-short-label" aria-hidden="true">{compactStepLabel(step.name)}</span>
+              <span className="step-rail-details"><strong>{step.name}</strong><small>{step.is_not_applicable ? "Nao se aplica" : formatStepStatus(step.status)}</small></span>
             </button>
           ))}
         </StepRail>
