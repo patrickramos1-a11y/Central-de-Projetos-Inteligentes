@@ -8574,3 +8574,15 @@ body {
   .materials-runtime-form { grid-template-columns: 1fr; }
   .prompt-condition-heading { display: grid; }
 }
+
+/* Generated prompts retain a stable, distinct visual marker across summary topics. */
+.summary-copy-chip.prompt-tone {
+  color: hsl(var(--summary-prompt-hue) 58% 29%);
+  border-color: hsl(var(--summary-prompt-hue) 58% 74%);
+  background: hsl(var(--summary-prompt-hue) 80% 96%);
+}
+
+.summary-copy-chip.prompt-tone:hover {
+  border-color: hsl(var(--summary-prompt-hue) 62% 58%);
+  background: hsl(var(--summary-prompt-hue) 75% 91%);
+}

@@ -38,6 +38,7 @@ import { createSummaryApi } from "../api/summary";
 import { parseProjectSummary } from "../lib/summaryParser";
 import { copyText as copyToClipboard } from "../components/ui/clipboard";
 import { resolveBoundSummary } from "../features/summary/summaryBinding";
+import { promptToneHue } from "../features/summary/promptTone";
 import { collapseAllBlockIds, toggleCollapsedBlockIds } from "../features/journey/blockPresentation";
 import { resolvePromptContent } from "../../shared/stepBuilder";
 import { Toast } from "../components/ui/Toast";
@@ -4980,7 +4981,7 @@ function LegacySummaryOperationalBlock({
                     const promptNumber = summaryPrompts.findIndex((candidate) => candidate.id === prompt.id) + 1;
                     return (
                       <span className="summary-generated-prompt" key={prompt.id}>
-                        <button className="summary-copy-chip" onClick={() => void copyToClipboard(prompt.final_prompt, `Prompt v${promptNumber}`)}><Copy size={13} /> Prompt v{promptNumber}</button>
+                        <button className="summary-copy-chip prompt-tone" style={{ "--summary-prompt-hue": promptToneHue(prompt.id) } as CSSProperties} onClick={() => void copyToClipboard(prompt.final_prompt, `Prompt v${promptNumber}`)}><Copy size={13} /> Prompt v{promptNumber}</button>
                         <button className="summary-archive-prompt" type="button" title={`Remover somente o Prompt v${promptNumber} deste topico`} onClick={() => onArchiveGeneratedPrompt(prompt.id, item.id)}><X size={12} /></button>
                       </span>
                     );
