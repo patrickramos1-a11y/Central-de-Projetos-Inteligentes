@@ -206,11 +206,42 @@ async function handleGenericStepRequest(request: Request, env: Env, ownerType: O
     const document = normalizeDocumentRow(documentRow).document;
     const block = document.blocks.find((candidate) => candidate.id === nested);
     if (!block) return error("Bloco nao encontrado.", 404);
-    const completionState = isEmpty(body.value) ? "empty" : "partial";
-    await saveRuntimeValue(db, ownerType, stepId, documentRow.id, nested, body.value ?? null, completionState, body.updatedBy ?? null, "block_value_saved");
+    const value = clearForcedCompletion(body.value);
+    const completionState = isEmpty(value) ? "empty" : "partial";
+    await saveRuntimeValue(db, ownerType, stepId, documentRow.id, nested, value, completionState, body.updatedBy ?? null, "block_value_saved");
     const payload = await genericPayload(db, ownerType, stepId, documentRow);
     await syncStepStatus(db, ownerType, stepId, payload.completion.status);
     return json({ data: payload });
+  }
+
+  if (request.method === "POST" && action === "complete") {
+    if (ownerType === "template") return error("Templates nao podem ser concluidos.", 400);
+    const body = await request.json().catch(() => ({})) as { forcePending?: boolean; updatedBy?: string };
+    const documentRow = await getCurrentDocument(db, ownerType, stepId);
+    const document = normalizeDocumentRow(documentRow).document;
+    const initialCompletion = await calculateRuntimeCompletion(db, ownerType, stepId, documentRow);
+
+    if (!initialCompletion.canComplete && !body.forcePending) {
+      return error("Existem blocos pendentes. Confirme a conclusao manual para continuar.", 409);
+    }
+
+    if (body.forcePending && !initialCompletion.canComplete) {
+      const values = await db.prepare("select * from journey_step_values where owner_type = ? and owner_step_id = ?")
+        .bind(ownerType, stepId).all<Record<string, unknown>>();
+      const currentValues = new Map((values.results ?? []).map((row) => [String(row.block_id), parseJson(String(row.value_json ?? "null"))]));
+      const requiredBlocks = document.blocks.filter((block) => block.required && block.visible !== false && !["section", "short_text", "long_text", "phase", "comment"].includes(block.type));
+
+      for (const block of requiredBlocks) {
+        const current = asRecord(currentValues.get(block.id));
+        const completed = forceCompleteBlockValue(block, current);
+        await saveRuntimeValue(db, ownerType, stepId, String(documentRow.id), block.id, completed, "completed_override", body.updatedBy ?? null, "block_force_completed");
+      }
+    }
+
+    const payload = await genericPayload(db, ownerType, stepId, documentRow);
+    if (!payload.completion.canComplete) return error("Nao foi possivel concluir todos os blocos da etapa.", 409);
+    await syncStepStatus(db, ownerType, stepId, "concluido");
+    return json({ data: { ...payload, completion: { ...payload.completion, status: "concluido" } } });
   }
 
   return error("Metodo nao permitido.", 405);
@@ -371,7 +402,7 @@ async function updateChecklistItem(db: D1Database, ownerType: OwnerType, stepId:
   const block = document.blocks.find((candidate) => candidate.id === blockId && candidate.type === "checklist");
   if (!block) throw new Error("Checklist nao encontrado nesta etapa.");
   const value = await getRuntimeValue(db, ownerType, stepId, blockId);
-  const current = asRecord(value?.value);
+  const current = asRecord(clearForcedCompletion(value?.value));
   const checkedItems = asRecord(current.checked);
   const next = { ...current, checked: { ...checkedItems, [itemId]: checked }, updatedAt: new Date().toISOString() };
   await saveRuntimeValue(db, ownerType, stepId, documentRow.id, blockId, next, checked ? "partial" : "partial", updatedBy, "checklist_item_updated");
@@ -393,7 +424,7 @@ async function createRuntimeContext(
   const block = document.blocks.find((candidate) => candidate.id === blockId && candidate.type === "context");
   if (!block) throw new Error("Bloco de contexto nao encontrado.");
   const value = await getRuntimeValue(db, ownerType, stepId, blockId);
-  const current = asRecord(value?.value);
+  const current = asRecord(clearForcedCompletion(value?.value));
   const context = {
     id: crypto.randomUUID(),
     title: String(body.title ?? "Contexto").trim() || "Contexto",
@@ -862,7 +893,9 @@ async function calculateRuntimeCompletion(db: D1Database, ownerType: OwnerType, 
     total += 1;
     const value = values.get(block.id);
     let complete = false;
-    if (block.type === "checklist") {
+    if (Boolean(asRecord(value).forceCompleted)) {
+      complete = true;
+    } else if (block.type === "checklist") {
       const checked = asRecord(asRecord(value).checked);
       const items = Array.isArray(block.config?.items) ? block.config?.items as Array<Record<string, unknown>> : [];
       const requiredItems = items.filter((item) => item.required !== false);
@@ -982,6 +1015,29 @@ function normalizeSelectedSummaryItems(rows: Record<string, unknown>[]) {
 
 function parseJson(value: string) { try { return JSON.parse(value); } catch { return null; } }
 function asRecord(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }
+function clearForcedCompletion(value: unknown) {
+  const record = asRecord(value);
+  if (!record.forceCompleted) return value;
+  const { forceCompleted: _forceCompleted, forceCompletedAt: _forceCompletedAt, ...next } = record;
+  return next;
+}
+function forceCompleteBlockValue(block: Block, value: Record<string, any>) {
+  const now = new Date().toISOString();
+  const next: Record<string, any> = { ...value, forceCompleted: true, forceCompletedAt: now };
+  if (block.type === "checklist") {
+    const items = Array.isArray(block.config?.items) ? block.config.items as Array<Record<string, unknown>> : [];
+    const checked = asRecord(value.checked);
+    next.checked = { ...checked, ...Object.fromEntries(items.filter((item) => item.required !== false).map((item) => [String(item.id), true])) };
+  }
+  if (block.type === "prompt") {
+    const conditions = Array.isArray(block.config?.applicationConditions) ? block.config.applicationConditions as Array<Record<string, unknown>> : [];
+    const conditionChecks = asRecord(value.conditionChecks);
+    next.applied = true;
+    next.appliedAt = value.appliedAt ?? now;
+    next.conditionChecks = { ...conditionChecks, ...Object.fromEntries(conditions.filter((condition) => condition.required !== false).map((condition) => [String(condition.id ?? ""), true])) };
+  }
+  return next;
+}
 function isEmpty(value: unknown) { return value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0) || (typeof value === "object" && value !== null && Object.keys(value as Record<string, unknown>).length === 0); }
 function sanitizeFileName(value: string) { return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "arquivo"; }
 function normalizeContextColor(value: string) { return ["mint", "teal", "amber", "blue", "rose", "slate"].includes(value) ? value : "mint"; }

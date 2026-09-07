@@ -3292,6 +3292,20 @@ function ClientBlockJourneyView({
     if (next.completion.status !== selectedStep.status) onUpdateStep(selectedStep.id, { status: next.completion.status });
   }
 
+  async function completeCurrentStep() {
+    if (!payload) return;
+    const forcePending = !payload.completion.canComplete;
+    if (forcePending && !window.confirm(`Esta etapa possui ${payload.completion.reasons.length} bloco(s) pendente(s). Deseja concluir esses blocos e finalizar a etapa?`)) return;
+    try {
+      const next = await request("/complete", { method: "POST", body: JSON.stringify({ forcePending, updatedBy: currentUser?.name ?? null }) });
+      setPayload(next);
+      onUpdateStep(selectedStep.id, { status: "concluido" });
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: forcePending ? "Blocos pendentes concluidos e etapa finalizada." : "Etapa concluida." } }));
+    } catch (error) {
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Nao foi possivel concluir a etapa." } }));
+    }
+  }
+
   function updatePresentation(update: (current: Set<string>) => Set<string>, reset = false) {
     setCollapsedBlockIds((current) => {
       const previous = new Set(current);
@@ -3342,7 +3356,7 @@ function ClientBlockJourneyView({
             <div className="journey-step-identity"><span className="eyebrow">Etapa do cliente</span>{mode === "edit" ? <InlineText defaultValue={selectedStep.name} className="inline-title" onSave={(name) => onUpdateStep(selectedStep.id, { name })} /> : <strong className="journey-step-title">{selectedStep.name}</strong>}</div>
             <div className="journey-mode-switch"><button className={mode === "execute" ? "active" : ""} onClick={() => setMode("execute")}><CheckCircle2 size={15} /> Executar</button><button className={mode === "edit" ? "active" : ""} onClick={() => setMode("edit")}><Pencil size={15} /> Editar estrutura</button></div>
             <div className="journey-block-view-actions" role="group" aria-label="Visibilidade dos blocos"><button className="secondary-button" type="button" onClick={() => updatePresentation(() => new Set())}><ChevronDown size={16} /> Abrir todos</button><button className="secondary-button" type="button" onClick={() => updatePresentation(() => collapseAllBlockIds(blocks.map((block) => block.id)))}><ChevronUp size={16} /> Recolher todos</button><button className="ghost-button" type="button" onClick={() => updatePresentation(() => new Set(), true)} title="Abrir todos e esquecer esta preferencia"><RefreshCw size={15} /> Restaurar</button></div>
-            <button className="secondary-button" disabled={!payload?.completion.canComplete} onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}><CheckCircle2 size={16} /> Concluir</button>
+            <button className="secondary-button" type="button" disabled={!payload} title={payload?.completion.canComplete ? "Concluir etapa" : "Concluir os blocos pendentes e finalizar a etapa"} onClick={() => void completeCurrentStep()}><CheckCircle2 size={16} /> Concluir</button>
             {mode === "edit" && <><form className="quick-step-form" onSubmit={(event) => { event.preventDefault(); onAddNextStep(client.id, newStepName || "Nova etapa"); setNewStepName(""); }}><input value={newStepName} onChange={(event) => setNewStepName(event.target.value)} placeholder="Nova etapa" /><button className="secondary-button"><Plus size={16} /> Adicionar etapa</button></form><div className="block-add-wrap"><button className="primary-button" onClick={() => setIsAdding((open) => !open)}><Plus size={17} /> Adicionar bloco</button>{isAdding && <BlockTypeMenu onSelect={addBlock} />}</div><button className="secondary-button" type="button" onClick={() => { const next = { ...templatePresentationDefaults, [selectedStep.id]: [...collapsedBlockIds] }; setTemplatePresentationDefaults(next); window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: "Visual inicial desta etapa sera salvo no template." } })); }}><PanelTop size={16} /> Salvar visual inicial</button><button className="secondary-button" onClick={() => onSaveTemplate(client, { presentationDefaults: templatePresentationDefaults })}><Save size={16} /> Salvar template</button></>}
           </div>
           <div className="step-auto-status"><span className={`chip active ${payload?.completion.status ?? selectedStep.status}`}>{formatStepStatus(payload?.completion.status ?? selectedStep.status)}</span><span>{payload ? `${payload.completion.completedBlocks}/${payload.completion.totalBlocks} blocos completos` : "Carregando blocos"}</span><div className="progress-bar"><span style={{ width: `${payload?.completion.progress ?? 0}%` }} /></div></div>
@@ -3698,6 +3712,20 @@ function JourneyView({
     if (!selectedStep.is_not_applicable && next.completion.status !== selectedStep.status) onUpdateStep(selectedStep.id, { status: next.completion.status });
   }
 
+  async function completeCurrentStep() {
+    if (!payload || selectedStep.is_not_applicable) return;
+    const forcePending = !payload.completion.canComplete;
+    if (forcePending && !window.confirm(`Esta etapa possui ${payload.completion.reasons.length} bloco(s) pendente(s). Deseja concluir esses blocos e finalizar a etapa?`)) return;
+    try {
+      const next = await stepRequest("/complete", { method: "POST", body: JSON.stringify({ forcePending, updatedBy: currentUser?.name ?? null }) });
+      setPayload(next);
+      onUpdateStep(selectedStep.id, { status: "concluido" });
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: forcePending ? "Blocos pendentes concluidos e etapa finalizada." : "Etapa concluida." } }));
+    } catch (error) {
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Nao foi possivel concluir a etapa." } }));
+    }
+  }
+
   function updatePresentation(update: (current: Set<string>) => Set<string>, reset = false) {
     setCollapsedBlockIds((current) => {
       const previous = new Set(current);
@@ -3805,7 +3833,7 @@ function JourneyView({
               <button className="ghost-button" type="button" onClick={() => updatePresentation(() => new Set(), true)} title="Restaurar o visual padrão e abrir todos os blocos"><RefreshCw size={16} /> Restaurar</button>
             </div>
             <button className={`secondary-button ${selectedStep.is_not_applicable ? "is-not-applicable" : ""}`} type="button" onClick={() => onUpdateStep(selectedStep.id, { is_not_applicable: !selectedStep.is_not_applicable })}>{selectedStep.is_not_applicable ? <RefreshCw size={16} /> : <X size={16} />}{selectedStep.is_not_applicable ? " Aplicar etapa" : " Nao se aplica"}</button>
-            <button className="secondary-button" type="button" disabled={Boolean(selectedStep.is_not_applicable) || !completion?.canComplete} title={selectedStep.is_not_applicable ? "Esta etapa foi marcada como nao aplicavel" : completion?.canComplete ? "Concluir etapa" : completion?.reasons[0]?.message ?? "Carregando condicoes de conclusao"} onClick={() => onUpdateStep(selectedStep.id, { status: "concluido" })}><CheckCircle2 size={17} /> Concluir</button>
+            <button className="secondary-button" type="button" disabled={Boolean(selectedStep.is_not_applicable) || !completion} title={selectedStep.is_not_applicable ? "Esta etapa foi marcada como nao aplicavel" : completion?.canComplete ? "Concluir etapa" : "Concluir os blocos pendentes e finalizar a etapa"} onClick={() => void completeCurrentStep()}><CheckCircle2 size={17} /> Concluir</button>
             {journeyMode === "edit" && (
               <>
                 <form className="quick-step-form" onSubmit={(event) => { event.preventDefault(); onAddNextStep(project.id, newStepName || "Nova etapa"); setNewStepName(""); }}>
@@ -4074,6 +4102,8 @@ function getCollapsedBlockState(block: StepBuilderBlock, value: any, summaries: 
   const complete = (label: string, detail = "") => ({ tone: "complete", label, detail });
   const pending = (label: string, detail = "") => ({ tone: "pending", label, detail });
   const active = (label: string, detail = "") => ({ tone: "active", label, detail });
+
+  if (value?.forceCompleted) return complete("Concluido", "Confirmado ao finalizar a etapa");
 
   if (block.type === "checklist") {
     const items = Array.isArray(block.config.items) ? block.config.items as Array<any> : [];
@@ -4431,6 +4461,8 @@ type PromptBlockRuntimeValue = {
   applied?: boolean;
   appliedAt?: string | null;
   conditionChecks?: Record<string, boolean>;
+  forceCompleted?: boolean;
+  forceCompletedAt?: string | null;
 };
 
 function PromptBlockSettings({
@@ -4604,7 +4636,7 @@ function PromptExecutionBlock({ block, value, tables, stepId, currentUser, owner
   const promptText = resolvePromptContent(block.config, linkedPrompt?.content).trim();
   const expectedOutput = String(block.config.expectedOutput ?? "").trim();
   const copyCount = Number(runtimeValue.copyCount ?? 0);
-  const isApplied = Boolean(runtimeValue.applied);
+  const isApplied = Boolean(runtimeValue.applied || runtimeValue.forceCompleted);
   const conditions = Array.isArray(block.config.applicationConditions)
     ? block.config.applicationConditions as Array<{ id: string; label: string; required?: boolean }>
     : [];
