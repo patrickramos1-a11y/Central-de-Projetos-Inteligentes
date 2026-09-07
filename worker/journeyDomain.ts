@@ -234,7 +234,7 @@ async function handleGenericStepRequest(request: Request, env: Env, ownerType: O
       for (const block of requiredBlocks) {
         const current = asRecord(currentValues.get(block.id));
         const completed = forceCompleteBlockValue(block, current);
-        await saveRuntimeValue(db, ownerType, stepId, String(documentRow.id), block.id, completed, "completed_override", body.updatedBy ?? null, "block_force_completed");
+        await saveRuntimeValue(db, ownerType, stepId, String(documentRow.id), block.id, completed, "complete", body.updatedBy ?? null, "block_force_completed");
       }
     }
 

@@ -151,29 +151,33 @@ export async function handleProjectStepRequest(request: Request, env: Env, stepI
   }
 
   if (request.method === "POST" && parts[0] === "complete") {
-    const body = (await request.json().catch(() => ({}))) as { forcePending?: boolean; updatedBy?: string };
-    const structure = await ensureDraftStructure(env.DB, stepId);
-    const document = parseDocument(structure);
-    const initialPayload = await buildPayload(env.DB, stepId, structure);
+    try {
+      const body = (await request.json().catch(() => ({}))) as { forcePending?: boolean; updatedBy?: string };
+      const structure = await ensureDraftStructure(env.DB, stepId);
+      const document = parseDocument(structure);
+      const initialPayload = await buildPayload(env.DB, stepId, structure);
 
-    if (!initialPayload.completion.canComplete && !body.forcePending) {
-      return jsonError("Existem blocos pendentes. Confirme a conclusao manual para continuar.", 409);
-    }
-
-    if (body.forcePending && !initialPayload.completion.canComplete) {
-      const currentValues = new Map(initialPayload.values.map((row) => [String(row.block_id), row.value]));
-      const requiredBlocks = document.blocks.filter((block) => block.visible && block.required && !["section", "short_text", "long_text", "phase", "comment"].includes(block.type));
-      for (const block of requiredBlocks) {
-        const value = forceCompleteBlockValue(block, currentValues.get(block.id));
-        await upsertBlockValue(env.DB, stepId, structure.id, block.id, value, "completed_override", body.updatedBy ?? null);
-        await logEvent(env.DB, stepId, structure.id, block.id, "block_force_completed", {}, body.updatedBy ?? null);
+      if (!initialPayload.completion.canComplete && !body.forcePending) {
+        return jsonError("Existem blocos pendentes. Confirme a conclusao manual para continuar.", 409);
       }
-    }
 
-    const payload = await buildPayload(env.DB, stepId, await getStructureById(env.DB, structure.id));
-    if (!payload.completion.canComplete) return jsonError("Nao foi possivel concluir todos os blocos da etapa.", 409);
-    await env.DB.prepare("update project_steps set status = 'concluido', updated_at = ? where id = ?").bind(new Date().toISOString(), stepId).run();
-    return json({ data: { ...payload, completion: { ...payload.completion, status: "concluido" } } });
+      if (body.forcePending && !initialPayload.completion.canComplete) {
+        const currentValues = new Map(initialPayload.values.map((row) => [String(row.block_id), row.value]));
+        const requiredBlocks = document.blocks.filter((block) => block.visible && block.required && !["section", "short_text", "long_text", "phase", "comment"].includes(block.type));
+        for (const block of requiredBlocks) {
+          const value = forceCompleteBlockValue(block, currentValues.get(block.id));
+          await upsertBlockValue(env.DB, stepId, structure.id, block.id, value, "complete", body.updatedBy ?? null);
+          await logEvent(env.DB, stepId, structure.id, block.id, "block_force_completed", {}, body.updatedBy ?? null);
+        }
+      }
+
+      const payload = await buildPayload(env.DB, stepId, await getStructureById(env.DB, structure.id));
+      if (!payload.completion.canComplete) return jsonError("Nao foi possivel concluir todos os blocos da etapa.", 409);
+      await env.DB.prepare("update project_steps set status = 'concluido', updated_at = ? where id = ?").bind(new Date().toISOString(), stepId).run();
+      return json({ data: { ...payload, completion: { ...payload.completion, status: "concluido" } } });
+    } catch {
+      return jsonError("Nao foi possivel concluir a etapa.", 500);
+    }
   }
 
   if (request.method === "POST" && parts[0] === "publish-structure") {
