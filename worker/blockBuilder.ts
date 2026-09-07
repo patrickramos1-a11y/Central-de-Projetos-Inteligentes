@@ -141,12 +141,39 @@ export async function handleProjectStepRequest(request: Request, env: Env, stepI
     const document = parseDocument(structure);
     const block = document.blocks.find((item) => item.id === blockId);
     if (!block) return jsonError("Bloco nao encontrado.", 404);
-    const completionState = isBlockComplete(block, body.value, []) ? "complete" : isEmpty(body.value) ? "empty" : "partial";
-    await upsertBlockValue(env.DB, stepId, structure.id, blockId, body.value ?? null, completionState, body.updatedBy ?? null);
+    const value = clearForcedCompletion(body.value);
+    const completionState = isBlockComplete(block, value, []) ? "complete" : isEmpty(value) ? "empty" : "partial";
+    await upsertBlockValue(env.DB, stepId, structure.id, blockId, value, completionState, body.updatedBy ?? null);
     await logEvent(env.DB, stepId, structure.id, blockId, "block_value_saved", { completionState }, body.updatedBy ?? null);
     const payload = await buildPayload(env.DB, stepId, await getStructureById(env.DB, structure.id));
     await env.DB.prepare("update project_steps set status = ?, updated_at = ? where id = ?").bind(payload.completion.status, new Date().toISOString(), stepId).run();
     return json({ data: payload });
+  }
+
+  if (request.method === "POST" && parts[0] === "complete") {
+    const body = (await request.json().catch(() => ({}))) as { forcePending?: boolean; updatedBy?: string };
+    const structure = await ensureDraftStructure(env.DB, stepId);
+    const document = parseDocument(structure);
+    const initialPayload = await buildPayload(env.DB, stepId, structure);
+
+    if (!initialPayload.completion.canComplete && !body.forcePending) {
+      return jsonError("Existem blocos pendentes. Confirme a conclusao manual para continuar.", 409);
+    }
+
+    if (body.forcePending && !initialPayload.completion.canComplete) {
+      const currentValues = new Map(initialPayload.values.map((row) => [String(row.block_id), row.value]));
+      const requiredBlocks = document.blocks.filter((block) => block.visible && block.required && !["section", "short_text", "long_text", "phase", "comment"].includes(block.type));
+      for (const block of requiredBlocks) {
+        const value = forceCompleteBlockValue(block, currentValues.get(block.id));
+        await upsertBlockValue(env.DB, stepId, structure.id, block.id, value, "completed_override", body.updatedBy ?? null);
+        await logEvent(env.DB, stepId, structure.id, block.id, "block_force_completed", {}, body.updatedBy ?? null);
+      }
+    }
+
+    const payload = await buildPayload(env.DB, stepId, await getStructureById(env.DB, structure.id));
+    if (!payload.completion.canComplete) return jsonError("Nao foi possivel concluir todos os blocos da etapa.", 409);
+    await env.DB.prepare("update project_steps set status = 'concluido', updated_at = ? where id = ?").bind(new Date().toISOString(), stepId).run();
+    return json({ data: { ...payload, completion: { ...payload.completion, status: "concluido" } } });
   }
 
   if (request.method === "POST" && parts[0] === "publish-structure") {
@@ -471,6 +498,7 @@ function calculateCompletion(document: StepDocument, valueRows: Array<Record<str
 }
 
 function isBlockComplete(block: StepBlock, value: unknown, fileRows: Array<Record<string, unknown>>, validSummaryIds: Set<string> = new Set()) {
+  if (typeof value === "object" && value !== null && Boolean((value as { forceCompleted?: boolean }).forceCompleted)) return true;
   if (block.type === "file_upload") return fileRows.filter((file) => file.block_id === block.id).length >= Math.max(1, Number(block.config.minFiles ?? 1));
   if (block.type === "project_summary") {
     const runtime = typeof value === "object" && value ? value as { completed?: boolean; summaryId?: string } : {};
@@ -498,6 +526,34 @@ function isBlockComplete(block: StepBlock, value: unknown, fileRows: Array<Recor
     return items.filter((item) => item.required !== false).every((item) => Boolean(checked[String(item.id)] ?? item.done));
   }
   return !isEmpty(value) || !isEmpty(block.config.content);
+}
+
+function clearForcedCompletion(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !Boolean((value as { forceCompleted?: boolean }).forceCompleted)) return value;
+  const { forceCompleted: _forceCompleted, forceCompletedAt: _forceCompletedAt, ...next } = value as Record<string, unknown>;
+  return next;
+}
+
+function forceCompleteBlockValue(block: StepBlock, value: unknown) {
+  const current = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const now = new Date().toISOString();
+  const next: Record<string, unknown> = { ...current, forceCompleted: true, forceCompletedAt: now };
+
+  if (block.type === "checklist") {
+    const items = Array.isArray(block.config.items) ? block.config.items as Array<Record<string, unknown>> : [];
+    const checked = current.checked && typeof current.checked === "object" && !Array.isArray(current.checked) ? current.checked as Record<string, boolean> : {};
+    next.checked = { ...checked, ...Object.fromEntries(items.filter((item) => item.required !== false).map((item) => [String(item.id), true])) };
+  }
+
+  if (block.type === "prompt") {
+    const conditions = Array.isArray(block.config.applicationConditions) ? block.config.applicationConditions as Array<Record<string, unknown>> : [];
+    const conditionChecks = current.conditionChecks && typeof current.conditionChecks === "object" && !Array.isArray(current.conditionChecks) ? current.conditionChecks as Record<string, boolean> : {};
+    next.applied = true;
+    next.appliedAt = current.appliedAt ?? now;
+    next.conditionChecks = { ...conditionChecks, ...Object.fromEntries(conditions.filter((condition) => condition.required !== false).map((condition) => [String(condition.id ?? ""), true])) };
+  }
+
+  return next;
 }
 
 function createProjectDocumentFromTemplate(templateDocument: StepDocument, step: Record<string, unknown>, structureId: string): StepDocument {
