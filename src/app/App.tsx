@@ -40,11 +40,12 @@ import { copyText as copyToClipboard } from "../components/ui/clipboard";
 import { resolveBoundSummary } from "../features/summary/summaryBinding";
 import { promptToneHue } from "../features/summary/promptTone";
 import { collapseAllBlockIds, toggleCollapsedBlockIds } from "../features/journey/blockPresentation";
+import { interpolateJourneyPrompt, journeyPromptVariableSuggestions } from "../features/journey/promptInterpolation";
 import { resolvePromptContent } from "../../shared/stepBuilder";
 import { Toast } from "../components/ui/Toast";
 import { ProgressBar } from "../components/ui/ProgressBar";
 import { StatusBadge, type StatusTone } from "../components/ui/StatusBadge";
-import { AppShell, CommandBar, JourneyContextBar, StepRail, WorkCanvas } from "../components/ui/LayoutPrimitives";
+import { AppShell, CommandBar, JourneyContextBar, WorkCanvas } from "../components/ui/LayoutPrimitives";
 
 type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
 type ProjectStatus = "planejado" | "em_andamento" | "concluido" | "bloqueado" | "arquivado";
@@ -55,6 +56,54 @@ type JourneyMode = "execute" | "edit";
 
 function compactStepLabel(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).join(" ");
+}
+
+type RailStep = { id: string; name: string; step_order: number; status: StepStatus; is_not_applicable?: boolean };
+
+function JourneyStepRail({ ownerType, ownerId, currentUser, steps, selectedStepId, onSelectStep, onOrganize }: { ownerType: "project" | "client"; ownerId: string; currentUser: AppUser | null; steps: RailStep[]; selectedStepId: string; onSelectStep: (id: string) => void; onOrganize?: () => void }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [loadedKey, setLoadedKey] = useState("");
+  const preferenceKey = `${ownerType}:${ownerId}:${currentUser?.id ?? ""}`;
+  const compactLabel = isExpanded ? "Recolher etapas" : "Expandir etapas";
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    void fetch(`${cloudflareApiUrl}/api/journey-rail-preferences/${ownerType}/${encodeURIComponent(ownerId)}?userId=${encodeURIComponent(currentUser.id)}`)
+      .then(async (response) => {
+        const body = await response.json() as unknown as { data?: { isExpanded?: boolean } };
+        return { response, body };
+      })
+      .then(({ response, body }) => {
+        if (!response.ok) throw new Error("Nao foi possivel carregar a navegacao da jornada.");
+        setIsExpanded(Boolean(body.data?.isExpanded));
+        setLoadedKey(preferenceKey);
+      })
+      .catch(() => setLoadedKey(preferenceKey));
+  }, [preferenceKey, ownerId, ownerType, currentUser?.id]);
+
+  function toggleRail() {
+    const next = !isExpanded;
+    const previous = isExpanded;
+    setIsExpanded(next);
+    if (!currentUser?.id) return;
+    void fetch(`${cloudflareApiUrl}/api/journey-rail-preferences/${ownerType}/${encodeURIComponent(ownerId)}`, {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ userId: currentUser.id, isExpanded: next }),
+    }).then(async (response) => {
+      if (!response.ok) throw new Error("Nao foi possivel salvar a navegacao da jornada.");
+    }).catch(() => {
+      setIsExpanded(previous);
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: "Nao foi possivel salvar a visualizacao das etapas." } }));
+    });
+  }
+
+  return <aside className={`step-rail step-rail-navigation ${isExpanded ? "is-expanded" : "is-compact"}`} aria-label="Navegacao de etapas" data-loaded={loadedKey === preferenceKey}>
+    <div className="rail-heading"><div><strong>Etapas</strong>{isExpanded && <span>{steps.filter((step) => step.status === "concluido").length} concluidas</span>}</div><button className="icon-button rail-toggle-button" type="button" title={compactLabel} aria-label={compactLabel} onClick={toggleRail}><PanelLeft size={16} /></button>{isExpanded && onOrganize && <button className="rail-edit-button" type="button" title="Organizar etapas" onClick={onOrganize}><Pencil size={14} /> Editar</button>}</div>
+    <nav className="step-rail-list">{steps.map((step) => {
+      const status = step.is_not_applicable ? "nao-aplicavel" : step.status;
+      const statusLabel = step.is_not_applicable ? "Nao se aplica" : formatStepStatus(step.status);
+      return <button key={step.id} className={`step-item ${status} ${selectedStepId === step.id ? "active" : ""}`} type="button" title={`${step.name} - ${statusLabel}`} aria-current={selectedStepId === step.id ? "step" : undefined} onClick={() => onSelectStep(step.id)}><span className={`step-dot ${status}`}>{step.status === "concluido" && !step.is_not_applicable ? <Check size={13} /> : step.step_order}</span><span className="step-rail-short-label" aria-hidden="true">{compactStepLabel(step.name)}</span><span className="step-rail-details"><strong>{step.name}</strong><small>{statusLabel}</small></span></button>;
+    })}</nav>
+  </aside>;
 }
 
 type AppUser = {
@@ -3356,7 +3405,7 @@ function ClientBlockJourneyView({
         <div className="journey-progress"><strong>{progress}%</strong><div className="progress-bar"><span style={{ width: `${progress}%` }} /></div></div>
       </JourneyContextBar>
       <section className="journey-layout block-journey-layout">
-        <aside className="step-rail collapsible-rail"><div className="rail-heading"><strong>Etapas</strong><span>{done} concluidas</span></div>{steps.map((step) => <button key={step.id} className={`step-item ${step.id === selectedStep.id ? "active" : ""}`} onClick={() => onSelectStep(step.id)}><span className={`step-dot ${step.status}`}>{step.status === "concluido" ? <Check size={13} /> : step.step_order}</span><span><strong>{step.name}</strong><small>{formatStepStatus(step.status)}</small></span></button>)}</aside>
+        <JourneyStepRail ownerType="client" ownerId={client.id} currentUser={currentUser} steps={steps} selectedStepId={selectedStep.id} onSelectStep={onSelectStep} />
         <section className="work-surface block-work-surface">
           <div className={`journey-command-bar mode-${mode}`}>
             <div className="journey-step-identity"><span className="eyebrow">Etapa do cliente</span>{mode === "edit" ? <InlineText defaultValue={selectedStep.name} className="inline-title" onSave={(name) => onUpdateStep(selectedStep.id, { name })} /> : <strong className="journey-step-title">{selectedStep.name}</strong>}</div>
@@ -3809,16 +3858,7 @@ function JourneyView({
       </section>
 
       <section className="journey-layout block-journey-layout">
-        <StepRail>
-          <div className="rail-heading"><div><strong>Etapas</strong><span>{doneSteps} concluidas</span></div><button className="rail-edit-button" type="button" title="Organizar etapas" onClick={() => setIsStepManagerOpen(true)}><Pencil size={14} /> Editar</button></div>
-          {steps.map((step) => (
-            <button key={step.id} className={`step-item ${step.is_not_applicable ? "nao-aplicavel" : ""} ${selectedStepId === step.id ? "active" : ""}`} title={step.name} onClick={() => onSelectStep(step.id)}>
-              <span className={`step-dot ${step.is_not_applicable ? "nao-aplicavel" : step.status}`}>{step.status === "concluido" && !step.is_not_applicable ? <Check size={13} /> : step.step_order}</span>
-              <span className="step-rail-short-label" aria-hidden="true">{compactStepLabel(step.name)}</span>
-              <span className="step-rail-details"><strong>{step.name}</strong><small>{step.is_not_applicable ? "Nao se aplica" : formatStepStatus(step.status)}</small></span>
-            </button>
-          ))}
-        </StepRail>
+        <JourneyStepRail ownerType="project" ownerId={project.id} currentUser={currentUser} steps={steps} selectedStepId={selectedStepId} onSelectStep={onSelectStep} onOrganize={() => setIsStepManagerOpen(true)} />
 
         <section className="work-surface block-work-surface">
           <CommandBar mode={journeyMode}>
@@ -4290,7 +4330,7 @@ function BlockBody({
   }
 
   if (block.type === "prompt") {
-    return <PromptExecutionBlock block={block} value={value} tables={tables} stepId={selectedStep.id} currentUser={currentUser} ownerType={ownerType} isStructureEditing={mode === "edit"} onSaveValue={onSaveValue} onUpdate={onUpdate} />;
+    return <PromptExecutionBlock block={block} value={value} tables={tables} stepId={selectedStep.id} currentUser={currentUser} ownerType={ownerType} project={project} selectedStep={selectedStep} isStructureEditing={mode === "edit"} onSaveValue={onSaveValue} onUpdate={onUpdate} />;
   }
 
   if (block.type === "context") {
@@ -4636,11 +4676,14 @@ function PromptBlockSettings({
   );
 }
 
-function PromptExecutionBlock({ block, value, tables, stepId, currentUser, ownerType, isStructureEditing, onSaveValue, onUpdate }: { block: StepBuilderBlock; value: any; tables: Tables; stepId: string; currentUser: AppUser | null; ownerType: "project" | "client"; isStructureEditing: boolean; onSaveValue: (value: unknown) => void; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
+function PromptExecutionBlock({ block, value, tables, stepId, currentUser, ownerType, project, selectedStep, isStructureEditing, onSaveValue, onUpdate }: { block: StepBuilderBlock; value: any; tables: Tables; stepId: string; currentUser: AppUser | null; ownerType: "project" | "client"; project: Project; selectedStep: ProjectStep; isStructureEditing: boolean; onSaveValue: (value: unknown) => void; onUpdate: (patch: Partial<StepBuilderBlock>) => void }) {
   const runtimeValue = value && typeof value === "object" && !Array.isArray(value) ? value as PromptBlockRuntimeValue : {};
   const linkedPrompt = tables.prompts.find((prompt) => prompt.id === block.config.promptId) ?? null;
   const tool = tables.ai_tools.find((item) => item.id === (linkedPrompt?.ai_tool_id ?? block.config.toolId)) ?? null;
-  const promptText = resolvePromptContent(block.config, linkedPrompt?.content).trim();
+  const rawPromptText = resolvePromptContent(block.config, linkedPrompt?.content).trim();
+  const projectType = tables.project_types.find((item) => item.id === project.project_type_id)?.name ?? null;
+  const latestSummary = tables.project_summaries.filter((summary) => summary.project_id === project.id && summary.consolidated_text).sort((left, right) => right.version_number - left.version_number)[0] ?? null;
+  const promptText = interpolateJourneyPrompt(rawPromptText, { projectName: project.name, company: project.company, projectType, stepName: selectedStep.name, responsible: project.responsible, context: project.notes, summary: latestSummary?.consolidated_text ?? null }).trim();
   const expectedOutput = String(block.config.expectedOutput ?? "").trim();
   const copyCount = Number(runtimeValue.copyCount ?? 0);
   const isApplied = Boolean(runtimeValue.applied || runtimeValue.forceCompleted);
@@ -4711,6 +4754,7 @@ function PromptExecutionBlock({ block, value, tables, stepId, currentUser, owner
         <button className={`secondary-button ${isApplied ? "is-applied" : ""}`} type="button" disabled={!isApplied && !canConfirm} onClick={toggleApplied}><CheckCircle2 size={15} /> {isApplied ? "Aplicado" : "Confirmar aplicação"}</button>
         {isStructureEditing && <button className="icon-button subtle" type="button" title="Atualizar titulo pelo prompt vinculado" disabled={!linkedPrompt} onClick={() => linkedPrompt && onUpdate({ title: linkedPrompt.title })}><RefreshCw size={14} /></button>}
       </div>
+      {isStructureEditing && rawPromptText && <details className="prompt-interpolation-preview"><summary>Previa com dados da jornada</summary><pre>{promptText}</pre></details>}
       {hasConditions && !isApplied && (
         <div className="prompt-conditions-runtime" role="group" aria-label="Condições da aplicação">
           <strong>Confirme as condições antes de aplicar</strong>
@@ -6840,7 +6884,7 @@ function ConfigForm({
 }
 
 function PromptVariablesEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  const suggestions = ["{{empresa}}", "{{projeto}}", "{{tipo_projeto}}", "{{etapa_atual}}", "{{responsavel}}", "{{data}}", "{{sumario}}", "{{contexto}}"];
+  const suggestions = journeyPromptVariableSuggestions;
   const variables = value.split(",").map((item) => item.trim()).filter(Boolean);
 
   function addVariable(variableName: string) {
@@ -7485,10 +7529,6 @@ function resolveSummaryPromptConfig(summary: ProjectSummary | null | undefined, 
   return mergeSummaryPromptConfig(platformConfig, parseSummaryPromptConfig(summary?.prompt_config_json));
 }
 
-function interpolateSummaryPrompt(template: string, values: Record<string, string>) {
-  return Object.entries(values).reduce((text, [token, value]) => text.split(token).join(value), template);
-}
-
 function composeGeneratedPrompt({
   project,
   step,
@@ -7523,13 +7563,15 @@ function composeGeneratedPrompt({
   if (!rawBasePrompt) return "";
   const usesSummaryVariable = rawBasePrompt.includes("{{sumario_consolidado}}");
   const usesTopicsVariable = rawBasePrompt.includes("{{topicos_selecionados}}");
-  const resolvedBasePrompt = interpolateSummaryPrompt(rawBasePrompt, {
-    "{{projeto}}": project.name,
-    "{{empresa}}": project.company ?? "",
-    "{{etapa}}": step.name,
-    "{{sumario_consolidado}}": summary?.consolidated_text?.trim() ?? "",
-    "{{topicos_selecionados}}": selectedTopicsText,
-  });
+  const resolvedBasePrompt = interpolateJourneyPrompt(rawBasePrompt, {
+    projectName: project.name,
+    company: project.company,
+    projectType: null,
+    stepName: step.name,
+    responsible: project.responsible,
+    context: project.notes,
+    summary: summary?.consolidated_text?.trim() ?? null,
+  }).split("{{topicos_selecionados}}").join(selectedTopicsText);
   const summaryContext = !usesSummaryVariable && summary?.consolidated_text?.trim()
     ? ["## Sumario consolidado", summary.consolidated_text.trim()]
     : [];

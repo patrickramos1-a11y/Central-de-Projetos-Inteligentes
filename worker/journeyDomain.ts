@@ -45,6 +45,20 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
     return json({ data: await migrateLegacyJourneyData(env.DB) });
   }
 
+  if (resource === "journey-rail-preferences" && isOwnerType(id) && action) {
+    if (id === "template") return error("Templates nao possuem preferencia de navegacao.", 400);
+    const ownerType = id as "project" | "client";
+    const userId = String(url.searchParams.get("userId") ?? "").trim();
+    if (request.method === "GET") {
+      return json({ data: await getRailPreference(env.DB, ownerType, action, userId) });
+    }
+    if (request.method === "PATCH") {
+      const body = await request.json() as { userId?: string; isExpanded?: boolean };
+      return json({ data: await saveRailPreference(env.DB, ownerType, action, String(body.userId ?? "").trim(), Boolean(body.isExpanded)) });
+    }
+    return error("Metodo nao permitido.", 405);
+  }
+
   if (resource === "journey-steps" && isOwnerType(id) && action) {
     return handleGenericStepRequest(request, env, id, action, nested, nestedId, url);
   }
@@ -104,6 +118,21 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
   }
 
   return null;
+}
+
+async function getRailPreference(db: D1Database, ownerType: "project" | "client", ownerId: string, userId: string) {
+  if (!userId) return { isExpanded: false, customized: false };
+  const row = await db.prepare("select is_expanded from journey_rail_preferences where user_id = ? and owner_type = ? and owner_id = ?")
+    .bind(userId, ownerType, ownerId).first<{ is_expanded?: number }>();
+  return { isExpanded: Boolean(row?.is_expanded), customized: Boolean(row) };
+}
+
+async function saveRailPreference(db: D1Database, ownerType: "project" | "client", ownerId: string, userId: string, isExpanded: boolean) {
+  if (!userId) throw new Error("Informe o usuario da preferencia visual.");
+  const now = new Date().toISOString();
+  await db.prepare("insert into journey_rail_preferences (id, user_id, owner_type, owner_id, is_expanded, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?) on conflict(user_id, owner_type, owner_id) do update set is_expanded = excluded.is_expanded, updated_at = excluded.updated_at")
+    .bind(crypto.randomUUID(), userId, ownerType, ownerId, isExpanded ? 1 : 0, now, now).run();
+  return { isExpanded, customized: true };
 }
 
 async function handleGenericStepRequest(request: Request, env: Env, ownerType: OwnerType, stepId: string, action?: string, nested?: string, url?: URL) {
