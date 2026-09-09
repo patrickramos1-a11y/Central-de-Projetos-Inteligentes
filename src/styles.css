@@ -8753,12 +8753,37 @@ body {
 }
 
 @media (min-width: 981px) and (max-width: 1199px) {
-  .journey-layout.block-journey-layout:has(.step-rail-navigation) { grid-template-columns: 88px minmax(0, 1fr); }
+  .journey-layout.block-journey-layout:has(.step-rail-navigation.is-compact),
+  .journey-layout.block-journey-layout:has(.step-rail-navigation.is-expanded) { grid-template-columns: 88px minmax(0, 1fr); }
   .step-rail-navigation.is-expanded .rail-heading > div { display: none; }
   .step-rail-navigation.is-expanded .rail-edit-button { display: none; }
-  .step-rail-navigation.is-expanded .step-item { min-height: 72px; padding: 6px 3px; grid-template-columns: 1fr; grid-template-rows: 30px minmax(0, 1fr); justify-items: center; gap: 4px; text-align: center; }
+  .step-rail-navigation.is-expanded .step-item { box-sizing: border-box; min-height: 72px; padding: 6px 3px; grid-template-columns: 1fr; grid-template-rows: 30px minmax(0, 1fr); justify-items: center; gap: 4px; text-align: center; }
   .step-rail-navigation.is-expanded .step-rail-details { display: none; }
   .step-rail-navigation.is-expanded .step-rail-short-label { display: -webkit-box; max-width: 66px; overflow: hidden; color: var(--text-soft); font-size: 0.57rem; font-weight: 800; line-height: 1.08; text-align: center; text-transform: uppercase; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+}
+
+/* Dense context cards retain their hierarchy without competing with the content. */
+.context-mini-card.compact-context-card .context-pin-label {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.context-mini-card.compact-context-card.pinned strong {
+  padding-right: 24px;
+}
+
+.context-mini-card.compact-context-card strong {
+  font-size: 0.74rem;
+  font-weight: 500;
+  line-height: 1.16;
 }
 
 @media (max-width: 980px) {
