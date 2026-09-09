@@ -4830,6 +4830,18 @@ function LegacySummaryOperationalBlock({
   const promptAdditions = summaryPromptConfig.additions ?? [];
   const basePromptText = summaryPromptConfig.basePromptSnapshot?.trim() ?? "";
   const triggerPromptText = summaryPromptConfig.triggerPromptSnapshot?.trim() ?? "";
+  const projectType = tables.project_types.find((item) => item.id === project.project_type_id)?.name ?? null;
+  const resolvedTriggerPromptText = triggerPromptText
+    ? interpolateJourneyPrompt(triggerPromptText, {
+      projectName: project.name,
+      company: project.company,
+      projectType,
+      stepName: selectedStep.name,
+      responsible: project.responsible,
+      context: project.notes,
+      summary: summary?.consolidated_text?.trim() ?? null,
+    }).trim()
+    : "";
   const basePrompt = basePromptText
     ? { id: "", content: basePromptText, ai_tool_id: null, title: "Prompt base desta versao" } as Pick<Prompt, "id" | "content" | "ai_tool_id" | "title">
     : null;
@@ -4962,6 +4974,7 @@ function LegacySummaryOperationalBlock({
         <div className="inline-actions">
           {isStructureEditing && <button className="secondary-button" type="button" disabled={isSavingTemplate} onClick={() => void saveSummaryToTemplate()} title="Salva a estrutura, selecao e configuracao de prompts deste sumario no template vinculado"><Save size={15} /> {isSavingTemplate ? "Salvando..." : "Salvar sumario no template"}</button>}
           <button className="secondary-button" type="button" disabled={!summary.consolidated_text} onClick={() => void copyToClipboard(summary.consolidated_text ?? "", "Sumario consolidado")}><Copy size={15} /> Copiar sumario</button>
+          <button className="secondary-button" type="button" disabled={!resolvedTriggerPromptText} title={resolvedTriggerPromptText ? "Copiar prompt de gatilho do sumario" : "Configure o prompt de gatilho no editor"} onClick={() => void copyToClipboard(resolvedTriggerPromptText, "Prompt de gatilho")}><Copy size={15} /> Copiar gatilho</button>
           <button className={`secondary-button ${value?.completed ? "is-applied" : ""}`} type="button" disabled={selectedItems.length === 0 || !selectedItems.every((item) => item.status === "concluido")} onClick={() => onSaveValue({ ...(value && typeof value === "object" ? value : {}), completed: true, summaryId: summary.id, summaryVersion: summary.version_number, completedAt: new Date().toISOString() })}><CheckCircle2 size={15} /> {value?.completed ? "Sumario concluido" : "Concluir sumario"}</button>
           <button className="primary-button" type="button" onClick={onOpenSummary}><GitBranch size={15} /> Editar estrutura do sumario</button>
         </div>
@@ -5008,7 +5021,7 @@ function LegacySummaryOperationalBlock({
             }) : <span className="summary-additions-empty">Configure adicionais no editor do sumario.</span>}
           </div>
           <button className="summary-composer-save-card primary-button" type="button" disabled={!basePrompt} onClick={saveComposedPrompt}><Save size={15} /> Salvar prompt</button>
-          <button className="summary-composer-trigger-card secondary-button" type="button" disabled={!triggerPromptText} title={triggerPromptText ? "Copiar prompt fixo para iniciar a execucao" : "Configure o prompt de gatilho no editor"} onClick={() => void copyToClipboard(triggerPromptText, "Prompt de gatilho")}><Copy size={15} /> Copiar gatilho</button>
+          <button className="summary-composer-trigger-card secondary-button" type="button" disabled={!resolvedTriggerPromptText} title={resolvedTriggerPromptText ? "Copiar prompt fixo para iniciar a execucao" : "Configure o prompt de gatilho no editor"} onClick={() => void copyToClipboard(resolvedTriggerPromptText, "Prompt de gatilho")}><Copy size={15} /> Copiar gatilho</button>
         </div>
       )}
 
