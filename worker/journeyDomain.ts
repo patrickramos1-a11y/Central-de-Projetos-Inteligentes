@@ -50,11 +50,11 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
     const ownerType = id as "project" | "client";
     const userId = String(url.searchParams.get("userId") ?? "").trim();
     if (request.method === "GET") {
-      return json({ data: await getRailPreference(env.DB, ownerType, action, userId) });
+      return json(await getRailPreference(env.DB, ownerType, action, userId));
     }
     if (request.method === "PATCH") {
       const body = await request.json() as { userId?: string; isExpanded?: boolean };
-      return json({ data: await saveRailPreference(env.DB, ownerType, action, String(body.userId ?? "").trim(), Boolean(body.isExpanded)) });
+      return json(await saveRailPreference(env.DB, ownerType, action, String(body.userId ?? "").trim(), Boolean(body.isExpanded)));
     }
     return error("Metodo nao permitido.", 405);
   }
