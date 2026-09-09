@@ -25,7 +25,7 @@
   backdrop-filter: var(--blur-glass);
 }
 .collapsible-rail .rail-heading { position: sticky; left: 0; z-index: 2; min-width: 132px; padding-right: var(--space-2); background: inherit; }
-.step-rail .step-item { min-width: 150px; min-height: 50px; border-radius: var(--radius-sm); }
+.step-rail:not(.step-rail-navigation) .step-item { min-width: 150px; min-height: 50px; border-radius: var(--radius-sm); }
 
 .journey-command-bar {
   position: sticky;
