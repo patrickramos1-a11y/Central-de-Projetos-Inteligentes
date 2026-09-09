@@ -8605,15 +8605,18 @@ body {
     flex-direction: column;
     align-items: stretch;
     gap: 6px;
-    overflow: visible;
+    box-sizing: border-box;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(25, 92, 76, 0.16);
     transition: width 180ms ease, box-shadow 180ms ease, background 180ms ease;
   }
 
   .block-journey-layout > .step-rail.collapsible-rail:hover,
-  .block-journey-layout > .step-rail.collapsible-rail:focus-within,
-  .step-rail.collapsible-rail:hover,
-  .step-rail.collapsible-rail:focus-within {
-    width: 272px;
+  .step-rail.collapsible-rail:hover {
+    width: 272px !important;
+    overflow-y: auto;
+    overflow-x: hidden;
     box-shadow: 0 14px 34px rgba(20, 64, 53, 0.16);
   }
 
@@ -8668,17 +8671,12 @@ body {
   }
 
   .collapsible-rail .step-rail-details { display: none; }
-  .collapsible-rail:hover .rail-heading,
-  .collapsible-rail:focus-within .rail-heading { justify-content: space-between; }
-  .collapsible-rail:hover .rail-heading strong,
-  .collapsible-rail:focus-within .rail-heading strong { font-size: 0.78rem; text-align: left; }
+  .collapsible-rail:hover .rail-heading { justify-content: space-between; }
+  .collapsible-rail:hover .rail-heading strong { font-size: 0.78rem; text-align: left; }
   .collapsible-rail:hover .rail-heading span,
-  .collapsible-rail:focus-within .rail-heading span,
-  .collapsible-rail:hover .rail-edit-button,
-  .collapsible-rail:focus-within .rail-edit-button { display: inline-flex; }
+  .collapsible-rail:hover .rail-edit-button { display: inline-flex; }
 
-  .collapsible-rail:hover .step-item,
-  .collapsible-rail:focus-within .step-item {
+  .collapsible-rail:hover .step-item {
     width: 100%;
     min-height: 46px;
     padding: 8px 10px;
@@ -8687,16 +8685,12 @@ body {
     gap: 9px;
   }
 
-  .collapsible-rail:hover .step-rail-short-label,
-  .collapsible-rail:focus-within .step-rail-short-label { display: none; }
+  .collapsible-rail:hover .step-rail-short-label { display: none; }
 
-  .collapsible-rail:hover .step-rail-details,
-  .collapsible-rail:focus-within .step-rail-details { display: grid; min-width: 0; gap: 2px; }
+  .collapsible-rail:hover .step-rail-details { display: grid; min-width: 0; gap: 2px; }
 
   .collapsible-rail:hover .step-rail-details strong,
-  .collapsible-rail:hover .step-rail-details small,
-  .collapsible-rail:focus-within .step-rail-details strong,
-  .collapsible-rail:focus-within .step-rail-details small {
+  .collapsible-rail:hover .step-rail-details small {
     display: block;
     overflow: hidden;
     opacity: 1;

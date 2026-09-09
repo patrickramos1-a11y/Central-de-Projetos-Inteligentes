@@ -3142,7 +3142,7 @@ function ClientJourneyView({
             <span>{doneSteps} concluidas</span>
           </div>
           {steps.map((step) => (
-            <button key={step.id} className={`step-item ${selectedStep.id === step.id ? "active" : ""}`} onClick={() => onSelectStep(step.id)}>
+            <button key={step.id} className={`step-item ${selectedStep.id === step.id ? "active" : ""}`} title={step.name} onClick={() => onSelectStep(step.id)}>
               <span className={`step-dot ${step.status}`}>
                 {step.status === "concluido" ? <Check size={13} /> : step.step_order}
               </span>
@@ -3812,7 +3812,7 @@ function JourneyView({
         <StepRail>
           <div className="rail-heading"><div><strong>Etapas</strong><span>{doneSteps} concluidas</span></div><button className="rail-edit-button" type="button" title="Organizar etapas" onClick={() => setIsStepManagerOpen(true)}><Pencil size={14} /> Editar</button></div>
           {steps.map((step) => (
-            <button key={step.id} className={`step-item ${step.is_not_applicable ? "nao-aplicavel" : ""} ${selectedStepId === step.id ? "active" : ""}`} onClick={() => onSelectStep(step.id)}>
+            <button key={step.id} className={`step-item ${step.is_not_applicable ? "nao-aplicavel" : ""} ${selectedStepId === step.id ? "active" : ""}`} title={step.name} onClick={() => onSelectStep(step.id)}>
               <span className={`step-dot ${step.is_not_applicable ? "nao-aplicavel" : step.status}`}>{step.status === "concluido" && !step.is_not_applicable ? <Check size={13} /> : step.step_order}</span>
               <span className="step-rail-short-label" aria-hidden="true">{compactStepLabel(step.name)}</span>
               <span className="step-rail-details"><strong>{step.name}</strong><small>{step.is_not_applicable ? "Nao se aplica" : formatStepStatus(step.status)}</small></span>
