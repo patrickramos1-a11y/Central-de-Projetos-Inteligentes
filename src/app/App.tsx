@@ -4805,6 +4805,7 @@ function LegacySummaryOperationalBlock({
   isStructureEditing: boolean;
 }) {
   const [summarySearch, setSummarySearch] = useState("");
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
   const [collapsedTopicIds, setCollapsedTopicIds] = useState<string[]>([]);
   const [promptScopeIds, setPromptScopeIds] = useState<string[]>([]);
   const [selectedPromptOptions, setSelectedPromptOptions] = useState<string[]>([]);
@@ -4914,6 +4915,29 @@ function LegacySummaryOperationalBlock({
     selectedRoots.forEach((item) => updateSummaryItemStatus(item, "concluido"));
   }
 
+  async function saveSummaryToTemplate() {
+    if (!summary) return;
+    if (!project.journey_template_id) {
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: "Salve a jornada como template antes de salvar o sumario." } }));
+      return;
+    }
+    setIsSavingTemplate(true);
+    try {
+      const response = await fetch(`${cloudflareApiUrl}/api/projects/${encodeURIComponent(project.id)}/summary-template`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ stepId: selectedStep.id, blockId: block.id, summaryId: summary.id, createdBy: currentUser?.name ?? null }),
+      });
+      const body = await response.json() as { data?: { itemCount?: number }; error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Nao foi possivel salvar o sumario no template.");
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: `Sumario salvo no template com ${body.data?.itemCount ?? 0} topico(s) e configuracoes de prompt.` } }));
+    } catch (error) {
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Nao foi possivel salvar o sumario no template." } }));
+    } finally {
+      setIsSavingTemplate(false);
+    }
+  }
+
   if (!summary) {
     return (
       <div className="summary-operational-block empty-summary-operational">
@@ -4936,6 +4960,7 @@ function LegacySummaryOperationalBlock({
           <span>{versionStateHelp} {selectedItems.length}/{items.length} topicos no sumario · {coveredSelectedCount} topico(s) com prompt.</span>
         </div>
         <div className="inline-actions">
+          {isStructureEditing && <button className="secondary-button" type="button" disabled={isSavingTemplate} onClick={() => void saveSummaryToTemplate()} title="Salva a estrutura, selecao e configuracao de prompts deste sumario no template vinculado"><Save size={15} /> {isSavingTemplate ? "Salvando..." : "Salvar sumario no template"}</button>}
           <button className="secondary-button" type="button" disabled={!summary.consolidated_text} onClick={() => void copyToClipboard(summary.consolidated_text ?? "", "Sumario consolidado")}><Copy size={15} /> Copiar sumario</button>
           <button className={`secondary-button ${value?.completed ? "is-applied" : ""}`} type="button" disabled={selectedItems.length === 0 || !selectedItems.every((item) => item.status === "concluido")} onClick={() => onSaveValue({ ...(value && typeof value === "object" ? value : {}), completed: true, summaryId: summary.id, summaryVersion: summary.version_number, completedAt: new Date().toISOString() })}><CheckCircle2 size={15} /> {value?.completed ? "Sumario concluido" : "Concluir sumario"}</button>
           <button className="primary-button" type="button" onClick={onOpenSummary}><GitBranch size={15} /> Editar estrutura do sumario</button>

@@ -76,6 +76,11 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
     return json(await saveProjectAsTemplate(env, id, body.name, body.createdBy ?? null, body.templateId ?? null, body.presentationDefaults ?? {}), 201);
   }
 
+  if (resource === "projects" && id && action === "summary-template" && request.method === "POST") {
+    const body = await request.json<{ stepId?: string; blockId?: string; summaryId?: string; createdBy?: string }>();
+    return json({ data: await saveProjectSummaryAsTemplate(env.DB, id, body) });
+  }
+
   if (resource === "journey-templates" && id && request.method === "PATCH") {
     const body = await request.json<{ name?: string; description?: string | null; status?: string }>();
     return json(await updateJourneyTemplate(env.DB, id, body));
@@ -147,11 +152,14 @@ async function handleGenericStepRequest(request: Request, env: Env, ownerType: O
       ? await db.prepare("select * from journey_step_documents where owner_type = 'template' and step_id = ? and state in ('draft', 'published') order by case state when 'published' then 0 else 1 end, version_number desc limit 1").bind(body.templateStepId).first<Record<string, unknown>>()
       : null;
     const templateDocument = templateRow ? normalizeDocumentRow(templateRow).document : null;
-    const document = templateDocument
+    let document = templateDocument
       ? createRuntimeDocumentFromTemplate(templateDocument, ownerType, step, stepId)
       : ownerType === "client"
       ? await buildClientLegacyDocument(db, step, crypto.randomUUID())
       : await buildProjectLegacyDocument(db, step, crypto.randomUUID());
+    if (ownerType === "project" && templateDocument) {
+      document = await materializeProjectSummaryTemplates(db, document, getOwnerId(ownerType, step));
+    }
     await insertDocument(db, document, getOwnerId(ownerType, step), null);
     if (templateRow) await copyTemplateFilesToRuntime(env, ownerType, String(templateRow.step_id), stepId, document.structureId, document.blocks);
     return json({ data: await genericPayload(db, ownerType, stepId, await getCurrentDocument(db, ownerType, stepId)) }, 201);
@@ -534,6 +542,158 @@ async function saveProjectAsTemplate(
   return { id: templateId, name, mode };
 }
 
+type SummaryTemplateItem = {
+  key: string;
+  parentKey: string | null;
+  topicNumber: string;
+  title: string;
+  level: number;
+  sortOrder: number;
+  originalText: string;
+  isSelected: boolean;
+  notes: string | null;
+  parseConfidence: number | null;
+  parseWarning: string | null;
+};
+
+type SummaryTemplateSnapshot = {
+  schemaVersion: 1;
+  savedAt: string;
+  rawText: string;
+  consolidatedText: string | null;
+  parseStatus: string;
+  promptConfigJson: string;
+  items: SummaryTemplateItem[];
+};
+
+async function saveProjectSummaryAsTemplate(
+  db: D1Database,
+  projectId: string,
+  body: { stepId?: string; blockId?: string; summaryId?: string; createdBy?: string },
+) {
+  const stepId = String(body.stepId ?? "").trim();
+  const blockId = String(body.blockId ?? "").trim();
+  const summaryId = String(body.summaryId ?? "").trim();
+  if (!stepId || !blockId || !summaryId) throw new Error("Informe a etapa, o bloco e a versao do sumario.");
+
+  const project = await db.prepare("select journey_template_id from projects where id = ?").bind(projectId).first<Record<string, unknown>>();
+  const templateId = String(project?.journey_template_id ?? "").trim();
+  if (!templateId) throw new Error("Salve ou vincule esta jornada a um template antes de salvar o sumario.");
+
+  const projectStep = await db.prepare("select id, source_journey_step_id from project_steps where id = ? and project_id = ?")
+    .bind(stepId, projectId).first<Record<string, unknown>>();
+  const templateStepId = String(projectStep?.source_journey_step_id ?? "").trim();
+  if (!templateStepId) throw new Error("Esta etapa nao possui uma origem no template vinculado.");
+
+  const runtimeRow = await getCurrentDocument(db, "project", stepId, false);
+  const runtimeBlock = runtimeRow ? normalizeDocumentRow(runtimeRow).document.blocks.find((block) => block.id === blockId && block.type === "project_summary") : null;
+  if (!runtimeBlock || String(runtimeBlock.config?.summaryId ?? "") !== summaryId) {
+    throw new Error("O bloco de sumario nao corresponde a versao selecionada nesta etapa.");
+  }
+
+  const summary = await db.prepare("select * from project_summaries where id = ? and project_id = ?")
+    .bind(summaryId, projectId).first<Record<string, unknown>>();
+  if (!summary) throw new Error("A versao do sumario nao pertence a este projeto.");
+
+  const summaryItems = await db.prepare("select * from project_summary_items where summary_id = ? order by sort_order asc")
+    .bind(summaryId).all<Record<string, unknown>>();
+  const snapshot: SummaryTemplateSnapshot = {
+    schemaVersion: 1,
+    savedAt: new Date().toISOString(),
+    rawText: String(summary.raw_text ?? ""),
+    consolidatedText: summary.consolidated_text == null ? null : String(summary.consolidated_text),
+    parseStatus: String(summary.parse_status ?? "reviewed"),
+    promptConfigJson: String(summary.prompt_config_json ?? "{}"),
+    items: (summaryItems.results ?? []).map((item) => ({
+      key: String(item.id),
+      parentKey: item.parent_id == null ? null : String(item.parent_id),
+      topicNumber: String(item.topic_number ?? ""),
+      title: String(item.title ?? "Topico"),
+      level: Number(item.level ?? 1),
+      sortOrder: Number(item.sort_order ?? 0),
+      originalText: String(item.original_text ?? ""),
+      isSelected: Number(item.is_selected ?? 0) === 1 || item.is_selected === true,
+      notes: item.notes == null ? null : String(item.notes),
+      parseConfidence: item.parse_confidence == null ? null : Number(item.parse_confidence),
+      parseWarning: item.parse_warning == null ? null : String(item.parse_warning),
+    })),
+  };
+
+  const templateRow = await db.prepare("select * from journey_step_documents where owner_type = 'template' and owner_id = ? and step_id = ? and state in ('draft', 'published') order by case state when 'published' then 0 else 1 end, version_number desc limit 1")
+    .bind(templateId, templateStepId).first<Record<string, unknown>>();
+  if (!templateRow) throw new Error("A estrutura correspondente no template nao foi encontrada.");
+  const templateDocument = normalizeDocumentRow(templateRow).document;
+  const blockFound = templateDocument.blocks.some((block) => block.id === blockId && block.type === "project_summary");
+  if (!blockFound) throw new Error("O bloco de sumario nao corresponde a estrutura do template.");
+
+  const document = {
+    ...templateDocument,
+    revision: Number(templateRow.revision ?? templateDocument.revision ?? 1) + 1,
+    blocks: templateDocument.blocks.map((block) => block.id === blockId
+      ? { ...block, config: { ...(block.config ?? {}), summaryId: null, summaryTemplate: snapshot } }
+      : block),
+  };
+  const now = new Date().toISOString();
+  await db.prepare("update journey_step_documents set revision = ?, document_json = ?, updated_at = ? where id = ?")
+    .bind(document.revision, JSON.stringify(document), now, templateRow.id).run();
+  await logGenericEvent(db, "template", templateStepId, String(templateRow.id), blockId, "summary_template_saved", { summaryId, itemCount: snapshot.items.length }, body.createdBy ?? null);
+  return { templateId, stepId: templateStepId, blockId, itemCount: snapshot.items.length, savedAt: snapshot.savedAt };
+}
+
+function readSummaryTemplateSnapshot(value: unknown): SummaryTemplateSnapshot | null {
+  const snapshot = asRecord(value);
+  if (Number(snapshot.schemaVersion) !== 1 || !Array.isArray(snapshot.items)) return null;
+  return {
+    schemaVersion: 1,
+    savedAt: String(snapshot.savedAt ?? ""),
+    rawText: String(snapshot.rawText ?? ""),
+    consolidatedText: snapshot.consolidatedText == null ? null : String(snapshot.consolidatedText),
+    parseStatus: String(snapshot.parseStatus ?? "reviewed"),
+    promptConfigJson: String(snapshot.promptConfigJson ?? "{}"),
+    items: snapshot.items.map((item) => {
+      const record = asRecord(item);
+      return {
+        key: String(record.key ?? crypto.randomUUID()),
+        parentKey: record.parentKey == null ? null : String(record.parentKey),
+        topicNumber: String(record.topicNumber ?? ""),
+        title: String(record.title ?? "Topico"),
+        level: Number(record.level ?? 1),
+        sortOrder: Number(record.sortOrder ?? 0),
+        originalText: String(record.originalText ?? ""),
+        isSelected: Boolean(record.isSelected),
+        notes: record.notes == null ? null : String(record.notes),
+        parseConfidence: record.parseConfidence == null ? null : Number(record.parseConfidence),
+        parseWarning: record.parseWarning == null ? null : String(record.parseWarning),
+      };
+    }),
+  };
+}
+
+async function materializeProjectSummaryTemplates(db: D1Database, document: StepDocument, projectId: string): Promise<StepDocument> {
+  let blocks = document.blocks;
+  for (const block of document.blocks) {
+    if (block.type !== "project_summary") continue;
+    const snapshot = readSummaryTemplateSnapshot(block.config?.summaryTemplate);
+    if (!snapshot) continue;
+
+    const summaryId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const itemIds = new Map(snapshot.items.map((item) => [item.key, crypto.randomUUID()]));
+    await db.prepare("insert into project_summaries (id, project_id, raw_text, consolidated_text, version_number, status, parse_status, item_count, selected_item_count, prompt_config_json, created_by, created_at, updated_at, activated_at) values (?, ?, ?, ?, 1, 'active', ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(summaryId, projectId, snapshot.rawText, snapshot.consolidatedText, snapshot.parseStatus, snapshot.items.length, snapshot.items.filter((item) => item.isSelected).length, snapshot.promptConfigJson, null, now, now, now).run();
+    if (snapshot.items.length) {
+      await db.batch(snapshot.items.map((item) => db.prepare("insert into project_summary_items (id, summary_id, project_id, parent_id, topic_number, title, level, sort_order, original_text, is_selected, status, notes, parse_confidence, parse_warning, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente', ?, ?, ?, ?, ?)")
+        .bind(itemIds.get(item.key), summaryId, projectId, item.parentKey ? itemIds.get(item.parentKey) ?? null : null, item.topicNumber, item.title, item.level, item.sortOrder, item.originalText, item.isSelected ? 1 : 0, item.notes, item.parseConfidence, item.parseWarning, now, now)));
+    }
+    blocks = blocks.map((candidate) => {
+      if (candidate.id !== block.id) return candidate;
+      const { summaryTemplate: _summaryTemplate, ...config } = candidate.config ?? {};
+      return { ...candidate, config: { ...config, summaryId } };
+    });
+  }
+  return { ...document, blocks };
+}
+
 async function createProjectTemplateDocument(
   sourceDocument: StepDocument,
   templateId: string,
@@ -553,6 +713,7 @@ async function createProjectTemplateDocument(
     revision: 1,
     // Execution contexts remain with the project. Only contexts deliberately pinned in edit mode are reusable.
     blocks: sourceDocument.blocks.map((block) => {
+      if (block.type === "project_summary") return { ...block, config: { ...(block.config ?? {}), summaryId: null } };
       if (block.type !== "context") return block;
       const configured = Array.isArray(block.config?.contexts) ? (block.config?.contexts as Array<Record<string, unknown>>) : [];
       const contexts = configured.filter((context) => Boolean(context.pinned) && String(context.content ?? "").trim());
