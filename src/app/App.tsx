@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties } from "react";
 import {
   Bot,
   Check,
@@ -5561,6 +5561,7 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue 
   const [draftColor, setDraftColor] = useState("mint");
   const [draftPinned, setDraftPinned] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [autoDraftTitle, setAutoDraftTitle] = useState("");
   type ContextCard = { id: string; title: string; content: string; color?: string; pinned?: boolean };
   const templateContexts = Array.isArray(block.config.contexts) ? block.config.contexts as ContextCard[] : [];
   const runtimeContexts = Array.isArray(value?.contexts) ? value.contexts as ContextCard[] : [];
@@ -5580,6 +5581,7 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue 
     setDraftContent("");
     setDraftColor("mint");
     setDraftPinned(false);
+    setAutoDraftTitle("");
   }
 
   function startNew() {
@@ -5588,6 +5590,7 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue 
     setDraftContent("");
     setDraftColor(contextColors[contexts.length % contextColors.length]);
     setDraftPinned(false);
+    setAutoDraftTitle("");
   }
 
   function startEdit(item: ContextCard) {
@@ -5596,6 +5599,32 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue 
     setDraftContent(item.content);
     setDraftColor(item.color || "mint");
     setDraftPinned(Boolean(item.pinned));
+    setAutoDraftTitle("");
+  }
+
+  function updateDraftTitle(value: string) {
+    setDraftTitle(value);
+    setAutoDraftTitle("");
+  }
+
+  function updateDraftContent(value: string) {
+    setDraftContent(value);
+    const nextTitle = inferContextTitle(value);
+    const canUseSuggestion = !draftTitle.trim() || (!!autoDraftTitle && draftTitle === autoDraftTitle);
+    if (nextTitle && canUseSuggestion) {
+      setDraftTitle(nextTitle);
+      setAutoDraftTitle(nextTitle);
+    }
+  }
+
+  function pasteContextIntoTitle(event: ClipboardEvent<HTMLInputElement>) {
+    const pastedText = event.clipboardData.getData("text");
+    if (!/\r?\n/.test(pastedText)) return;
+    event.preventDefault();
+    const nextTitle = inferContextTitle(pastedText);
+    setDraftContent(pastedText);
+    setDraftTitle(nextTitle);
+    setAutoDraftTitle(nextTitle);
   }
 
   function saveContext() {
@@ -5641,8 +5670,8 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue 
 
       {isWriting && (
         <div className="context-compose compact-context-compose">
-          <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Titulo do contexto" />
-          <textarea value={draftContent} onChange={(event) => setDraftContent(event.target.value)} placeholder="Cole aqui o contexto" rows={5} />
+          <input value={draftTitle} onChange={(event) => updateDraftTitle(event.target.value)} onPaste={pasteContextIntoTitle} placeholder="Titulo do contexto" />
+          <textarea value={draftContent} onChange={(event) => updateDraftContent(event.target.value)} placeholder="Cole aqui o contexto" rows={5} />
           <div className="context-form-row">
             <div className="context-color-picker">
               {contextColors.map((color) => <button key={color} type="button" className={`context-color-dot ${color} ${draftColor === color ? "active" : ""}`} onClick={() => setDraftColor(color)} />)}
@@ -7389,6 +7418,14 @@ function formatPromptStatus(status: ProjectStepPrompt["prompt_status"], content:
   }
 
   return "Pronto";
+}
+
+function inferContextTitle(content: string) {
+  const firstLine = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean) ?? "";
+  return firstLine.replace(/^#{1,6}\s+/, "").slice(0, 120).trim();
 }
 
 function getBlockingPhase(phase: ProjectStepPhase | null | undefined, phases: ProjectStepPhase[]) {
