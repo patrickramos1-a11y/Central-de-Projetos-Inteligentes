@@ -211,6 +211,7 @@ type Project = {
   name: string;
   company: string | null;
   responsible: string | null;
+  responsible_user_id: string | null;
   project_type_id: string | null;
   journey_template_id: string | null;
   status: ProjectStatus;
@@ -415,6 +416,7 @@ type Client = {
   company: string | null;
   logo_url: string | null;
   responsible: string | null;
+  responsible_user_id: string | null;
   project_type_id: string | null;
   journey_template_id: string | null;
   entry_month: string | null;
@@ -801,13 +803,15 @@ export default function App() {
     }
 
     setIsLoading(true);
+    const responsibleUser = tables.app_users.find((user) => user.id === form.responsible_user_id) ?? null;
     const { data: project, error } = await supabase
       .from<Project>("projects")
       .insert(
         normalizePayload({
           name: form.name,
           company: form.company,
-          responsible: form.responsible,
+          responsible: responsibleUser?.name ?? null,
+          responsible_user_id: responsibleUser?.id ?? null,
           project_type_id: form.project_type_id,
           journey_template_id: form.journey_template_id,
           status: "em_andamento",
@@ -2049,6 +2053,7 @@ export default function App() {
 
     setIsLoading(true);
     const templateId = form.journey_template_id || getDefaultClientTemplate(tables.journey_templates)?.id || "";
+    const responsibleUser = tables.app_users.find((user) => user.id === form.responsible_user_id) ?? null;
     const { data: client, error } = await supabase
       .from<Client>("clients")
       .insert(
@@ -2056,7 +2061,8 @@ export default function App() {
           name: form.name,
           company: form.company,
           logo_url: form.logo_url,
-          responsible: form.responsible,
+          responsible: responsibleUser?.name ?? null,
+          responsible_user_id: responsibleUser?.id ?? null,
           project_type_id: form.project_type_id,
           journey_template_id: templateId,
           entry_month: form.entry_month,
@@ -2485,6 +2491,7 @@ export default function App() {
             stats={stats}
             query={query}
             setQuery={setQuery}
+            currentUser={currentUser}
             onCreate={createProject}
             onUpdate={updateProject}
             onOpen={(id) => {
@@ -2497,7 +2504,7 @@ export default function App() {
 
         {view === "projectTemplates" && <ProjectTemplatesView tables={tables} query={query} setQuery={setQuery} onUpdate={updateJourneyTemplate} onDelete={deleteJourneyTemplate} />}
 
-        {view === "clients" && <ClientsView tables={tables} query={query} setQuery={setQuery} onCreate={createClientJourney} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} />}
+        {view === "clients" && <ClientsView tables={tables} currentUser={currentUser} query={query} setQuery={setQuery} onCreate={createClientJourney} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} />}
 
         {view === "journey" && selectedProject && selectedStep && (
           <JourneyView
@@ -2588,7 +2595,7 @@ export default function App() {
 type NewProjectFormState = {
   name: string;
   company: string;
-  responsible: string;
+  responsible_user_id: string;
   project_type_id: string;
   journey_template_id: string;
   notes: string;
@@ -2598,7 +2605,7 @@ type NewClientFormState = {
   name: string;
   company: string;
   logo_url: string;
-  responsible: string;
+  responsible_user_id: string;
   project_type_id: string;
   journey_template_id: string;
   entry_month: string;
@@ -2610,6 +2617,7 @@ function ProjectsView({
   stats,
   query,
   setQuery,
+  currentUser,
   onCreate,
   onUpdate,
   onOpen,
@@ -2619,6 +2627,7 @@ function ProjectsView({
   stats: Array<{ label: string; value: number }>;
   query: string;
   setQuery: (query: string) => void;
+  currentUser: AppUser | null;
   onCreate: (form: NewProjectFormState) => void;
   onUpdate: (id: string, payload: Partial<Project>) => void;
   onOpen: (id: string) => void;
@@ -2626,28 +2635,33 @@ function ProjectsView({
 }) {
   const [showForm, setShowForm] = useState(false);
   const [statusFilter, setStatusFilter] = useState<ProjectStatus | "todos">("todos");
+  const [responsibleFilter, setResponsibleFilter] = useState("todos");
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [projectNameDraft, setProjectNameDraft] = useState("");
   const [projectCompanyDraft, setProjectCompanyDraft] = useState("");
-  const [projectResponsibleDraft, setProjectResponsibleDraft] = useState("");
+  const [projectResponsibleUserDraft, setProjectResponsibleUserDraft] = useState("");
+  const activeUsers = tables.app_users.filter((user) => user.status === "ativo");
   const filteredProjects = tables.projects
     .filter((project) => statusFilter === "todos" || project.status === statusFilter)
-    .filter((project) => normalizeSearch(project.name, project.company, project.responsible).includes(query.toLowerCase()))
+    .filter((project) => responsibleFilter === "todos" || resolveResponsibleUserId(project, tables.app_users) === responsibleFilter)
+    .filter((project) => normalizeSearch(project.name, project.company, getResponsibleName(project, tables.app_users)).includes(query.toLowerCase()))
     .sort((a, b) => new Date(b.updated_at ?? b.created_at).getTime() - new Date(a.updated_at ?? a.created_at).getTime());
 
   function openProjectEditor(project: Project) {
     setEditingProject(project);
     setProjectNameDraft(project.name);
     setProjectCompanyDraft(project.company ?? "");
-    setProjectResponsibleDraft(project.responsible ?? "");
+    setProjectResponsibleUserDraft(resolveResponsibleUserId(project, tables.app_users));
   }
 
   function saveProjectEditor() {
     if (!editingProject || !projectNameDraft.trim()) return;
+    const responsibleUser = tables.app_users.find((user) => user.id === projectResponsibleUserDraft) ?? null;
     onUpdate(editingProject.id, {
       name: projectNameDraft.trim(),
       company: projectCompanyDraft.trim() || null,
-      responsible: projectResponsibleDraft.trim() || null,
+      responsible: responsibleUser?.name ?? null,
+      responsible_user_id: responsibleUser?.id ?? null,
     });
     setEditingProject(null);
   }
@@ -2674,7 +2688,7 @@ function ProjectsView({
         ))}
       </section>
 
-      {showForm && <NewProjectPanel tables={tables} onCreate={onCreate} />}
+      {showForm && <NewProjectPanel tables={tables} currentUser={currentUser} onCreate={onCreate} />}
 
       <section className="list-panel">
         <div className="panel-heading">
@@ -2695,6 +2709,12 @@ function ProjectsView({
               <option value="bloqueado">Bloqueados</option>
               <option value="arquivado">Arquivados</option>
             </select>
+            <select className="compact-select" value={responsibleFilter} onChange={(event) => setResponsibleFilter(event.target.value)}>
+              <option value="todos">Todos responsaveis</option>
+              {activeUsers.map((user) => (
+                <option key={user.id} value={user.id}>{user.name}</option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -2705,6 +2725,7 @@ function ProjectsView({
             const hasProjectSummary = tables.project_summaries.some((summary) => summary.project_id === project.id && summary.status !== "archived");
             const done = applicableSteps.filter((step) => step.status === "concluido" && (hasProjectSummary || !isProjectSummaryStep(step))).length;
             const progress = applicableSteps.length ? Math.round((done / applicableSteps.length) * 100) : 0;
+            const responsibleName = getResponsibleName(project, tables.app_users);
             const displayStatus = project.status === "bloqueado" || project.status === "arquivado"
               ? project.status
               : progress === 100 && applicableSteps.length > 0
@@ -2730,6 +2751,7 @@ function ProjectsView({
                   <small>
                     {progress}% concluido - {applicableSteps.length} etapas aplicaveis
                   </small>
+                  {responsibleName && <small>Responsavel: {responsibleName}</small>}
                 </button>
                 <div className="project-card-actions">
                   <button className="secondary-button project-edit-button" type="button" onClick={() => openProjectEditor(project)}>
@@ -2765,7 +2787,7 @@ function ProjectsView({
             <div className="project-editor-fields">
               <Field label="Nome do projeto" value={projectNameDraft} onChange={setProjectNameDraft} />
               <Field label="Empresa ou cliente" value={projectCompanyDraft} onChange={setProjectCompanyDraft} />
-              <Field label="Responsavel" value={projectResponsibleDraft} onChange={setProjectResponsibleDraft} />
+              <SelectField label="Responsavel" value={projectResponsibleUserDraft} onChange={setProjectResponsibleUserDraft} options={activeUsers.map(toOption)} />
             </div>
             <div className="inline-actions project-editor-actions">
               <button className="secondary-button" type="button" onClick={() => setEditingProject(null)}>Cancelar</button>
@@ -2914,12 +2936,13 @@ function ProjectTemplatesView({
   );
 }
 
-function NewProjectPanel({ tables, onCreate }: { tables: Tables; onCreate: (form: NewProjectFormState) => void }) {
+function NewProjectPanel({ tables, currentUser, onCreate }: { tables: Tables; currentUser: AppUser | null; onCreate: (form: NewProjectFormState) => void }) {
   const projectTemplates = tables.journey_templates.filter((template) => template.context === "projeto" || template.context === "geral");
+  const activeUsers = tables.app_users.filter((user) => user.status === "ativo");
   const [form, setForm] = useState<NewProjectFormState>({
     name: "",
     company: "",
-    responsible: "",
+    responsible_user_id: currentUser?.id ?? "",
     project_type_id: "",
     journey_template_id: "",
     notes: "",
@@ -2940,7 +2963,7 @@ function NewProjectPanel({ tables, onCreate }: { tables: Tables; onCreate: (form
       <div className="form-grid">
         <Field label="Nome do projeto" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
         <Field label="Empresa / cliente" value={form.company} onChange={(value) => setForm({ ...form, company: value })} />
-        <Field label="Responsavel" value={form.responsible} onChange={(value) => setForm({ ...form, responsible: value })} />
+        <SelectField label="Responsavel" value={form.responsible_user_id} onChange={(value) => setForm({ ...form, responsible_user_id: value })} options={activeUsers.map(toOption)} />
         <SelectField label="Tipo de projeto" value={form.project_type_id} onChange={(value) => setForm({ ...form, project_type_id: value })} options={tables.project_types.map(toOption)} />
         <SelectField
           label="Template"
@@ -2957,12 +2980,14 @@ function NewProjectPanel({ tables, onCreate }: { tables: Tables; onCreate: (form
 
 function ClientsView({
   tables,
+  currentUser,
   query,
   setQuery,
   onCreate,
   onOpen,
 }: {
   tables: Tables;
+  currentUser: AppUser | null;
   query: string;
   setQuery: (query: string) => void;
   onCreate: (form: NewClientFormState) => void;
@@ -2970,7 +2995,7 @@ function ClientsView({
 }) {
   const [showForm, setShowForm] = useState(false);
   const filteredClients = tables.clients
-    .filter((client) => normalizeSearch(client.name, client.company, client.responsible).includes(query.toLowerCase()))
+    .filter((client) => normalizeSearch(client.name, client.company, getResponsibleName(client, tables.app_users)).includes(query.toLowerCase()))
     .sort((a, b) => new Date(b.updated_at ?? b.created_at).getTime() - new Date(a.updated_at ?? a.created_at).getTime());
 
   const activeClients = tables.clients.filter((client) => client.status !== "arquivado");
@@ -3020,7 +3045,7 @@ function ClientsView({
         </article>
       </section>
 
-      {showForm && <NewClientPanel tables={tables} onCreate={onCreate} />}
+      {showForm && <NewClientPanel tables={tables} currentUser={currentUser} onCreate={onCreate} />}
 
       <section className="list-panel">
         <div className="panel-heading">
@@ -3039,6 +3064,7 @@ function ClientsView({
             const steps = tables.client_steps.filter((step) => step.client_id === client.id);
             const done = steps.filter((step) => step.status === "concluido").length;
             const progress = steps.length ? Math.round((done / steps.length) * 100) : 0;
+            const responsibleName = getResponsibleName(client, tables.app_users);
 
             return (
               <button className="project-card client-card" key={client.id} onClick={() => onOpen(client.id)}>
@@ -3059,6 +3085,7 @@ function ClientsView({
                 <small>
                   {progress}% concluido - {steps.length} etapas
                 </small>
+                {responsibleName && <small>Responsavel: {responsibleName}</small>}
               </button>
             );
           })}
@@ -3076,13 +3103,14 @@ function ClientsView({
   );
 }
 
-function NewClientPanel({ tables, onCreate }: { tables: Tables; onCreate: (form: NewClientFormState) => void }) {
+function NewClientPanel({ tables, currentUser, onCreate }: { tables: Tables; currentUser: AppUser | null; onCreate: (form: NewClientFormState) => void }) {
   const defaultTemplate = getDefaultClientTemplate(tables.journey_templates);
+  const activeUsers = tables.app_users.filter((user) => user.status === "ativo");
   const [form, setForm] = useState<NewClientFormState>({
     name: "",
     company: "",
     logo_url: "",
-    responsible: "",
+    responsible_user_id: currentUser?.id ?? "",
     project_type_id: "",
     journey_template_id: defaultTemplate?.id ?? "",
     entry_month: "",
@@ -3107,7 +3135,7 @@ function NewClientPanel({ tables, onCreate }: { tables: Tables; onCreate: (form:
         <Field label="Nome do cliente" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
         <Field label="Empresa / unidade" value={form.company} onChange={(value) => setForm({ ...form, company: value })} />
         <Field label="Logo URL" value={form.logo_url} onChange={(value) => setForm({ ...form, logo_url: value })} />
-        <Field label="Responsavel interno" value={form.responsible} onChange={(value) => setForm({ ...form, responsible: value })} />
+        <SelectField label="Responsavel interno" value={form.responsible_user_id} onChange={(value) => setForm({ ...form, responsible_user_id: value })} options={activeUsers.map(toOption)} />
         <Field label="Mes de entrada" value={form.entry_month} onChange={(value) => setForm({ ...form, entry_month: value })} />
         <SelectField label="Produto / tipo" value={form.project_type_id} onChange={(value) => setForm({ ...form, project_type_id: value })} options={tables.project_types.map(toOption)} />
         <SelectField
@@ -3393,7 +3421,7 @@ function ClientBlockJourneyView({
     void request("/blocks/reorder", { method: "POST", body: JSON.stringify({ blockIds, updatedBy: currentUser?.name ?? null }) }).then(setPayload);
   }
 
-  const projectLike: Project = { id: client.id, name: client.name, company: client.company, responsible: client.responsible, project_type_id: client.project_type_id, journey_template_id: client.journey_template_id, status: "em_andamento", notes: client.notes, created_at: client.created_at, updated_at: client.updated_at };
+  const projectLike: Project = { id: client.id, name: client.name, company: client.company, responsible: getResponsibleName(client, tables.app_users), responsible_user_id: client.responsible_user_id, project_type_id: client.project_type_id, journey_template_id: client.journey_template_id, status: "em_andamento", notes: client.notes, created_at: client.created_at, updated_at: client.updated_at };
   const stepLike: ProjectStep = { id: selectedStep.id, project_id: client.id, source_journey_step_id: selectedStep.source_journey_step_id, name: selectedStep.name, description: selectedStep.description, step_order: selectedStep.step_order, objective: selectedStep.objective, ai_tool_id: null, expected_output: selectedStep.required_evidence_label, execution_instructions: null, status: selectedStep.status, notes: selectedStep.notes };
   const blocks = payload?.document.blocks ?? [];
 
@@ -4683,7 +4711,8 @@ function PromptExecutionBlock({ block, value, tables, stepId, currentUser, owner
   const rawPromptText = resolvePromptContent(block.config, linkedPrompt?.content).trim();
   const projectType = tables.project_types.find((item) => item.id === project.project_type_id)?.name ?? null;
   const latestSummary = tables.project_summaries.filter((summary) => summary.project_id === project.id && summary.consolidated_text).sort((left, right) => right.version_number - left.version_number)[0] ?? null;
-  const promptText = interpolateJourneyPrompt(rawPromptText, { projectName: project.name, company: project.company, projectType, stepName: selectedStep.name, responsible: project.responsible, context: project.notes, summary: latestSummary?.consolidated_text ?? null }).trim();
+  const responsibleName = getResponsibleName(project, tables.app_users);
+  const promptText = interpolateJourneyPrompt(rawPromptText, { projectName: project.name, company: project.company, projectType, stepName: selectedStep.name, responsible: responsibleName, context: project.notes, summary: latestSummary?.consolidated_text ?? null }).trim();
   const expectedOutput = String(block.config.expectedOutput ?? "").trim();
   const copyCount = Number(runtimeValue.copyCount ?? 0);
   const isApplied = Boolean(runtimeValue.applied || runtimeValue.forceCompleted);
@@ -4837,7 +4866,7 @@ function LegacySummaryOperationalBlock({
       company: project.company,
       projectType,
       stepName: selectedStep.name,
-      responsible: project.responsible,
+      responsible: getResponsibleName(project, tables.app_users),
       context: project.notes,
       summary: summary?.consolidated_text?.trim() ?? null,
     }).trim()
@@ -7285,6 +7314,29 @@ function findName(records: Array<{ id: string; name: string }>, id: string | nul
   }
 
   return records.find((record) => record.id === id)?.name ?? "";
+}
+
+type ResponsibleOwner = {
+  responsible: string | null;
+  responsible_user_id?: string | null;
+};
+
+function resolveResponsibleUserId(owner: ResponsibleOwner, users: AppUser[]) {
+  if (owner.responsible_user_id && users.some((user) => user.id === owner.responsible_user_id)) {
+    return owner.responsible_user_id;
+  }
+
+  const legacyName = owner.responsible?.trim();
+  if (!legacyName) {
+    return "";
+  }
+
+  return users.find((user) => normalizeSearchText(user.name) === normalizeSearchText(legacyName))?.id ?? "";
+}
+
+function getResponsibleName(owner: ResponsibleOwner, users: AppUser[]) {
+  const linkedUser = owner.responsible_user_id ? users.find((user) => user.id === owner.responsible_user_id) : null;
+  return linkedUser?.name ?? owner.responsible ?? "";
 }
 
 function toOption(record: { id: string; name?: string; title?: string }) {

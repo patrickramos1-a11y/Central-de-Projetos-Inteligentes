@@ -111,6 +111,7 @@ create table if not exists public.projects (
   name text not null,
   company text,
   responsible text,
+  responsible_user_id uuid references public.app_users(id) on delete set null,
   project_type_id uuid references public.project_types(id) on delete set null,
   journey_template_id uuid references public.journey_templates(id) on delete set null,
   status text not null default 'planejado' check (status in ('planejado', 'em_andamento', 'concluido', 'bloqueado', 'arquivado')),
@@ -175,6 +176,7 @@ create table if not exists public.project_step_links (
 );
 
 create index if not exists projects_project_type_id_idx on public.projects(project_type_id);
+create index if not exists projects_responsible_user_id_idx on public.projects(responsible_user_id);
 create index if not exists project_steps_project_id_idx on public.project_steps(project_id);
 create index if not exists project_steps_project_id_order_idx on public.project_steps(project_id, step_order);
 create index if not exists project_step_checklist_items_step_id_idx on public.project_step_checklist_items(project_step_id);
@@ -187,6 +189,7 @@ create table if not exists public.clients (
   company text,
   logo_url text,
   responsible text,
+  responsible_user_id uuid references public.app_users(id) on delete set null,
   project_type_id uuid references public.project_types(id) on delete set null,
   journey_template_id uuid references public.journey_templates(id) on delete set null,
   entry_month text,
@@ -233,6 +236,7 @@ create table if not exists public.client_step_links (
 );
 
 create index if not exists clients_project_type_id_idx on public.clients(project_type_id);
+create index if not exists clients_responsible_user_id_idx on public.clients(responsible_user_id);
 create index if not exists client_steps_client_id_idx on public.client_steps(client_id);
 create index if not exists client_steps_client_id_order_idx on public.client_steps(client_id, step_order);
 create index if not exists client_step_checklist_items_step_id_idx on public.client_step_checklist_items(client_step_id);
