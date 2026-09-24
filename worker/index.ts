@@ -20,7 +20,7 @@ const tableColumns: Record<string, string[]> = {
   journey_steps: ["id", "journey_template_id", "name", "description", "step_order", "objective", "ai_tool_id", "expected_output", "checklist", "execution_instructions", "status", "created_at"],
   step_prompts: ["id", "journey_step_id", "prompt_id", "title", "content", "ai_tool_id", "prompt_status", "is_required", "placeholder_note", "prompt_order", "usage_notes", "created_at"],
   procedures: ["id", "title", "description", "content", "category", "project_type_id", "journey_step_id", "status", "created_at"],
-  projects: ["id", "name", "company", "responsible", "responsible_user_id", "project_type_id", "journey_template_id", "status", "notes", "created_at", "updated_at"],
+  projects: ["id", "name", "company", "client_id", "responsible", "responsible_user_id", "project_type_id", "journey_template_id", "status", "notes", "created_at", "updated_at"],
   project_steps: ["id", "project_id", "source_journey_step_id", "name", "description", "step_order", "objective", "ai_tool_id", "expected_output", "execution_instructions", "status", "is_not_applicable", "notes", "created_at", "updated_at"],
   project_step_checklist_items: ["id", "project_step_id", "label", "is_done", "item_order", "created_at"],
   project_step_prompts: ["id", "project_step_id", "prompt_id", "title", "content", "ai_tool_id", "prompt_status", "is_required", "placeholder_note", "prompt_order", "usage_notes", "created_at"],

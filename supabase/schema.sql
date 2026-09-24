@@ -177,6 +177,8 @@ create table if not exists public.project_step_links (
 
 create index if not exists projects_project_type_id_idx on public.projects(project_type_id);
 create index if not exists projects_responsible_user_id_idx on public.projects(responsible_user_id);
+create index if not exists projects_status_idx on public.projects(status);
+create index if not exists projects_updated_at_idx on public.projects(updated_at);
 create index if not exists project_steps_project_id_idx on public.project_steps(project_id);
 create index if not exists project_steps_project_id_order_idx on public.project_steps(project_id, step_order);
 create index if not exists project_step_checklist_items_step_id_idx on public.project_step_checklist_items(project_step_id);
@@ -198,6 +200,9 @@ create table if not exists public.clients (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.projects add column if not exists client_id uuid references public.clients(id) on delete set null;
+create index if not exists projects_client_id_idx on public.projects(client_id);
 
 create table if not exists public.client_steps (
   id uuid primary key default gen_random_uuid(),
@@ -235,6 +240,7 @@ create table if not exists public.client_step_links (
   created_at timestamptz not null default now()
 );
 
+create index if not exists clients_name_idx on public.clients(name);
 create index if not exists clients_project_type_id_idx on public.clients(project_type_id);
 create index if not exists clients_responsible_user_id_idx on public.clients(responsible_user_id);
 create index if not exists client_steps_client_id_idx on public.client_steps(client_id);

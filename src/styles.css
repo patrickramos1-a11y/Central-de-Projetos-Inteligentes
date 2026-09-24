@@ -585,6 +585,132 @@ button {
   gap: 10px;
 }
 
+.management-panel {
+  margin-bottom: 16px;
+}
+
+.management-tools {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.management-table {
+  display: grid;
+  padding: 12px 18px 18px;
+  overflow-x: auto;
+}
+
+.management-row {
+  display: grid;
+  grid-template-columns: minmax(210px, 1.5fr) minmax(160px, 1fr) minmax(140px, 0.85fr) minmax(140px, 0.85fr) minmax(120px, 0.65fr) minmax(150px, 0.8fr);
+  gap: 12px;
+  align-items: center;
+  min-width: 980px;
+  padding: 12px 10px;
+  border-bottom: 1px solid #edf1ef;
+}
+
+.management-row-head {
+  color: #66736f;
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.management-link {
+  width: fit-content;
+  max-width: 100%;
+  color: #0f5f55;
+  font-weight: 850;
+  text-align: left;
+  cursor: pointer;
+}
+
+.management-link.subtle {
+  color: #37534e;
+  font-weight: 750;
+}
+
+.management-link:disabled {
+  color: #7a8782;
+  cursor: default;
+}
+
+.management-progress {
+  display: grid;
+  grid-template-columns: 44px minmax(90px, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.management-client-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding: 18px;
+}
+
+.management-client-card {
+  display: grid;
+  gap: 10px;
+  min-height: 144px;
+  padding: 14px;
+  border: 1px solid #dfe7e3;
+  border-radius: 8px;
+  color: inherit;
+  text-align: left;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.management-client-card:hover {
+  border-color: #9dd8cc;
+  box-shadow: 0 12px 32px rgba(15, 54, 49, 0.08);
+}
+
+.management-client-card strong {
+  font-size: 16px;
+}
+
+.management-client-card span,
+.management-client-card small {
+  color: #66736f;
+}
+
+.management-client-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.management-client-stats small {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #e7f3ef;
+}
+
+@media (max-width: 1100px) {
+  .management-client-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .management-tools {
+    align-items: stretch;
+  }
+
+  .management-tools .search-field,
+  .management-tools .compact-select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .management-client-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .compact-select {
   height: 42px;
   min-width: 150px;

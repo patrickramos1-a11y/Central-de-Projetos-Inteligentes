@@ -41,6 +41,13 @@ import { resolveBoundSummary } from "../features/summary/summaryBinding";
 import { promptToneHue } from "../features/summary/promptTone";
 import { collapseAllBlockIds, toggleCollapsedBlockIds } from "../features/journey/blockPresentation";
 import { interpolateJourneyPrompt, journeyPromptVariableSuggestions } from "../features/journey/promptInterpolation";
+import {
+  buildManagementClientRows,
+  buildManagementProjectRows,
+  filterManagementProjectRows,
+  getProjectClientName,
+  type ManagementStatus,
+} from "../features/management/managementModel";
 import { resolvePromptContent } from "../../shared/stepBuilder";
 import { Toast } from "../components/ui/Toast";
 import { ProgressBar } from "../components/ui/ProgressBar";
@@ -51,7 +58,7 @@ type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
 type ProjectStatus = "planejado" | "em_andamento" | "concluido" | "bloqueado" | "arquivado";
 type ClientStatus = "em_implantacao" | "ativo" | "concluido" | "bloqueado" | "arquivado";
 type StepStatus = "pendente" | "em_andamento" | "concluido" | "bloqueado";
-type ViewMode = "projects" | "journey" | "projectTemplates" | "clients" | "clientJourney" | "settings";
+type ViewMode = "projects" | "journey" | "projectTemplates" | "clients" | "clientJourney" | "management" | "settings";
 type JourneyMode = "execute" | "edit";
 
 function compactStepLabel(name: string) {
@@ -210,6 +217,7 @@ type Project = {
   id: string;
   name: string;
   company: string | null;
+  client_id: string | null;
   responsible: string | null;
   responsible_user_id: string | null;
   project_type_id: string | null;
@@ -697,6 +705,7 @@ export default function App() {
       projectTemplates: "Templates",
       clients: "Clientes",
       clientJourney: selectedClient?.name ?? "Cliente",
+      management: "Gestao",
       settings: "Configuracoes",
     };
     const context = viewLabels[view] ?? "Ramos Jornadas";
@@ -804,12 +813,50 @@ export default function App() {
 
     setIsLoading(true);
     const responsibleUser = tables.app_users.find((user) => user.id === form.responsible_user_id) ?? null;
+    let linkedClient = tables.clients.find((client) => client.id === form.client_id) ?? null;
+
+    if (form.client_id === "__new") {
+      const clientName = form.new_client_name.trim() || form.company.trim();
+
+      if (!clientName) {
+        setNotice("Informe o nome do novo cliente antes de criar o projeto.");
+        setIsLoading(false);
+        return;
+      }
+
+      const { data: client, error: clientError } = await supabase
+        .from<Client>("clients")
+        .insert(
+          normalizePayload({
+            name: clientName,
+            company: clientName,
+            responsible: responsibleUser?.name ?? null,
+            responsible_user_id: responsibleUser?.id ?? null,
+            project_type_id: form.project_type_id,
+            status: "ativo",
+            notes: "Cliente criado pelo cadastro rapido de projeto.",
+          }),
+        )
+        .select("*")
+        .single();
+
+      if (clientError || !client) {
+        setNotice(`Nao foi possivel criar o cliente vinculado: ${clientError?.message ?? "erro desconhecido"}`);
+        setIsLoading(false);
+        return;
+      }
+
+      linkedClient = client as Client;
+    }
+
+    const legacyCompany = linkedClient?.name ?? (form.company.trim() || form.new_client_name.trim());
     const { data: project, error } = await supabase
       .from<Project>("projects")
       .insert(
         normalizePayload({
           name: form.name,
-          company: form.company,
+          company: legacyCompany,
+          client_id: linkedClient?.id ?? null,
           responsible: responsibleUser?.name ?? null,
           responsible_user_id: responsibleUser?.id ?? null,
           project_type_id: form.project_type_id,
@@ -2445,6 +2492,10 @@ export default function App() {
             <Users size={18} />
             Clientes
           </button>
+          <button className={`nav-item ${view === "management" ? "active" : ""}`} onClick={() => setView("management")}>
+            <Layers3 size={18} />
+            Gestao
+          </button>
           <button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")}>
             <Settings size={18} />
             Configuracoes
@@ -2505,6 +2556,22 @@ export default function App() {
         {view === "projectTemplates" && <ProjectTemplatesView tables={tables} query={query} setQuery={setQuery} onUpdate={updateJourneyTemplate} onDelete={deleteJourneyTemplate} />}
 
         {view === "clients" && <ClientsView tables={tables} currentUser={currentUser} query={query} setQuery={setQuery} onCreate={createClientJourney} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} />}
+
+        {view === "management" && (
+          <ManagementView
+            tables={tables}
+            query={query}
+            setQuery={setQuery}
+            onOpenProject={(id) => {
+              setSelectedProjectId(id);
+              setView("journey");
+            }}
+            onOpenClient={(id) => {
+              setSelectedClientId(id);
+              setView("clientJourney");
+            }}
+          />
+        )}
 
         {view === "journey" && selectedProject && selectedStep && (
           <JourneyView
@@ -2595,6 +2662,8 @@ export default function App() {
 type NewProjectFormState = {
   name: string;
   company: string;
+  client_id: string;
+  new_client_name: string;
   responsible_user_id: string;
   project_type_id: string;
   journey_template_id: string;
@@ -2639,27 +2708,31 @@ function ProjectsView({
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [projectNameDraft, setProjectNameDraft] = useState("");
   const [projectCompanyDraft, setProjectCompanyDraft] = useState("");
+  const [projectClientDraft, setProjectClientDraft] = useState("");
   const [projectResponsibleUserDraft, setProjectResponsibleUserDraft] = useState("");
   const activeUsers = tables.app_users.filter((user) => user.status === "ativo");
   const filteredProjects = tables.projects
     .filter((project) => statusFilter === "todos" || project.status === statusFilter)
     .filter((project) => responsibleFilter === "todos" || resolveResponsibleUserId(project, tables.app_users) === responsibleFilter)
-    .filter((project) => normalizeSearch(project.name, project.company, getResponsibleName(project, tables.app_users)).includes(query.toLowerCase()))
+    .filter((project) => normalizeSearch(project.name, getProjectClientName(project, tables.clients), project.company, getResponsibleName(project, tables.app_users)).includes(query.toLowerCase()))
     .sort((a, b) => new Date(b.updated_at ?? b.created_at).getTime() - new Date(a.updated_at ?? a.created_at).getTime());
 
   function openProjectEditor(project: Project) {
     setEditingProject(project);
     setProjectNameDraft(project.name);
     setProjectCompanyDraft(project.company ?? "");
+    setProjectClientDraft(project.client_id ?? resolveLegacyClientId(project.company, tables.clients));
     setProjectResponsibleUserDraft(resolveResponsibleUserId(project, tables.app_users));
   }
 
   function saveProjectEditor() {
     if (!editingProject || !projectNameDraft.trim()) return;
     const responsibleUser = tables.app_users.find((user) => user.id === projectResponsibleUserDraft) ?? null;
+    const linkedClient = tables.clients.find((client) => client.id === projectClientDraft) ?? null;
     onUpdate(editingProject.id, {
       name: projectNameDraft.trim(),
-      company: projectCompanyDraft.trim() || null,
+      company: linkedClient?.name ?? (projectCompanyDraft.trim() || null),
+      client_id: linkedClient?.id ?? null,
       responsible: responsibleUser?.name ?? null,
       responsible_user_id: responsibleUser?.id ?? null,
     });
@@ -2726,6 +2799,7 @@ function ProjectsView({
             const done = applicableSteps.filter((step) => step.status === "concluido" && (hasProjectSummary || !isProjectSummaryStep(step))).length;
             const progress = applicableSteps.length ? Math.round((done / applicableSteps.length) * 100) : 0;
             const responsibleName = getResponsibleName(project, tables.app_users);
+            const clientName = getProjectClientName(project, tables.clients);
             const displayStatus = project.status === "bloqueado" || project.status === "arquivado"
               ? project.status
               : progress === 100 && applicableSteps.length > 0
@@ -2741,7 +2815,7 @@ function ProjectsView({
                     </span>
                     <div>
                       <strong>{project.name}</strong>
-                      <span>{project.company || "Sem empresa definida"}</span>
+                      <span>{clientName}</span>
                     </div>
                     <StatusPill status={displayStatus} />
                   </div>
@@ -2786,7 +2860,8 @@ function ProjectsView({
             </div>
             <div className="project-editor-fields">
               <Field label="Nome do projeto" value={projectNameDraft} onChange={setProjectNameDraft} />
-              <Field label="Empresa ou cliente" value={projectCompanyDraft} onChange={setProjectCompanyDraft} />
+              <SelectField label="Cliente vinculado" value={projectClientDraft} onChange={(value) => { setProjectClientDraft(value); const client = tables.clients.find((item) => item.id === value); if (client) setProjectCompanyDraft(client.name); }} options={tables.clients.map(toOption)} />
+              {!projectClientDraft && <Field label="Empresa legada" value={projectCompanyDraft} onChange={setProjectCompanyDraft} />}
               <SelectField label="Responsavel" value={projectResponsibleUserDraft} onChange={setProjectResponsibleUserDraft} options={activeUsers.map(toOption)} />
             </div>
             <div className="inline-actions project-editor-actions">
@@ -2942,6 +3017,8 @@ function NewProjectPanel({ tables, currentUser, onCreate }: { tables: Tables; cu
   const [form, setForm] = useState<NewProjectFormState>({
     name: "",
     company: "",
+    client_id: "",
+    new_client_name: "",
     responsible_user_id: currentUser?.id ?? "",
     project_type_id: "",
     journey_template_id: "",
@@ -2962,7 +3039,18 @@ function NewProjectPanel({ tables, currentUser, onCreate }: { tables: Tables; cu
       </div>
       <div className="form-grid">
         <Field label="Nome do projeto" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
-        <Field label="Empresa / cliente" value={form.company} onChange={(value) => setForm({ ...form, company: value })} />
+        <SelectField
+          label="Cliente"
+          value={form.client_id}
+          onChange={(value) => {
+            const client = tables.clients.find((item) => item.id === value);
+            setForm({ ...form, client_id: value, company: client?.name ?? form.company, new_client_name: value === "__new" ? form.new_client_name : "" });
+          }}
+          options={[...tables.clients.map(toOption), { value: "__new", label: "+ Criar novo cliente" }]}
+          emptyLabel="Selecionar cliente"
+        />
+        {form.client_id === "__new" && <Field label="Novo cliente" value={form.new_client_name} onChange={(value) => setForm({ ...form, new_client_name: value, company: value })} />}
+        {!form.client_id && <Field label="Empresa / cliente legado" value={form.company} onChange={(value) => setForm({ ...form, company: value })} />}
         <SelectField label="Responsavel" value={form.responsible_user_id} onChange={(value) => setForm({ ...form, responsible_user_id: value })} options={activeUsers.map(toOption)} />
         <SelectField label="Tipo de projeto" value={form.project_type_id} onChange={(value) => setForm({ ...form, project_type_id: value })} options={tables.project_types.map(toOption)} />
         <SelectField
@@ -2975,6 +3063,162 @@ function NewProjectPanel({ tables, currentUser, onCreate }: { tables: Tables; cu
         <TextArea label="Observacoes iniciais" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
       </div>
     </section>
+  );
+}
+
+function ManagementView({
+  tables,
+  query,
+  setQuery,
+  onOpenProject,
+  onOpenClient,
+}: {
+  tables: Tables;
+  query: string;
+  setQuery: (query: string) => void;
+  onOpenProject: (id: string) => void;
+  onOpenClient: (id: string) => void;
+}) {
+  const [clientFilter, setClientFilter] = useState("todos");
+  const [responsibleFilter, setResponsibleFilter] = useState("todos");
+  const [typeFilter, setTypeFilter] = useState("todos");
+  const [statusFilter, setStatusFilter] = useState<ManagementStatus | "todos">("todos");
+  const activeUsers = tables.app_users.filter((user) => user.status === "ativo");
+  const projectRows = buildManagementProjectRows({
+    projects: tables.projects,
+    clients: tables.clients,
+    projectTypes: tables.project_types,
+    users: tables.app_users,
+    steps: tables.project_steps,
+  }).sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+  const filteredRows = filterManagementProjectRows(projectRows, {
+    search: query,
+    clientId: clientFilter,
+    responsibleUserId: responsibleFilter,
+    projectTypeId: typeFilter,
+    status: statusFilter,
+  });
+  const clientRows = buildManagementClientRows(tables.clients, projectRows).sort((a, b) => b.projectCount - a.projectCount || a.name.localeCompare(b.name));
+  const activeProjects = projectRows.filter((row) => !["concluido", "arquivado"].includes(row.status));
+  const averageProgress = projectRows.length ? Math.round(projectRows.reduce((total, row) => total + row.progress, 0) / projectRows.length) : 0;
+  const uncategorizedCount = projectRows.filter((row) => !row.projectTypeId).length;
+
+  return (
+    <>
+      <section className="topbar">
+        <div>
+          <h1>Gestao</h1>
+          <p>Visao consolidada para acompanhar projetos, clientes, responsaveis e tipos de entrega.</p>
+        </div>
+      </section>
+
+      <section className="metric-grid management-metrics">
+        <article className="metric-card">
+          <span>Projetos ativos</span>
+          <strong>{activeProjects.length}</strong>
+        </article>
+        <article className="metric-card">
+          <span>Clientes com projetos</span>
+          <strong>{clientRows.filter((row) => row.projectCount > 0).length}</strong>
+        </article>
+        <article className="metric-card">
+          <span>Progresso medio</span>
+          <strong>{averageProgress}%</strong>
+        </article>
+        <article className="metric-card">
+          <span>Sem tipo definido</span>
+          <strong>{uncategorizedCount}</strong>
+        </article>
+      </section>
+
+      <section className="list-panel management-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Carteira de projetos</h2>
+            <p>Filtre por cliente, responsavel, tipo e status para priorizar a execucao.</p>
+          </div>
+          <div className="panel-tools management-tools">
+            <label className="search-field">
+              <Search size={16} />
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar na gestao" />
+            </label>
+            <select className="compact-select" value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}>
+              <option value="todos">Todos clientes</option>
+              {tables.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+            </select>
+            <select className="compact-select" value={responsibleFilter} onChange={(event) => setResponsibleFilter(event.target.value)}>
+              <option value="todos">Todos responsaveis</option>
+              {activeUsers.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
+            </select>
+            <select className="compact-select" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
+              <option value="todos">Todos tipos</option>
+              {tables.project_types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
+            </select>
+            <select className="compact-select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ManagementStatus | "todos")}>
+              <option value="todos">Todos status</option>
+              <option value="planejado">Planejado</option>
+              <option value="em_andamento">Em andamento</option>
+              <option value="concluido">Concluido</option>
+              <option value="bloqueado">Bloqueado</option>
+              <option value="arquivado">Arquivado</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="management-table" role="table" aria-label="Carteira de projetos">
+          <div className="management-row management-row-head" role="row">
+            <span>Projeto</span>
+            <span>Cliente</span>
+            <span>Tipo</span>
+            <span>Responsavel</span>
+            <span>Status</span>
+            <span>Progresso</span>
+          </div>
+          {filteredRows.map((row) => (
+            <div className="management-row" role="row" key={row.id}>
+              <button type="button" className="management-link" onClick={() => onOpenProject(row.id)}>{row.name}</button>
+              <button type="button" className="management-link subtle" disabled={!row.clientId} onClick={() => row.clientId && onOpenClient(row.clientId)}>{row.clientName}</button>
+              <span>{row.projectTypeName}</span>
+              <span>{row.responsibleName || "Sem responsavel"}</span>
+              <span><StatusPill status={row.status} /></span>
+              <span className="management-progress"><span>{row.progress}%</span><div className="progress-bar"><span style={{ width: `${row.progress}%` }} /></div></span>
+            </div>
+          ))}
+        </div>
+
+        {filteredRows.length === 0 && (
+          <div className="empty-state">
+            <Layers3 size={34} />
+            <strong>Nenhum projeto para os filtros atuais</strong>
+            <span>Ajuste os filtros para visualizar a carteira.</span>
+          </div>
+        )}
+      </section>
+
+      <section className="list-panel management-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Clientes consolidados</h2>
+            <p>Quantidade de projetos, pendencias e progresso medio por cliente.</p>
+          </div>
+        </div>
+        <div className="management-client-grid">
+          {clientRows.map((client) => (
+            <button className="management-client-card" type="button" key={client.id} onClick={() => onOpenClient(client.id)}>
+              <strong>{client.name}</strong>
+              <span>{client.company || "Cliente sem unidade informada"}</span>
+              <div className="management-client-stats">
+                <small>{client.projectCount} projeto(s)</small>
+                <small>{client.activeProjectCount} ativo(s)</small>
+                <small>{client.completedProjectCount} concluido(s)</small>
+              </div>
+              <div className="progress-bar"><span style={{ width: `${client.averageProgress}%` }} /></div>
+              <small>{client.averageProgress}% de progresso medio</small>
+            </button>
+          ))}
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -3421,7 +3665,7 @@ function ClientBlockJourneyView({
     void request("/blocks/reorder", { method: "POST", body: JSON.stringify({ blockIds, updatedBy: currentUser?.name ?? null }) }).then(setPayload);
   }
 
-  const projectLike: Project = { id: client.id, name: client.name, company: client.company, responsible: getResponsibleName(client, tables.app_users), responsible_user_id: client.responsible_user_id, project_type_id: client.project_type_id, journey_template_id: client.journey_template_id, status: "em_andamento", notes: client.notes, created_at: client.created_at, updated_at: client.updated_at };
+  const projectLike: Project = { id: client.id, name: client.name, company: client.company, client_id: client.id, responsible: getResponsibleName(client, tables.app_users), responsible_user_id: client.responsible_user_id, project_type_id: client.project_type_id, journey_template_id: client.journey_template_id, status: "em_andamento", notes: client.notes, created_at: client.created_at, updated_at: client.updated_at };
   const stepLike: ProjectStep = { id: selectedStep.id, project_id: client.id, source_journey_step_id: selectedStep.source_journey_step_id, name: selectedStep.name, description: selectedStep.description, step_order: selectedStep.step_order, objective: selectedStep.objective, ai_tool_id: null, expected_output: selectedStep.required_evidence_label, execution_instructions: null, status: selectedStep.status, notes: selectedStep.notes };
   const blocks = payload?.document.blocks ?? [];
 
@@ -7343,6 +7587,15 @@ function findName(records: Array<{ id: string; name: string }>, id: string | nul
   }
 
   return records.find((record) => record.id === id)?.name ?? "";
+}
+
+function resolveLegacyClientId(company: string | null, clients: Client[]) {
+  const normalizedCompany = normalizeSearchText(company ?? "");
+  if (!normalizedCompany) {
+    return "";
+  }
+
+  return clients.find((client) => normalizeSearchText(client.name) === normalizedCompany || normalizeSearchText(client.company ?? "") === normalizedCompany)?.id ?? "";
 }
 
 type ResponsibleOwner = {
