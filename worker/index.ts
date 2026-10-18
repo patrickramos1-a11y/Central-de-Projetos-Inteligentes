@@ -1,5 +1,6 @@
 import { handleProjectStepRequest } from "./blockBuilder";
 import { handleJourneyDomainRequest } from "./journeyDomain";
+import { buildTableReadQuery } from "./tableRead";
 
 type Env = {
   DB: D1Database;
@@ -63,6 +64,17 @@ export default {
         return json({ ok: true, storage: "cloudflare-d1" });
       }
 
+      if (url.pathname === "/api/overview" && request.method === "GET") {
+        const [promptCount, summaryProjects] = await Promise.all([
+          env.DB.prepare("select count(*) as total from prompts").first<{ total: number }>(),
+          env.DB.prepare("select distinct project_id from project_summaries where status != 'archived'").all<{ project_id: string }>(),
+        ]);
+        return json({ data: {
+          promptCount: promptCount?.total ?? 0,
+          summaryProjectIds: (summaryProjects.results ?? []).map((row) => row.project_id),
+        } });
+      }
+
       const domainResponse = await handleJourneyDomainRequest(request, env, parts, url);
       if (domainResponse) {
         return domainResponse;
@@ -99,10 +111,10 @@ async function handleTableRequest(request: Request, env: Env, tableName = "", id
   }
 
   if (request.method === "GET") {
-    const order = url.searchParams.get("order") || "created_at";
-    const direction = url.searchParams.get("ascending") === "false" ? "DESC" : "ASC";
-    const orderColumn = columns.includes(order) ? order : "created_at";
-    const { results } = await env.DB.prepare(`select * from ${tableName} order by ${orderColumn} ${direction}`).all();
+    const query = buildTableReadQuery(tableName, columns, url);
+    if (!query) return jsonError("Consulta invalida.", 400);
+    const statement = env.DB.prepare(query.sql);
+    const { results } = await (query.bindings.length ? statement.bind(...query.bindings) : statement).all();
     return json({ data: normalizeRows(results ?? []) });
   }
 

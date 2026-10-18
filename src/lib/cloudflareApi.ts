@@ -35,16 +35,38 @@ async function requestJson<T>(baseUrl: string, path: string, init?: RequestInit)
 class SelectBuilder<T> implements PromiseLike<ApiResult<T[]>> {
   private orderColumn = "";
   private ascending = true;
+  private selectedColumns = "*";
+  private filterColumn = "";
+  private filterValue = "";
+  private offset = 0;
+  private pageSize = 0;
 
   constructor(
     private readonly baseUrl: string,
     private readonly tableName: string,
   ) {}
 
+  select(columns: string) {
+    this.selectedColumns = columns;
+    return this;
+  }
+
+  eq(column: string, value: string) {
+    this.filterColumn = column;
+    this.filterValue = value;
+    return this;
+  }
+
+  range(start: number, end: number) {
+    this.offset = start;
+    this.pageSize = end - start + 1;
+    return this;
+  }
+
   order(column: string, options?: OrderOptions) {
     this.orderColumn = column;
     this.ascending = options?.ascending ?? true;
-    return this.execute();
+    return this;
   }
 
   then<TResult1 = ApiResult<T[]>, TResult2 = never>(
@@ -60,6 +82,15 @@ class SelectBuilder<T> implements PromiseLike<ApiResult<T[]>> {
     if (this.orderColumn) {
       params.set("order", this.orderColumn);
       params.set("ascending", String(this.ascending));
+    }
+    if (this.selectedColumns !== "*") params.set("select", this.selectedColumns);
+    if (this.filterColumn) {
+      params.set("filter", this.filterColumn);
+      params.set("value", this.filterValue);
+    }
+    if (this.pageSize) {
+      params.set("limit", String(this.pageSize));
+      params.set("offset", String(this.offset));
     }
 
     const query = params.toString();
@@ -118,7 +149,7 @@ class TableApi<T> {
   ) {}
 
   select(_columns = "*") {
-    return new SelectBuilder<T>(this.baseUrl, this.tableName);
+    return new SelectBuilder<T>(this.baseUrl, this.tableName).select(_columns);
   }
 
   insert(payload: unknown) {

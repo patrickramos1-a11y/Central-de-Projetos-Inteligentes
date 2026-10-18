@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type SetStateAction } from "react";
 import {
   Bot,
   Check,
@@ -49,6 +49,7 @@ import {
   type ManagementStatus,
 } from "../features/management/managementModel";
 import { resolvePromptContent } from "../../shared/stepBuilder";
+import { mergeSuccessfulTables, replaceProjectRows, shouldApplyRefresh, type TableResult } from "../features/data/refreshState";
 import { Toast } from "../components/ui/Toast";
 import { ProgressBar } from "../components/ui/ProgressBar";
 import { StatusBadge, type StatusTone } from "../components/ui/StatusBadge";
@@ -546,6 +547,31 @@ const emptyTables: Tables = {
   client_step_links: [],
 };
 
+const coreTableNames: Array<keyof Tables> = [
+  "app_users", "projects", "project_steps", "clients", "project_types", "journey_templates",
+];
+const detailTableNames = ["project_steps", "project_summaries", "project_summary_items", "generated_prompts"] as const;
+const initialReadColumns: Partial<Record<keyof Tables, string>> = {
+  app_users: "id,name,status,created_at,updated_at",
+  projects: "id,name,company,client_id,responsible,responsible_user_id,project_type_id,journey_template_id,status,notes,created_at,updated_at",
+  project_steps: "id,project_id,source_journey_step_id,name,step_order,status,is_not_applicable,created_at,updated_at",
+  clients: "id,name,company,logo_url,responsible,responsible_user_id,project_type_id,journey_template_id,entry_month,status,notes,created_at,updated_at",
+  project_types: "id,name,description,status,created_at",
+  journey_templates: "id,name,description,project_type_id,context,status,created_at",
+};
+function activeSecondaryTables(view: ViewMode, activeConfig: ConfigModuleKey): Array<keyof Tables> {
+  if (view === "projectTemplates") return ["journey_steps", "step_prompts"];
+  if (view === "clients") return ["client_steps", "journey_steps"];
+  if (view === "clientJourney") return ["client_steps", "client_step_checklist_items", "client_step_links", "prompts", "ai_tools", "prompt_blocks"];
+  if (view === "settings") return [...new Set<keyof Tables>([activeConfig, "ai_tools", "prompt_categories", "project_types", "journey_steps"])];
+  if (view === "journey") return ["prompts", "ai_tools", "prompt_blocks", "project_step_prompts", "project_step_checklist_items", "project_step_links", "project_step_phases", "project_step_contexts", "journey_steps", "step_prompts"];
+  return [];
+}
+
+const projectFormTables: Array<keyof Tables> = ["journey_steps", "step_prompts"];
+
+type Overview = { promptCount: number; summaryProjectIds: string[] };
+
 const configModules: Array<{ key: ConfigModuleKey; label: string; icon: typeof Bot; description: string }> = [
   {
     key: "app_users",
@@ -606,7 +632,12 @@ const configModules: Array<{ key: ConfigModuleKey; label: string; icon: typeof B
 export default function App() {
   const [view, setView] = useState<ViewMode>("projects");
   const [activeConfig, setActiveConfig] = useState<ConfigModuleKey>("prompts");
-  const [tables, setTables] = useState<Tables>(emptyTables);
+  const [tables, setTablesState] = useState<Tables>(emptyTables);
+  const localMutationVersionRef = useRef(0);
+  const setTables = useCallback((update: SetStateAction<Tables>) => {
+    localMutationVersionRef.current += 1;
+    setTablesState(update);
+  }, []);
   const [currentUserId, setCurrentUserId] = useState(() => localStorage.getItem("central_ia_user_id") ?? "");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
@@ -614,6 +645,24 @@ export default function App() {
   const [selectedClientStepId, setSelectedClientStepId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [hasLoadedCore, setHasLoadedCore] = useState(false);
+  const [loadedSecondaryTables, setLoadedSecondaryTables] = useState<Set<keyof Tables>>(() => new Set());
+  const [secondaryLoading, setSecondaryLoading] = useState(false);
+  const [loadedProjectDetails, setLoadedProjectDetails] = useState<Set<string>>(() => new Set());
+  const [loadingProjectDetails, setLoadingProjectDetails] = useState<Set<string>>(() => new Set());
+  const [projectDetailErrors, setProjectDetailErrors] = useState<Record<string, string>>({});
+  const [overview, setOverview] = useState<Overview>({ promptCount: 0, summaryProjectIds: [] });
+  const coreInFlightRef = useRef<Promise<void> | null>(null);
+  const secondaryInFlightRef = useRef<Promise<void> | null>(null);
+  const secondaryInFlightScopeRef = useRef("");
+  const detailInFlightRef = useRef(new Map<string, Promise<void>>());
+  const coreRequestIdRef = useRef(0);
+  const secondaryRequestIdRef = useRef(0);
+  const detailRequestIdsRef = useRef(new Map<string, number>());
+  const lastAutoRefreshRef = useRef(0);
+  const lastViewedAreaRef = useRef<ViewMode>("projects");
+  const lastReadFailedRef = useRef(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [tableErrors, setTableErrors] = useState<string[]>([]);
 
@@ -640,15 +689,47 @@ export default function App() {
     return [
       { label: "Projetos ativos", value: activeProjects.length },
       { label: "Clientes", value: tables.clients.filter((client) => client.status !== "arquivado").length },
-      { label: "Prompts", value: tables.prompts.length },
+      { label: "Prompts", value: loadedSecondaryTables.has("prompts") ? tables.prompts.length : overview.promptCount },
       { label: "Templates", value: tables.journey_templates.length },
       { label: "Etapas concluidas", value: doneSteps.length || doneProjects.length },
     ];
-  }, [tables]);
+  }, [tables, overview.promptCount, loadedSecondaryTables]);
+
+  const currentSecondaryReady = activeSecondaryTables(view, activeConfig).every((name) => loadedSecondaryTables.has(name));
+  const projectFormReady = projectFormTables.every((name) => loadedSecondaryTables.has(name));
 
   useEffect(() => {
-    void loadAll();
+    void refreshCore();
   }, []);
+
+  useEffect(() => {
+    const changedArea = lastViewedAreaRef.current !== view;
+    lastViewedAreaRef.current = view;
+    const required = activeSecondaryTables(view, activeConfig);
+    const missing = required.filter((name) => !loadedSecondaryTables.has(name));
+    if (missing.length) void refreshSecondary(missing);
+    else if (changedArea && required.length) void refreshSecondary(required);
+  }, [view, activeConfig, loadedSecondaryTables]);
+
+  useEffect(() => {
+    if (view === "journey" && selectedProjectId) void refreshProjectDetails(selectedProjectId);
+  }, [view, selectedProjectId]);
+
+  useEffect(() => {
+    const refreshWhenActive = () => {
+      if (document.visibilityState !== "visible" || Date.now() - lastAutoRefreshRef.current < 15_000) return;
+      lastAutoRefreshRef.current = Date.now();
+      void refreshActive(false);
+    };
+    document.addEventListener("visibilitychange", refreshWhenActive);
+    window.addEventListener("focus", refreshWhenActive);
+    window.addEventListener("online", refreshWhenActive);
+    return () => {
+      document.removeEventListener("visibilitychange", refreshWhenActive);
+      window.removeEventListener("focus", refreshWhenActive);
+      window.removeEventListener("online", refreshWhenActive);
+    };
+  }, [view, selectedProjectId]);
 
   useEffect(() => {
     const showToast = (event: Event) => {
@@ -721,55 +802,177 @@ export default function App() {
     );
   }, [selectedClient?.name, selectedProject?.name, view]);
 
-  async function loadAll() {
-    if (!supabase) {
-      setNotice("Configure a API Cloudflare para conectar ao banco D1.");
-      setTableErrors(Object.keys(emptyTables));
-      return;
-    }
-
-    setIsLoading(true);
-    const tableNames = Object.keys(emptyTables) as Array<keyof Tables>;
-    const results = await Promise.all(
-      tableNames.map(async (tableName) => {
-        const { data, error } = await supabase.from(tableName).select("*").order(getOrderColumn(tableName), {
-          ascending: true,
-        });
-
-        return { tableName, data: data ?? [], error };
-      }),
-    );
-
-    const nextTables = { ...emptyTables };
-    const errors = results.filter((result) => result.error);
-
-    results.forEach((result) => {
-      nextTables[result.tableName] = result.data as never;
-    });
-
-    if (!errors.length && nextTables.app_users.length === 0) {
-      const { data: defaultUser, error } = await supabase
-        .from<AppUser>("app_users")
-        .insert(
-          normalizePayload({
-            id: "user-patrick",
-            name: "Patrick",
-            status: "ativo",
-            updated_at: new Date().toISOString(),
-          }),
-        )
-        .select("*")
-        .single();
-
-      if (!error && defaultUser) {
-        nextTables.app_users = [defaultUser as AppUser];
+  async function readTables(names: Array<keyof Tables>): Promise<Array<TableResult<Tables>>> {
+    return Promise.all(names.map(async (tableName) => {
+      const rows: Tables[keyof Tables] = [];
+      for (let offset = 0; ; offset += 500) {
+        const { data, error } = await supabase.from(tableName).select(initialReadColumns[tableName] ?? "*").order(getOrderColumn(tableName), { ascending: true }).range(offset, offset + 499);
+        if (error || !data) return { tableName, data: null, error: error ?? new Error("Resposta vazia.") };
+        rows.push(...data as never[]);
+        if (data.length < 500) break;
       }
-    }
+      return { tableName, data: rows, error: null };
+    }));
+  }
 
-    setTables(nextTables);
-    setIsLoading(false);
-    setTableErrors(errors.map((result) => String(result.tableName)));
-    setNotice(errors.length ? `Falha ao sincronizar ${errors.length} tabela(s): ${errors.map((result) => result.tableName).join(", ")}.` : "Dados sincronizados.");
+  function reportReadErrors(names: readonly string[], errors: string[]) {
+    setTableErrors((current) => [...current.filter((name) => !names.includes(name)), ...errors]);
+    if (errors.length) {
+      lastReadFailedRef.current = true;
+      setNotice(`Falha ao atualizar: ${errors.join(", ")}. Os ultimos dados validos foram mantidos.`);
+    }
+  }
+
+  function refreshCore(): Promise<void> {
+    if (coreInFlightRef.current) return coreInFlightRef.current;
+    const requestId = ++coreRequestIdRef.current;
+    const promise = (async () => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const version = localMutationVersionRef.current;
+        const [results, overviewResult] = await Promise.all([
+          readTables(coreTableNames),
+          fetch(`${cloudflareApiUrl}/api/overview`).then(async (response) => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return (await response.json() as { data: Overview }).data;
+          }).then((data) => ({ data, error: null })).catch((error) => ({ data: null, error })),
+        ]);
+        if (!shouldApplyRefresh(version, localMutationVersionRef.current, requestId, coreRequestIdRef.current)) {
+          if (attempt === 0) continue;
+          return;
+        }
+        const userResult = results.find((result) => result.tableName === "app_users");
+        if (!userResult?.error && Array.isArray(userResult?.data) && userResult.data.length === 0 && results.every((result) => !result.error)) {
+          const { data, error } = await supabase.from<AppUser>("app_users").insert(normalizePayload({
+            id: "user-patrick", name: "Patrick", status: "ativo", updated_at: new Date().toISOString(),
+          })).select("*").single();
+          if (!error && data) userResult.data = [data];
+          else userResult.error = error;
+        }
+        setTablesState((current) => {
+          const next = mergeSuccessfulTables(current, results);
+          const steps = results.find((result) => result.tableName === "project_steps");
+          if (!steps?.error && steps?.data) {
+            const existing = new Map(current.project_steps.map((step) => [step.id, step]));
+            next.project_steps = (steps.data as ProjectStep[]).map((step) => ({ ...existing.get(step.id), ...step }));
+          }
+          return next;
+        });
+        if (overviewResult.data) setOverview(overviewResult.data);
+        const errors = results.filter((result) => result.error).map((result) => String(result.tableName));
+        if (overviewResult.error) errors.push("overview");
+        reportReadErrors([...coreTableNames, "overview"], errors);
+        setHasLoadedCore(true);
+        return;
+      }
+    })().finally(() => { coreInFlightRef.current = null; setHasLoadedCore(true); });
+    coreInFlightRef.current = promise;
+    return promise;
+  }
+
+  function refreshSecondary(names: Array<keyof Tables>): Promise<void> {
+    const scope = names.join(",");
+    if (secondaryInFlightRef.current) {
+      if (secondaryInFlightScopeRef.current === scope) return secondaryInFlightRef.current;
+      return secondaryInFlightRef.current.then(() => refreshSecondary(names));
+    }
+    secondaryInFlightScopeRef.current = scope;
+    const requestId = ++secondaryRequestIdRef.current;
+    setSecondaryLoading(true);
+    const promise = (async () => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const version = localMutationVersionRef.current;
+        const results = await readTables(names);
+        if (!shouldApplyRefresh(version, localMutationVersionRef.current, requestId, secondaryRequestIdRef.current)) {
+          if (attempt === 0) continue;
+          return;
+        }
+        setTablesState((current) => mergeSuccessfulTables(current, results));
+        const errors = results.filter((result) => result.error).map((result) => String(result.tableName));
+        reportReadErrors(names, errors);
+        setLoadedSecondaryTables((current) => {
+          const next = new Set(current);
+          for (const result of results) if (!result.error) next.add(result.tableName);
+          return next.size === current.size ? current : next;
+        });
+        return;
+      }
+    })().finally(() => { secondaryInFlightRef.current = null; secondaryInFlightScopeRef.current = ""; setSecondaryLoading(false); });
+    secondaryInFlightRef.current = promise;
+    return promise;
+  }
+
+  function refreshProjectDetails(projectId: string): Promise<void> {
+    const existing = detailInFlightRef.current.get(projectId);
+    if (existing) return existing;
+    const requestId = (detailRequestIdsRef.current.get(projectId) ?? 0) + 1;
+    detailRequestIdsRef.current.set(projectId, requestId);
+    setLoadingProjectDetails((current) => new Set(current).add(projectId));
+    const promise = (async () => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const version = localMutationVersionRef.current;
+        const results = await Promise.all(detailTableNames.map(async (tableName) => {
+          const rows: Tables[typeof tableName] = [];
+          let error: unknown = null;
+          for (let offset = 0; ; offset += 500) {
+            const page = await supabase.from(tableName).select("*").eq("project_id", projectId)
+              .order(getOrderColumn(tableName), { ascending: true }).range(offset, offset + 499);
+            if (page.error || !page.data) { error = page.error ?? new Error("Resposta vazia."); break; }
+            rows.push(...page.data as never[]);
+            if (page.data.length < 500) break;
+          }
+          return { tableName, rows, error };
+        }));
+        if (!shouldApplyRefresh(version, localMutationVersionRef.current, requestId, detailRequestIdsRef.current.get(projectId) ?? 0)) {
+          if (attempt === 0) continue;
+          return;
+        }
+        setTablesState((current) => {
+          const next = { ...current };
+          for (const result of results) {
+            if (result.error) continue;
+            if (result.tableName === "project_steps") next.project_steps = replaceProjectRows(current.project_steps, projectId, result.rows as ProjectStep[]);
+            if (result.tableName === "project_summaries") next.project_summaries = replaceProjectRows(current.project_summaries, projectId, result.rows as ProjectSummary[]);
+            if (result.tableName === "project_summary_items") next.project_summary_items = replaceProjectRows(current.project_summary_items, projectId, result.rows as ProjectSummaryItem[]);
+            if (result.tableName === "generated_prompts") next.generated_prompts = replaceProjectRows(current.generated_prompts, projectId, result.rows as GeneratedPrompt[]);
+          }
+          return next;
+        });
+        const errors = results.filter((result) => result.error).map((result) => result.tableName);
+        setProjectDetailErrors((current) => {
+          const next = { ...current };
+          if (errors.length) next[projectId] = `Falha ao carregar: ${errors.join(", ")}.`;
+          else delete next[projectId];
+          return next;
+        });
+        if (errors.length === 0) setLoadedProjectDetails((current) => new Set(current).add(projectId));
+        else setNotice(`Falha ao atualizar dados da jornada. Os ultimos dados validos foram mantidos.`);
+        reportReadErrors(detailTableNames, errors);
+        return;
+      }
+    })().finally(() => {
+      detailInFlightRef.current.delete(projectId);
+      setLoadingProjectDetails((current) => { const next = new Set(current); next.delete(projectId); return next; });
+    });
+    detailInFlightRef.current.set(projectId, promise);
+    return promise;
+  }
+
+  async function refreshActive(announce: boolean) {
+    if (announce) setIsSyncing(true);
+    lastReadFailedRef.current = false;
+    try {
+      await refreshCore();
+      const required = activeSecondaryTables(view, activeConfig);
+      if (required.length) await refreshSecondary(required);
+      if (view === "journey" && selectedProjectId) await refreshProjectDetails(selectedProjectId);
+      if (announce && !lastReadFailedRef.current) setNotice("Dados sincronizados.");
+    } finally {
+      if (announce) setIsSyncing(false);
+    }
+  }
+
+  async function loadAll() {
+    await refreshActive(true);
   }
 
   function selectUser(userId: string) {
@@ -2455,11 +2658,15 @@ export default function App() {
     setNotice(`Template "${templateName}" salvo a partir da jornada do cliente.`);
   }
 
+  if (!hasLoadedCore) {
+    return <div className="startup-loading"><Loader2 className="spin" size={26} /><span>Carregando projetos...</span></div>;
+  }
+
   if (!currentUser) {
     return (
       <UserEntryScreen
         users={activeUsers}
-        isLoading={isLoading}
+        isLoading={isLoading || isSyncing}
         notice={notice ?? ""}
         tableErrors={tableErrors}
         onSelect={selectUser}
@@ -2526,8 +2733,8 @@ export default function App() {
 
       <main className="workspace">
         <div className={`setup-alert ${hasCloudflareApi ? "connected" : ""}`}>
-          {isLoading ? <Loader2 className="spin" size={18} /> : <Database size={18} />}
-          <span>{isLoading ? "Sincronizando dados..." : tableErrors.length > 0 ? "Existem pendencias de dados para revisar." : hasCloudflareApi ? "Dados conectados ao Cloudflare." : "Configure a API Cloudflare para conectar ao banco D1."}</span>
+          {isSyncing ? <Loader2 className="spin" size={18} /> : <Database size={18} />}
+          <span>{isSyncing ? "Sincronizando dados..." : tableErrors.length > 0 ? "Existem pendencias de dados para revisar." : hasCloudflareApi ? "Dados conectados ao Cloudflare." : "Configure a API Cloudflare para conectar ao banco D1."}</span>
           {tableErrors.length > 0 && <span className="table-error-count">{tableErrors.length} pendencia(s)</span>}
           <button className="ghost-button" onClick={() => void loadAll()}>
             <RefreshCw size={16} />
@@ -2540,9 +2747,13 @@ export default function App() {
           <ProjectsView
             tables={tables}
             stats={stats}
+            summaryProjectIds={overview.summaryProjectIds}
             query={query}
             setQuery={setQuery}
             currentUser={currentUser}
+            supportingDataReady={projectFormReady}
+            supportingDataLoading={secondaryLoading}
+            onPrepareSupportingData={() => void refreshSecondary(projectFormTables)}
             onCreate={createProject}
             onUpdate={updateProject}
             onOpen={(id) => {
@@ -2553,9 +2764,9 @@ export default function App() {
           />
         )}
 
-        {view === "projectTemplates" && <ProjectTemplatesView tables={tables} query={query} setQuery={setQuery} onUpdate={updateJourneyTemplate} onDelete={deleteJourneyTemplate} />}
+        {view === "projectTemplates" && (currentSecondaryReady ? <ProjectTemplatesView tables={tables} query={query} setQuery={setQuery} onUpdate={updateJourneyTemplate} onDelete={deleteJourneyTemplate} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
-        {view === "clients" && <ClientsView tables={tables} currentUser={currentUser} query={query} setQuery={setQuery} onCreate={createClientJourney} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} />}
+        {view === "clients" && (currentSecondaryReady ? <ClientsView tables={tables} currentUser={currentUser} query={query} setQuery={setQuery} onCreate={createClientJourney} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
         {view === "management" && (
           <ManagementView
@@ -2573,7 +2784,11 @@ export default function App() {
           />
         )}
 
-        {view === "journey" && selectedProject && selectedStep && (
+        {view === "journey" && (!currentSecondaryReady || (selectedProjectId && !loadedProjectDetails.has(selectedProjectId))) && (
+          <DataAreaLoading loading={secondaryLoading || Boolean(selectedProjectId && loadingProjectDetails.has(selectedProjectId))} error={selectedProjectId ? projectDetailErrors[selectedProjectId] : undefined} onRetry={() => { void refreshSecondary(activeSecondaryTables(view, activeConfig)); if (selectedProjectId) void refreshProjectDetails(selectedProjectId); }} />
+        )}
+
+        {view === "journey" && currentSecondaryReady && selectedProjectId && loadedProjectDetails.has(selectedProjectId) && selectedProject && selectedStep && (
           <JourneyView
             project={selectedProject}
             steps={projectSteps}
@@ -2618,11 +2833,13 @@ export default function App() {
           />
         )}
 
-        {view === "journey" && (!selectedProject || !selectedStep) && (
+        {view === "journey" && currentSecondaryReady && selectedProjectId && loadedProjectDetails.has(selectedProjectId) && (!selectedProject || !selectedStep) && (
           <EmptyProjectJourney onBack={() => setView("projects")} />
         )}
 
-        {view === "clientJourney" && selectedClient && selectedClientStep && (
+        {view === "clientJourney" && !currentSecondaryReady && <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />}
+
+        {view === "clientJourney" && currentSecondaryReady && selectedClient && selectedClientStep && (
           <ClientBlockJourneyView
             client={selectedClient}
             steps={clientSteps}
@@ -2638,11 +2855,13 @@ export default function App() {
           />
         )}
 
-        {view === "clientJourney" && (!selectedClient || !selectedClientStep) && (
+        {view === "clientJourney" && currentSecondaryReady && (!selectedClient || !selectedClientStep) && (
           <EmptyClientJourney onBack={() => setView("clients")} />
         )}
 
-        {view === "settings" && (
+        {view === "settings" && !currentSecondaryReady && <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />}
+
+        {view === "settings" && currentSecondaryReady && (
           <SettingsView
             tables={tables}
             activeConfig={activeConfig}
@@ -2657,6 +2876,12 @@ export default function App() {
       </main>
     </AppShell>
   );
+}
+
+function DataAreaLoading({ loading, error, onRetry }: { loading: boolean; error?: string; onRetry: () => void }) {
+  return <section className="data-area-loading" role="status">
+    {loading ? <><Loader2 className="spin" size={22} /> Carregando dados desta area...</> : <><span>{error ?? "Nao foi possivel atualizar esta area."}</span><button className="secondary-button" onClick={onRetry}><RefreshCw size={16} /> Tentar novamente</button></>}
+  </section>;
 }
 
 type NewProjectFormState = {
@@ -2684,6 +2909,10 @@ type NewClientFormState = {
 function ProjectsView({
   tables,
   stats,
+  summaryProjectIds,
+  supportingDataReady,
+  supportingDataLoading,
+  onPrepareSupportingData,
   query,
   setQuery,
   currentUser,
@@ -2694,6 +2923,10 @@ function ProjectsView({
 }: {
   tables: Tables;
   stats: Array<{ label: string; value: number }>;
+  summaryProjectIds: string[];
+  supportingDataReady: boolean;
+  supportingDataLoading: boolean;
+  onPrepareSupportingData: () => void;
   query: string;
   setQuery: (query: string) => void;
   currentUser: AppUser | null;
@@ -2746,7 +2979,7 @@ function ProjectsView({
           <h1>Projetos</h1>
           <p>Crie uma execucao real, conduza as etapas e salve o que funcionar como template.</p>
         </div>
-        <button className="primary-button" onClick={() => setShowForm((current) => !current)}>
+        <button className="primary-button" onClick={() => { if (!showForm && !supportingDataReady) onPrepareSupportingData(); setShowForm((current) => !current); }}>
           <Plus size={17} />
           Novo projeto
         </button>
@@ -2761,7 +2994,7 @@ function ProjectsView({
         ))}
       </section>
 
-      {showForm && <NewProjectPanel tables={tables} currentUser={currentUser} onCreate={onCreate} />}
+      {showForm && (supportingDataReady ? <NewProjectPanel tables={tables} currentUser={currentUser} onCreate={onCreate} /> : <DataAreaLoading loading={supportingDataLoading} onRetry={onPrepareSupportingData} />)}
 
       <section className="list-panel">
         <div className="panel-heading">
@@ -2795,7 +3028,7 @@ function ProjectsView({
           {filteredProjects.map((project) => {
             const steps = tables.project_steps.filter((step) => step.project_id === project.id);
             const applicableSteps = steps.filter((step) => !step.is_not_applicable);
-            const hasProjectSummary = tables.project_summaries.some((summary) => summary.project_id === project.id && summary.status !== "archived");
+            const hasProjectSummary = summaryProjectIds.includes(project.id) || tables.project_summaries.some((summary) => summary.project_id === project.id && summary.status !== "archived");
             const done = applicableSteps.filter((step) => step.status === "concluido" && (hasProjectSummary || !isProjectSummaryStep(step))).length;
             const progress = applicableSteps.length ? Math.round((done / applicableSteps.length) * 100) : 0;
             const responsibleName = getResponsibleName(project, tables.app_users);
@@ -6982,17 +7215,27 @@ function ConfigCrud({
 
     const payload = normalizePayload(formState);
     const request = editingId ? supabase.from(module.key).update(payload).eq("id", editingId) : supabase.from(module.key).insert(payload);
-    const { error } = await request;
+    const { data, error } = await request;
 
     if (error) {
       onNotice(`Erro ao salvar ${module.label}: ${error.message}`);
       return;
     }
 
+    const saved = Array.isArray(data) ? data[0] as { id: string } | undefined : undefined;
+    if (!saved) {
+      onNotice(`Erro ao salvar ${module.label}: resposta vazia do servidor.`);
+      return;
+    }
+    onTables((current) => ({
+      ...current,
+      [module.key]: editingId
+        ? (current[module.key] as Array<{ id: string }>).map((record) => record.id === saved.id ? saved : record)
+        : [...current[module.key], saved],
+    }));
     onNotice(editingId ? "Registro atualizado." : "Registro criado.");
     setEditingId(null);
     setFormState(createBlankConfig(module.key));
-    onRefresh();
   }
 
   async function removeConfig(id: string) {
