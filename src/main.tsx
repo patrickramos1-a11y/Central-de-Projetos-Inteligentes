@@ -7,6 +7,7 @@ import "./styles/layout.css";
 import "./styles/components.css";
 import "./styles/journey.css";
 import "./styles/admin.css";
+import "./styles/projects.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

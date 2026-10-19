@@ -53,6 +53,7 @@ export type ManagementProjectRow = {
   progress: number;
   totalSteps: number;
   completedSteps: number;
+  createdAt: string;
   updatedAt: string;
 };
 
@@ -195,6 +196,7 @@ export function buildManagementProjectRows(input: {
       projectTypeId,
       projectTypeName: typeName || "Sem tipo definido",
       status: project.status,
+      createdAt: project.created_at ?? "",
       updatedAt: project.updated_at ?? project.created_at ?? "",
       ...progress,
     };

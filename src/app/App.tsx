@@ -48,6 +48,15 @@ import {
   getProjectClientName,
   type ManagementStatus,
 } from "../features/management/managementModel";
+import {
+  buildProjectListRows,
+  filterProjectListRows,
+  getProjectAge,
+  groupProjectListRows,
+  type ProjectGroupBy,
+  type ProjectListRow,
+  type ProjectListStatusFilter,
+} from "../features/projects/projectListModel";
 import { resolvePromptContent } from "../../shared/stepBuilder";
 import { mergeSuccessfulTables, replaceProjectRows, shouldApplyRefresh, type TableResult } from "../features/data/refreshState";
 import { Toast } from "../components/ui/Toast";
@@ -680,20 +689,6 @@ export default function App() {
   const selectedClientStep = clientSteps.find((step) => step.id === selectedClientStepId) ?? clientSteps[0] ?? null;
   const activeUsers = tables.app_users.filter((user) => user.status === "ativo");
   const currentUser = tables.app_users.find((user) => user.id === currentUserId) ?? null;
-
-  const stats = useMemo(() => {
-    const activeProjects = tables.projects.filter((project) => project.status !== "arquivado");
-    const doneProjects = tables.projects.filter((project) => project.status === "concluido");
-    const doneSteps = tables.project_steps.filter((step) => step.status === "concluido");
-
-    return [
-      { label: "Projetos ativos", value: activeProjects.length },
-      { label: "Clientes", value: tables.clients.filter((client) => client.status !== "arquivado").length },
-      { label: "Prompts", value: loadedSecondaryTables.has("prompts") ? tables.prompts.length : overview.promptCount },
-      { label: "Templates", value: tables.journey_templates.length },
-      { label: "Etapas concluidas", value: doneSteps.length || doneProjects.length },
-    ];
-  }, [tables, overview.promptCount, loadedSecondaryTables]);
 
   const currentSecondaryReady = activeSecondaryTables(view, activeConfig).every((name) => loadedSecondaryTables.has(name));
   const projectFormReady = projectFormTables.every((name) => loadedSecondaryTables.has(name));
@@ -2746,7 +2741,6 @@ export default function App() {
         {view === "projects" && (
           <ProjectsView
             tables={tables}
-            stats={stats}
             summaryProjectIds={overview.summaryProjectIds}
             query={query}
             setQuery={setQuery}
@@ -2908,7 +2902,6 @@ type NewClientFormState = {
 
 function ProjectsView({
   tables,
-  stats,
   summaryProjectIds,
   supportingDataReady,
   supportingDataLoading,
@@ -2922,7 +2915,6 @@ function ProjectsView({
   onDelete,
 }: {
   tables: Tables;
-  stats: Array<{ label: string; value: number }>;
   summaryProjectIds: string[];
   supportingDataReady: boolean;
   supportingDataLoading: boolean;
@@ -2936,19 +2928,62 @@ function ProjectsView({
   onDelete: (id: string) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<ProjectStatus | "todos">("todos");
+  const [statusFilter, setStatusFilter] = useState<ProjectListStatusFilter>("em_andamento");
   const [responsibleFilter, setResponsibleFilter] = useState("todos");
+  const [typeFilter, setTypeFilter] = useState("todos");
+  const [groupBy, setGroupBy] = useState<ProjectGroupBy>("none");
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [projectNameDraft, setProjectNameDraft] = useState("");
   const [projectCompanyDraft, setProjectCompanyDraft] = useState("");
   const [projectClientDraft, setProjectClientDraft] = useState("");
   const [projectResponsibleUserDraft, setProjectResponsibleUserDraft] = useState("");
   const activeUsers = tables.app_users.filter((user) => user.status === "ativo");
-  const filteredProjects = tables.projects
-    .filter((project) => statusFilter === "todos" || project.status === statusFilter)
-    .filter((project) => responsibleFilter === "todos" || resolveResponsibleUserId(project, tables.app_users) === responsibleFilter)
-    .filter((project) => normalizeSearch(project.name, getProjectClientName(project, tables.clients), project.company, getResponsibleName(project, tables.app_users)).includes(query.toLowerCase()))
-    .sort((a, b) => new Date(b.updated_at ?? b.created_at).getTime() - new Date(a.updated_at ?? a.created_at).getTime());
+  const managementRows = useMemo(() => buildManagementProjectRows({
+    projects: tables.projects,
+    clients: tables.clients,
+    projectTypes: tables.project_types,
+    users: tables.app_users,
+    steps: tables.project_steps,
+  }), [tables.projects, tables.clients, tables.project_types, tables.app_users, tables.project_steps]);
+  const activeSummaryProjectIds = useMemo(() => [
+    ...summaryProjectIds,
+    ...tables.project_summaries.filter((summary) => summary.status !== "archived").map((summary) => summary.project_id),
+  ], [summaryProjectIds, tables.project_summaries]);
+  const projectRows = useMemo(() => buildProjectListRows(
+    managementRows,
+    tables.project_steps,
+    activeSummaryProjectIds,
+  ), [managementRows, tables.project_steps, activeSummaryProjectIds]);
+  const filteredRows = useMemo(() => filterProjectListRows(projectRows, {
+    search: query,
+    status: statusFilter,
+    responsible: responsibleFilter,
+    type: typeFilter,
+  }), [projectRows, query, statusFilter, responsibleFilter, typeFilter]);
+  const groupedRows = useMemo(() => groupProjectListRows(filteredRows, groupBy), [filteredRows, groupBy]);
+  const responsibleOptions = useMemo(() => [...new Set(projectRows.map((row) => row.responsibleName).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [projectRows]);
+  const typeOptions = useMemo(() => [...new Set(projectRows.map((row) => row.projectTypeName))].sort((a, b) => a.localeCompare(b)), [projectRows]);
+
+  function toggleGroup(key: string) {
+    setExpandedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function selectGrouping(value: ProjectGroupBy) {
+    setGroupBy(value);
+    setExpandedGroups(new Set());
+  }
+
+  function completeProject(row: ProjectListRow) {
+    const unfinished = row.totalSteps - row.completedSteps;
+    if (unfinished > 0 && !window.confirm(`Concluir o projeto "${row.name}" com ${unfinished} etapa(s) ainda nao concluida(s)? As etapas permanecerao como estao.`)) return;
+    onUpdate(row.id, { status: "concluido" });
+  }
 
   function openProjectEditor(project: Project) {
     setEditingProject(project);
@@ -2973,116 +3008,106 @@ function ProjectsView({
   }
 
   return (
-    <>
-      <section className="topbar">
-        <div>
+    <div className="projects-page">
+      <header className="projects-page-heading">
+        <div className="projects-page-title">
           <h1>Projetos</h1>
-          <p>Crie uma execucao real, conduza as etapas e salve o que funcionar como template.</p>
+          <span>{tables.projects.length} projetos · {tables.clients.length} clientes</span>
         </div>
-        <button className="primary-button" onClick={() => { if (!showForm && !supportingDataReady) onPrepareSupportingData(); setShowForm((current) => !current); }}>
+        <button className="primary-button" type="button" onClick={() => { if (!supportingDataReady) onPrepareSupportingData(); setShowForm(true); }}>
           <Plus size={17} />
           Novo projeto
         </button>
-      </section>
+      </header>
 
-      <section className="metric-grid">
-        {stats.map((stat) => (
-          <article className="metric-card" key={stat.label}>
-            <span>{stat.label}</span>
-            <strong>{stat.value}</strong>
-          </article>
-        ))}
-      </section>
+      <section className="projects-portfolio" aria-labelledby="projects-portfolio-heading">
+        <div className="projects-portfolio-heading">
+          <h2 id="projects-portfolio-heading">Carteira de projetos</h2>
+          <span aria-live="polite">{filteredRows.length} de {projectRows.length}</span>
+        </div>
 
-      {showForm && (supportingDataReady ? <NewProjectPanel tables={tables} currentUser={currentUser} onCreate={onCreate} /> : <DataAreaLoading loading={supportingDataLoading} onRetry={onPrepareSupportingData} />)}
-
-      <section className="list-panel">
-        <div className="panel-heading">
-          <div>
-            <h2>Projetos reais</h2>
-            <p>Abra um projeto para executar a jornada, copiar prompts e marcar entregas.</p>
+        <div className="projects-toolbar">
+          <label className="projects-search">
+            <Search size={17} aria-hidden="true" />
+            <input aria-label="Buscar projetos por nome, cliente, tipo ou responsavel" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar projeto, cliente ou tipo" />
+          </label>
+          <div className="projects-segment-field">
+            <span>Status</span>
+            <div className="projects-segment projects-status-segment" role="group" aria-label="Filtrar projetos por status">
+              <button type="button" aria-pressed={statusFilter === "todos"} aria-label="Todos os projetos" title="Todos os projetos" onClick={() => setStatusFilter("todos")}><ListChecks size={15} aria-hidden="true" /><span>Todos</span></button>
+              <button type="button" aria-pressed={statusFilter === "em_andamento"} aria-label="Projetos em andamento" title="Em andamento, incluindo planejados e bloqueados" onClick={() => setStatusFilter("em_andamento")}><RefreshCw size={15} aria-hidden="true" /><span>Em andamento</span></button>
+              <button type="button" aria-pressed={statusFilter === "concluido"} aria-label="Projetos concluidos" title="Projetos concluidos" onClick={() => setStatusFilter("concluido")}><CheckCircle2 size={15} aria-hidden="true" /><span>Concluidos</span></button>
+            </div>
           </div>
-          <div className="panel-tools">
-            <label className="search-field">
-              <Search size={16} />
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar projeto" />
-            </label>
-            <select className="compact-select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ProjectStatus | "todos")}>
+          <label className="projects-filter">
+            <span>Responsavel</span>
+            <select value={responsibleFilter} onChange={(event) => setResponsibleFilter(event.target.value)}>
               <option value="todos">Todos</option>
-              <option value="em_andamento">Em andamento</option>
-              <option value="planejado">Planejados</option>
-              <option value="concluido">Concluidos</option>
-              <option value="bloqueado">Bloqueados</option>
-              <option value="arquivado">Arquivados</option>
+              {responsibleOptions.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
-            <select className="compact-select" value={responsibleFilter} onChange={(event) => setResponsibleFilter(event.target.value)}>
-              <option value="todos">Todos responsaveis</option>
-              {activeUsers.map((user) => (
-                <option key={user.id} value={user.id}>{user.name}</option>
-              ))}
+          </label>
+          <label className="projects-filter">
+            <span>Tipo</span>
+            <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
+              <option value="todos">Todos</option>
+              {typeOptions.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
+          </label>
+          <div className="projects-segment-field projects-group-filter">
+            <span>Agrupar por</span>
+            <div className="projects-segment projects-group-segment" role="group" aria-label="Agrupar projetos">
+              <button type="button" aria-pressed={groupBy === "none"} title="Mostrar lista sem agrupamento" onClick={() => selectGrouping("none")}><PanelTop size={15} aria-hidden="true" /><span>Lista</span></button>
+              <button type="button" aria-pressed={groupBy === "client"} title="Agrupar por cliente, inicialmente recolhido" onClick={() => selectGrouping("client")}><Users size={15} aria-hidden="true" /><span>Cliente</span></button>
+              <button type="button" aria-pressed={groupBy === "type"} title="Agrupar por tipo, inicialmente recolhido" onClick={() => selectGrouping("type")}><Layers3 size={15} aria-hidden="true" /><span>Tipo</span></button>
+            </div>
           </div>
         </div>
 
-        <div className="project-grid">
-          {filteredProjects.map((project) => {
-            const steps = tables.project_steps.filter((step) => step.project_id === project.id);
-            const applicableSteps = steps.filter((step) => !step.is_not_applicable);
-            const hasProjectSummary = summaryProjectIds.includes(project.id) || tables.project_summaries.some((summary) => summary.project_id === project.id && summary.status !== "archived");
-            const done = applicableSteps.filter((step) => step.status === "concluido" && (hasProjectSummary || !isProjectSummaryStep(step))).length;
-            const progress = applicableSteps.length ? Math.round((done / applicableSteps.length) * 100) : 0;
-            const responsibleName = getResponsibleName(project, tables.app_users);
-            const clientName = getProjectClientName(project, tables.clients);
-            const displayStatus = project.status === "bloqueado" || project.status === "arquivado"
-              ? project.status
-              : progress === 100 && applicableSteps.length > 0
-                ? "concluido"
-                : progress > 0 ? "em_andamento" : project.status;
-
-            return (
-              <article className="project-card" key={project.id}>
-                <button className="project-card-main" onClick={() => onOpen(project.id)}>
-                  <div className="project-card-head">
-                    <span className="progress-ring" style={{ "--progress": `${progress * 3.6}deg` } as CSSProperties}>
-                      <strong>{progress}%</strong>
-                    </span>
-                    <div>
-                      <strong>{project.name}</strong>
-                      <span>{clientName}</span>
-                    </div>
-                    <StatusPill status={displayStatus} />
-                  </div>
-                  <div className="progress-bar">
-                    <span style={{ width: `${progress}%` }} />
-                  </div>
-                  <small>
-                    {progress}% concluido - {applicableSteps.length} etapas aplicaveis
-                  </small>
-                  {responsibleName && <small>Responsavel: {responsibleName}</small>}
-                </button>
-                <div className="project-card-actions">
-                  <button className="secondary-button project-edit-button" type="button" onClick={() => openProjectEditor(project)}>
-                    <Pencil size={16} />
-                    Editar projeto
-                  </button>
-                  <button className="danger-text-button" onClick={() => onDelete(project.id)}>
-                    <Trash2 size={15} />
-                    Excluir projeto
-                  </button>
-                </div>
-              </article>
-            );
-          })}
+        <div className="projects-column-head" aria-hidden="true">
+          <span>Projeto</span><span>Cliente</span><span>Tipo</span><span>Responsavel</span><span>Execucao</span><span>Tempo</span><span>Status</span><span>Acoes</span>
         </div>
+        {groupedRows.map((group) => {
+          const isCollapsed = groupBy !== "none" && !expandedGroups.has(group.key);
+          return (
+            <section className="projects-group" key={group.key} aria-label={group.label || "Todos os projetos"}>
+              {groupBy !== "none" && (
+                <button className="projects-group-heading" data-tone={projectOwnerTone(group.key)} type="button" aria-expanded={!isCollapsed} onClick={() => toggleGroup(group.key)}>
+                  <ChevronDown className={isCollapsed ? "collapsed" : ""} size={16} aria-hidden="true" />
+                  <strong>{group.label}</strong>
+                  <span>{group.rows.length}</span>
+                </button>
+              )}
+              {!isCollapsed && <div className="projects-rows" role="list">
+                {group.rows.map((row) => (
+                  <ProjectPortfolioRow
+                    key={row.id}
+                    row={row}
+                    onOpen={() => onOpen(row.id)}
+                    onEdit={() => { const project = tables.projects.find((item) => item.id === row.id); if (project) openProjectEditor(project); }}
+                    onComplete={() => completeProject(row)}
+                    onReopen={() => onUpdate(row.id, { status: "em_andamento" })}
+                    onDelete={() => onDelete(row.id)}
+                  />
+                ))}
+              </div>}
+            </section>
+          );
+        })}
 
-        {filteredProjects.length === 0 && (
-          <div className="empty-state">
-            <FileText size={34} />
+        {filteredRows.length === 0 && (
+          <div className="projects-empty-state">
+            <Search size={22} aria-hidden="true" />
             <strong>Nenhum projeto encontrado</strong>
-            <span>Crie o primeiro projeto para iniciar uma jornada executavel.</span>
+            <span>Ajuste a busca ou os filtros.</span>
           </div>
         )}
       </section>
+
+      {showForm && <NewProjectDialog onClose={() => setShowForm(false)}>
+        {supportingDataReady
+          ? <NewProjectPanel tables={tables} currentUser={currentUser} onCreate={onCreate} onClose={() => setShowForm(false)} />
+          : <DataAreaLoading loading={supportingDataLoading} onRetry={onPrepareSupportingData} />}
+      </NewProjectDialog>}
 
       {editingProject && (
         <div className="modal-backdrop project-editor-backdrop" role="dialog" aria-modal="true" aria-label="Editar projeto">
@@ -3104,12 +3129,81 @@ function ProjectsView({
           </form>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
-function isProjectSummaryStep(step: ProjectStep) {
-  return normalizeSearch(step.name, step.description, step.objective).includes("sumario");
+function projectOwnerTone(name: string) {
+  let hash = 0;
+  for (const character of name) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  return (hash % 5) + 1;
+}
+
+function ProjectPortfolioRow({ row, onOpen, onEdit, onComplete, onReopen, onDelete }: {
+  row: ProjectListRow;
+  onOpen: () => void;
+  onEdit: () => void;
+  onComplete: () => void;
+  onReopen: () => void;
+  onDelete: () => void;
+}) {
+  const ownerName = row.responsibleName || "Sem responsavel";
+  const ownerInitials = row.responsibleName
+    ? row.responsibleName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()
+    : "?";
+  const age = getProjectAge(row);
+  const canReopen = row.status === "concluido" && row.progress < 100;
+  const completionDisabled = (row.displayStatus === "concluido" && !canReopen) || row.status === "arquivado";
+
+  return (
+    <article className="projects-row" role="listitem" data-status={row.displayStatus}>
+      <div className="projects-cell projects-project">
+        <button type="button" onClick={onOpen} title={row.name}>{row.name}</button>
+      </div>
+      <span className="projects-cell projects-client" title={row.clientName}>{row.clientName}</span>
+      <span className="projects-cell projects-type" title={row.projectTypeName}>{row.projectTypeName}</span>
+      <span className="projects-cell projects-owner">
+        <span className="projects-owner-tag" data-tone={projectOwnerTone(ownerName)} title={`Responsavel: ${ownerName}`}>
+          <span className="projects-owner-initials" aria-hidden="true">{ownerInitials}</span>{ownerName}
+        </span>
+      </span>
+      <span className="projects-cell projects-execution" aria-label={`${row.completedSteps} de ${row.totalSteps} etapas concluidas; ${row.progress}% do projeto`}>
+        <strong>{row.totalSteps ? `${row.completedSteps}/${row.totalSteps}` : "Sem etapas"}</strong>
+        <progress value={row.progress} max={100} aria-label={`Progresso de ${row.name}`} />
+        <span>{row.progress}%</span>
+      </span>
+      <span className={`projects-cell projects-age ${age.available ? "" : "unavailable"}`} title={age.title} aria-label={age.title}>
+        <strong>{age.label}</strong><small>{age.detail}</small>
+      </span>
+      <span className="projects-cell projects-status"><StatusPill status={row.displayStatus} /></span>
+      <div className="projects-cell projects-actions">
+        <button className="projects-action-button complete" type="button" title={canReopen ? `Reabrir ${row.name}` : completionDisabled ? "Projeto ja concluido ou arquivado" : `Concluir ${row.name}`} aria-label={canReopen ? `Reabrir ${row.name}` : row.status === "arquivado" ? `${row.name} arquivado` : `Concluir ${row.name}`} disabled={completionDisabled} onClick={canReopen ? onReopen : onComplete}>{canReopen ? <RefreshCw size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />}</button>
+        <button className="projects-action-button edit" type="button" title={`Editar ${row.name}`} aria-label={`Editar ${row.name}`} onClick={onEdit}><Pencil size={16} aria-hidden="true" /></button>
+        <button className="projects-action-button danger" type="button" title={`Excluir ${row.name}`} aria-label={`Excluir ${row.name}`} onClick={onDelete}><Trash2 size={16} aria-hidden="true" /></button>
+      </div>
+    </article>
+  );
+}
+
+function NewProjectDialog({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.open) dialog.showModal();
+  }, []);
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="project-create-dialog"
+      aria-label="Criar projeto"
+      onClose={onClose}
+      onClick={(event) => { if (event.target === dialogRef.current) dialogRef.current?.close(); }}
+    >
+      {children}
+    </dialog>
+  );
 }
 
 function ProjectTemplatesView({
@@ -3244,7 +3338,7 @@ function ProjectTemplatesView({
   );
 }
 
-function NewProjectPanel({ tables, currentUser, onCreate }: { tables: Tables; currentUser: AppUser | null; onCreate: (form: NewProjectFormState) => void }) {
+function NewProjectPanel({ tables, currentUser, onCreate, onClose }: { tables: Tables; currentUser: AppUser | null; onCreate: (form: NewProjectFormState) => void; onClose: () => void }) {
   const projectTemplates = tables.journey_templates.filter((template) => template.context === "projeto" || template.context === "geral");
   const activeUsers = tables.app_users.filter((user) => user.status === "ativo");
   const [form, setForm] = useState<NewProjectFormState>({
@@ -3263,12 +3357,8 @@ function NewProjectPanel({ tables, currentUser, onCreate }: { tables: Tables; cu
       <div className="form-heading">
         <div>
           <h2>Criar projeto</h2>
-          <p>Escolha um template salvo ou comece vazio e construa a jornada na pratica.</p>
         </div>
-        <button className="primary-button" onClick={() => onCreate(form)}>
-          <Save size={16} />
-          Criar jornada
-        </button>
+        <button className="icon-button" type="button" title="Fechar" aria-label="Fechar criacao de projeto" onClick={onClose}><X size={18} /></button>
       </div>
       <div className="form-grid">
         <Field label="Nome do projeto" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
@@ -3294,6 +3384,10 @@ function NewProjectPanel({ tables, currentUser, onCreate }: { tables: Tables; cu
           emptyLabel="Comecar vazio"
         />
         <TextArea label="Observacoes iniciais" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
+      </div>
+      <div className="project-create-footer">
+        <button className="secondary-button" type="button" onClick={onClose}>Cancelar</button>
+        <button className="primary-button" type="button" onClick={() => onCreate(form)}><Save size={16} />Criar jornada</button>
       </div>
     </section>
   );
