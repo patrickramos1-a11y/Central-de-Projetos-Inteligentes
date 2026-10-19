@@ -36,13 +36,13 @@ const tableColumns: Record<string, string[]> = {
   project_step_block_values: ["id", "project_step_id", "structure_id", "block_id", "value_json", "completion_state", "updated_by", "created_at", "updated_at"],
   project_step_block_files: ["id", "project_step_id", "structure_id", "block_id", "item_id", "name", "content_type", "size_bytes", "version_number", "description", "approval_status", "url", "created_by", "created_at"],
   project_step_block_events: ["id", "project_step_id", "structure_id", "block_id", "event_type", "event_payload_json", "created_by", "created_at"],
-  clients: ["id", "name", "company", "logo_url", "responsible", "responsible_user_id", "project_type_id", "journey_template_id", "entry_month", "status", "notes", "created_at", "updated_at"],
+  clients: ["id", "name", "company", "logo_url", "client_kind", "is_active", "responsible", "responsible_user_id", "project_type_id", "journey_template_id", "entry_month", "status", "notes", "created_at", "updated_at"],
   client_steps: ["id", "client_id", "source_journey_step_id", "name", "description", "step_order", "objective", "required_evidence_label", "status", "notes", "due_date", "completed_at", "created_at", "updated_at"],
   client_step_checklist_items: ["id", "client_step_id", "label", "is_done", "item_order", "created_at"],
   client_step_links: ["id", "client_step_id", "title", "url", "notes", "link_order", "created_at"],
 };
 
-const booleanColumns = new Set(["is_done", "is_required", "requires_previous_phase", "is_selected", "is_not_applicable"]);
+const booleanColumns = new Set(["is_done", "is_required", "requires_previous_phase", "is_selected", "is_not_applicable", "is_active"]);
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
@@ -90,6 +90,10 @@ export default {
 
       if (parts[0] === "api" && parts[1] === "files") {
         return handleFileRequest(request, env, parts.slice(2), url);
+      }
+
+      if (url.pathname === "/api/client-logos" && request.method === "POST") {
+        return handleClientLogoUpload(request, env);
       }
 
       if (env.ASSETS) {
@@ -145,6 +149,21 @@ async function handleTableRequest(request: Request, env: Env, tableName = "", id
   }
 
   return jsonError("Metodo nao permitido.", 405);
+}
+
+async function handleClientLogoUpload(request: Request, env: Env) {
+  if (!env.FILES) return jsonError("R2 nao esta habilitado.", 503);
+  const body = (await request.json()) as { contentBase64?: string; contentType?: string };
+  const extensions: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
+  const extension = extensions[body.contentType ?? ""];
+  if (!extension || !body.contentBase64 || body.contentBase64.length > 4_100_000) {
+    return jsonError("Envie uma imagem PNG, JPEG, WebP ou GIF de ate 3 MB.", 400);
+  }
+  const bytes = decodeBase64(body.contentBase64);
+  if (bytes.byteLength > 3_000_000) return jsonError("A logo deve ter ate 3 MB.", 400);
+  const key = `client-logos/${crypto.randomUUID()}.${extension}`;
+  await env.FILES.put(key, bytes.buffer, { httpMetadata: { contentType: body.contentType } });
+  return json({ data: { url: `/api/files/${encodeURIComponent(key)}` } });
 }
 
 async function handleFileRequest(request: Request, env: Env, pathParts: string[], url: URL) {

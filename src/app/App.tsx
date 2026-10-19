@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type SetStateAction } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type SetStateAction } from "react";
 import {
   Bot,
   Check,
@@ -39,6 +39,7 @@ import { parseProjectSummary } from "../lib/summaryParser";
 import { copyText as copyToClipboard } from "../components/ui/clipboard";
 import { resolveBoundSummary } from "../features/summary/summaryBinding";
 import { promptToneHue } from "../features/summary/promptTone";
+import { clientKindOptions, validateClientLogo, type ClientKind } from "../features/clients/clientIdentity";
 import { collapseAllBlockIds, toggleCollapsedBlockIds } from "../features/journey/blockPresentation";
 import { interpolateJourneyPrompt, journeyPromptVariableSuggestions } from "../features/journey/promptInterpolation";
 import {
@@ -433,6 +434,8 @@ type Client = {
   name: string;
   company: string | null;
   logo_url: string | null;
+  client_kind: ClientKind | null;
+  is_active: boolean;
   responsible: string | null;
   responsible_user_id: string | null;
   project_type_id: string | null;
@@ -564,7 +567,7 @@ const initialReadColumns: Partial<Record<keyof Tables, string>> = {
   app_users: "id,name,status,created_at,updated_at",
   projects: "id,name,company,client_id,responsible,responsible_user_id,project_type_id,journey_template_id,status,notes,created_at,updated_at",
   project_steps: "id,project_id,source_journey_step_id,name,step_order,status,is_not_applicable,created_at,updated_at",
-  clients: "id,name,company,logo_url,responsible,responsible_user_id,project_type_id,journey_template_id,entry_month,status,notes,created_at,updated_at",
+  clients: "id,name,company,logo_url,client_kind,is_active,responsible,responsible_user_id,project_type_id,journey_template_id,entry_month,status,notes,created_at,updated_at",
   project_types: "id,name,description,status,created_at",
   journey_templates: "id,name,description,project_type_id,context,status,created_at",
 };
@@ -2295,8 +2298,15 @@ export default function App() {
     if (!supabase || !form.name.trim()) {
       return;
     }
+    if (!form.client_kind) { setNotice("Selecione se o novo cliente e AC ou AV."); return; }
 
     setIsLoading(true);
+    let logoUrl = form.logo_url;
+    if (form.logo_file) {
+      const uploaded = await uploadClientLogo(form.logo_file);
+      if (!uploaded) { setIsLoading(false); return; }
+      logoUrl = uploaded;
+    }
     const templateId = form.journey_template_id || getDefaultClientTemplate(tables.journey_templates)?.id || "";
     const responsibleUser = tables.app_users.find((user) => user.id === form.responsible_user_id) ?? null;
     const { data: client, error } = await supabase
@@ -2305,7 +2315,9 @@ export default function App() {
         normalizePayload({
           name: form.name,
           company: form.company,
-          logo_url: form.logo_url,
+          logo_url: logoUrl,
+          client_kind: form.client_kind || null,
+          is_active: true,
           responsible: responsibleUser?.name ?? null,
           responsible_user_id: responsibleUser?.id ?? null,
           project_type_id: form.project_type_id,
@@ -2457,6 +2469,41 @@ export default function App() {
       ...current,
       clients: current.clients.map((client) => (client.id === clientId ? { ...client, ...payload } : client)),
     }));
+  }
+
+  async function saveClientIdentity(clientId: string, payload: Partial<Client>, logoFile: File | null): Promise<boolean> {
+    if (!supabase) return false;
+    let logoUrl = payload.logo_url;
+    if (logoFile) {
+      const uploaded = await uploadClientLogo(logoFile);
+      if (!uploaded) return false;
+      logoUrl = uploaded;
+    }
+    const update = { ...payload, ...(logoFile || "logo_url" in payload ? { logo_url: logoUrl ?? null } : {}), updated_at: new Date().toISOString() };
+    const { error } = await supabase.from("clients").update(normalizePayload(update)).eq("id", clientId);
+    if (error) { setNotice(`Erro ao atualizar cliente: ${error.message}`); return false; }
+    setTables((current) => ({ ...current, clients: current.clients.map((client) => client.id === clientId ? { ...client, ...update } : client) }));
+    setNotice("Cadastro do cliente atualizado.");
+    return true;
+  }
+
+  async function uploadClientLogo(file: File): Promise<string | null> {
+    const validationError = validateClientLogo(file);
+    if (validationError) { setNotice(validationError); return null; }
+    try {
+      const response = await fetch(`${cloudflareApiUrl.replace(/\/$/, "")}/api/client-logos`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ contentBase64: await fileToBase64(file), contentType: file.type }),
+      });
+      const body = await response.json() as { data?: { url: string }; error?: string };
+      if (!response.ok || !body.data?.url) throw new Error(body.error ?? "Falha ao enviar logo.");
+      const apiOrigin = new URL(cloudflareApiUrl || "/", window.location.origin).origin;
+      return new URL(body.data.url, apiOrigin).toString();
+    } catch (error) {
+      setNotice(`Erro ao enviar logo: ${error instanceof Error ? error.message : "erro desconhecido"}`);
+      return null;
+    }
   }
 
   async function updateClientStep(stepId: string, payload: Partial<ClientStep>) {
@@ -2760,7 +2807,7 @@ export default function App() {
 
         {view === "projectTemplates" && (currentSecondaryReady ? <ProjectTemplatesView tables={tables} query={query} setQuery={setQuery} onUpdate={updateJourneyTemplate} onDelete={deleteJourneyTemplate} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
-        {view === "clients" && (currentSecondaryReady ? <ClientsView tables={tables} currentUser={currentUser} query={query} setQuery={setQuery} onCreate={createClientJourney} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
+        {view === "clients" && (currentSecondaryReady ? <ClientsView tables={tables} currentUser={currentUser} query={query} setQuery={setQuery} onCreate={createClientJourney} onSaveIdentity={saveClientIdentity} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
         {view === "management" && (
           <ManagementView
@@ -2850,7 +2897,7 @@ export default function App() {
         )}
 
         {view === "clientJourney" && currentSecondaryReady && (!selectedClient || !selectedClientStep) && (
-          <EmptyClientJourney onBack={() => setView("clients")} />
+          <EmptyClientJourney client={selectedClient} onBack={() => setView("clients")} onCreateStep={(clientId) => void addNextClientStep(clientId, "Primeira etapa")} />
         )}
 
         {view === "settings" && !currentSecondaryReady && <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />}
@@ -2893,6 +2940,8 @@ type NewClientFormState = {
   name: string;
   company: string;
   logo_url: string;
+  logo_file: File | null;
+  client_kind: ClientKind | "";
   responsible_user_id: string;
   project_type_id: string;
   journey_template_id: string;
@@ -3073,6 +3122,7 @@ function ProjectsView({
               {groupBy !== "none" && (
                 <button className="projects-group-heading" data-tone={projectOwnerTone(group.key)} type="button" aria-expanded={!isCollapsed} onClick={() => toggleGroup(group.key)}>
                   <ChevronDown className={isCollapsed ? "collapsed" : ""} size={16} aria-hidden="true" />
+                  {groupBy === "client" && <ClientLogo client={tables.clients.find((client) => client.id === group.rows[0]?.clientId) ?? { name: group.label, logo_url: null }} small />}
                   <strong>{group.label}</strong>
                   <span>{group.rows.length}</span>
                 </button>
@@ -3082,6 +3132,7 @@ function ProjectsView({
                   <ProjectPortfolioRow
                     key={row.id}
                     row={row}
+                    client={tables.clients.find((client) => client.id === row.clientId) ?? null}
                     onOpen={() => onOpen(row.id)}
                     onEdit={() => { const project = tables.projects.find((item) => item.id === row.id); if (project) openProjectEditor(project); }}
                     onComplete={() => completeProject(row)}
@@ -3118,7 +3169,7 @@ function ProjectsView({
             </div>
             <div className="project-editor-fields">
               <Field label="Nome do projeto" value={projectNameDraft} onChange={setProjectNameDraft} />
-              <SelectField label="Cliente vinculado" value={projectClientDraft} onChange={(value) => { setProjectClientDraft(value); const client = tables.clients.find((item) => item.id === value); if (client) setProjectCompanyDraft(client.name); }} options={tables.clients.map(toOption)} />
+              <ClientSearchSelect label="Cliente vinculado" value={projectClientDraft} clients={tables.clients} onChange={(value) => { setProjectClientDraft(value); const client = tables.clients.find((item) => item.id === value); if (client) setProjectCompanyDraft(client.name); }} />
               {!projectClientDraft && <Field label="Empresa legada" value={projectCompanyDraft} onChange={setProjectCompanyDraft} />}
               <SelectField label="Responsavel" value={projectResponsibleUserDraft} onChange={setProjectResponsibleUserDraft} options={activeUsers.map(toOption)} />
             </div>
@@ -3139,8 +3190,9 @@ function projectOwnerTone(name: string) {
   return (hash % 5) + 1;
 }
 
-function ProjectPortfolioRow({ row, onOpen, onEdit, onComplete, onReopen, onDelete }: {
+function ProjectPortfolioRow({ row, client, onOpen, onEdit, onComplete, onReopen, onDelete }: {
   row: ProjectListRow;
+  client: Client | null;
   onOpen: () => void;
   onEdit: () => void;
   onComplete: () => void;
@@ -3160,7 +3212,7 @@ function ProjectPortfolioRow({ row, onOpen, onEdit, onComplete, onReopen, onDele
       <div className="projects-cell projects-project">
         <button type="button" onClick={onOpen} title={row.name}>{row.name}</button>
       </div>
-      <span className="projects-cell projects-client" title={row.clientName}>{row.clientName}</span>
+      <span className="projects-cell projects-client" title={row.clientName}>{client && <ClientLogo client={client} small />}<span>{row.clientName}</span></span>
       <span className="projects-cell projects-type" title={row.projectTypeName}>{row.projectTypeName}</span>
       <span className="projects-cell projects-owner">
         <span className="projects-owner-tag" data-tone={projectOwnerTone(ownerName)} title={`Responsavel: ${ownerName}`}>
@@ -3362,15 +3414,15 @@ function NewProjectPanel({ tables, currentUser, onCreate, onClose }: { tables: T
       </div>
       <div className="form-grid">
         <Field label="Nome do projeto" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
-        <SelectField
+        <ClientSearchSelect
           label="Cliente"
           value={form.client_id}
+          clients={tables.clients}
+          allowCreate
           onChange={(value) => {
             const client = tables.clients.find((item) => item.id === value);
             setForm({ ...form, client_id: value, company: client?.name ?? form.company, new_client_name: value === "__new" ? form.new_client_name : "" });
           }}
-          options={[...tables.clients.map(toOption), { value: "__new", label: "+ Criar novo cliente" }]}
-          emptyLabel="Selecionar cliente"
         />
         {form.client_id === "__new" && <Field label="Novo cliente" value={form.new_client_name} onChange={(value) => setForm({ ...form, new_client_name: value, company: value })} />}
         {!form.client_id && <Field label="Empresa / cliente legado" value={form.company} onChange={(value) => setForm({ ...form, company: value })} />}
@@ -3504,7 +3556,7 @@ function ManagementView({
           {filteredRows.map((row) => (
             <div className="management-row" role="row" key={row.id}>
               <button type="button" className="management-link" onClick={() => onOpenProject(row.id)}>{row.name}</button>
-              <button type="button" className="management-link subtle" disabled={!row.clientId} onClick={() => row.clientId && onOpenClient(row.clientId)}>{row.clientName}</button>
+              <button type="button" className="management-link subtle management-client-name" disabled={!row.clientId} onClick={() => row.clientId && onOpenClient(row.clientId)}>{row.clientId && <ClientLogo client={tables.clients.find((client) => client.id === row.clientId) ?? { name: row.clientName, logo_url: null }} small />}{row.clientName}</button>
               <span>{row.projectTypeName}</span>
               <span>{row.responsibleName || "Sem responsavel"}</span>
               <span><StatusPill status={row.status} /></span>
@@ -3532,7 +3584,7 @@ function ManagementView({
         <div className="management-client-grid">
           {clientRows.map((client) => (
             <button className="management-client-card" type="button" key={client.id} onClick={() => onOpenClient(client.id)}>
-              <strong>{client.name}</strong>
+              <span className="management-client-title"><ClientLogo client={tables.clients.find((item) => item.id === client.id) ?? { name: client.name, logo_url: null }} /><strong>{client.name}</strong>{tables.clients.find((item) => item.id === client.id)?.client_kind && <span className="client-kind-badge">{tables.clients.find((item) => item.id === client.id)?.client_kind}</span>}</span>
               <span>{client.company || "Cliente sem unidade informada"}</span>
               <div className="management-client-stats">
                 <small>{client.projectCount} projeto(s)</small>
@@ -3555,6 +3607,7 @@ function ClientsView({
   query,
   setQuery,
   onCreate,
+  onSaveIdentity,
   onOpen,
 }: {
   tables: Tables;
@@ -3562,14 +3615,18 @@ function ClientsView({
   query: string;
   setQuery: (query: string) => void;
   onCreate: (form: NewClientFormState) => void;
+  onSaveIdentity: (id: string, payload: Partial<Client>, logoFile: File | null) => Promise<boolean>;
   onOpen: (id: string) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const normalizedQuery = normalizeSearchText(query);
   const filteredClients = tables.clients
-    .filter((client) => normalizeSearch(client.name, client.company, getResponsibleName(client, tables.app_users)).includes(query.toLowerCase()))
+    .filter((client) => (client.is_active || showInactive || normalizedQuery) && normalizeSearchText(normalizeSearch(client.name, client.company, client.client_kind, getResponsibleName(client, tables.app_users))).includes(normalizedQuery))
     .sort((a, b) => new Date(b.updated_at ?? b.created_at).getTime() - new Date(a.updated_at ?? a.created_at).getTime());
 
-  const activeClients = tables.clients.filter((client) => client.status !== "arquivado");
+  const activeClients = tables.clients.filter((client) => client.is_active && client.status !== "arquivado");
   const doneSteps = tables.client_steps.filter((step) => step.status === "concluido").length;
   const blockedSteps = tables.client_steps.filter((step) => step.status === "bloqueado").length;
   const averageProgress = activeClients.length
@@ -3624,10 +3681,10 @@ function ClientsView({
             <h2>Jornadas de clientes</h2>
             <p>Abra um cliente para marcar checklist, anexar evidencias e concluir etapas.</p>
           </div>
-          <label className="search-field">
-            <Search size={16} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar cliente" />
-          </label>
+          <div className="clients-search-tools">
+            <label className="search-field clients-search-field"><Search size={16} /><input aria-label="Buscar clientes pelo nome, empresa, categoria ou responsavel" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar cliente, empresa ou AC/AV" /></label>
+            <button className="secondary-button" type="button" aria-pressed={showInactive} onClick={() => setShowInactive((value) => !value)}>{showInactive ? "Somente ativos" : "Ver inativos"}</button>
+          </div>
         </div>
 
         <div className="project-grid">
@@ -3638,7 +3695,8 @@ function ClientsView({
             const responsibleName = getResponsibleName(client, tables.app_users);
 
             return (
-              <button className="project-card client-card" key={client.id} onClick={() => onOpen(client.id)}>
+              <article className="project-card client-card" key={client.id}>
+                <button className="client-card-open" type="button" onClick={() => onOpen(client.id)} aria-label={`Abrir cliente ${client.name}`}>
                 <div className="client-card-head">
                   <div className="client-avatar-stack">
                     <ClientLogo client={client} />
@@ -3648,7 +3706,7 @@ function ClientsView({
                   </div>
                   <StatusPill status={client.status} />
                 </div>
-                <strong>{client.name}</strong>
+                <span className="client-name-line"><strong>{client.name}</strong>{client.client_kind && <span className="client-kind-badge">{client.client_kind}</span>}{!client.is_active && <span className="client-inactive-indicator">Inativo</span>}</span>
                 <span>{client.company || client.entry_month || "Cliente sem detalhe definido"}</span>
                 <div className="progress-bar">
                   <span style={{ width: `${progress}%` }} />
@@ -3657,7 +3715,10 @@ function ClientsView({
                   {progress}% concluido - {steps.length} etapas
                 </small>
                 {responsibleName && <small>Responsavel: {responsibleName}</small>}
-              </button>
+                </button>
+                <button className="icon-button client-edit-button" type="button" title={`Editar cadastro de ${client.name}`} aria-label={`Editar cadastro de ${client.name}`} onClick={() => setEditingClient(client)}><Pencil size={16} /></button>
+                {!client.is_active && <button className="secondary-button client-activate-button" type="button" onClick={() => void onSaveIdentity(client.id, { is_active: true }, null)}>Ativar</button>}
+              </article>
             );
           })}
         </div>
@@ -3666,10 +3727,11 @@ function ClientsView({
           <div className="empty-state">
             <Users size={34} />
             <strong>Nenhum cliente encontrado</strong>
-            <span>Crie o primeiro cliente para acompanhar uma jornada.</span>
+            <span>Refine a busca ou inclua um novo cliente.</span>
           </div>
         )}
       </section>
+      {editingClient && <ClientProfileDialog key={editingClient.id} client={editingClient} users={tables.app_users} onClose={() => setEditingClient(null)} onSave={onSaveIdentity} />}
     </>
   );
 }
@@ -3681,6 +3743,8 @@ function NewClientPanel({ tables, currentUser, onCreate }: { tables: Tables; cur
     name: "",
     company: "",
     logo_url: "",
+    logo_file: null,
+    client_kind: "",
     responsible_user_id: currentUser?.id ?? "",
     project_type_id: "",
     journey_template_id: defaultTemplate?.id ?? "",
@@ -3705,7 +3769,8 @@ function NewClientPanel({ tables, currentUser, onCreate }: { tables: Tables; cur
       <div className="form-grid">
         <Field label="Nome do cliente" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
         <Field label="Empresa / unidade" value={form.company} onChange={(value) => setForm({ ...form, company: value })} />
-        <Field label="Logo URL" value={form.logo_url} onChange={(value) => setForm({ ...form, logo_url: value })} />
+        <ClientLogoPicker name={form.name} logoUrl={form.logo_url} file={form.logo_file} onFile={(file) => setForm((current) => ({ ...current, logo_file: file }))} onRemove={() => setForm((current) => ({ ...current, logo_file: null, logo_url: "" }))} />
+        <SelectField label="Categoria do cliente" value={form.client_kind} onChange={(value) => setForm({ ...form, client_kind: value as ClientKind | "" })} options={clientKindOptions} emptyLabel="Nao definida" />
         <SelectField label="Responsavel interno" value={form.responsible_user_id} onChange={(value) => setForm({ ...form, responsible_user_id: value })} options={activeUsers.map(toOption)} />
         <Field label="Mes de entrada" value={form.entry_month} onChange={(value) => setForm({ ...form, entry_month: value })} />
         <SelectField label="Produto / tipo" value={form.project_type_id} onChange={(value) => setForm({ ...form, project_type_id: value })} options={tables.project_types.map(toOption)} />
@@ -3720,6 +3785,82 @@ function NewClientPanel({ tables, currentUser, onCreate }: { tables: Tables; cur
       </div>
     </section>
   );
+}
+
+function ClientProfileDialog({ client, users, onClose, onSave }: {
+  client: Client;
+  users: AppUser[];
+  onClose: () => void;
+  onSave: (id: string, payload: Partial<Client>, logoFile: File | null) => Promise<boolean>;
+}) {
+  const [name, setName] = useState(client.name);
+  const [company, setCompany] = useState(client.company ?? "");
+  const [clientKind, setClientKind] = useState<ClientKind | "">(client.client_kind ?? "");
+  const [logoUrl, setLogoUrl] = useState(client.logo_url ?? "");
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [responsibleUserId, setResponsibleUserId] = useState(client.responsible_user_id ?? "");
+  const [isActive, setIsActive] = useState(client.is_active);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!name.trim()) { setError("Informe o nome do cliente."); return; }
+    setSaving(true);
+    const responsible = users.find((user) => user.id === responsibleUserId) ?? null;
+    const saved = await onSave(client.id, {
+      name: name.trim(), company: company.trim() || null,
+      client_kind: clientKind || null, logo_url: logoUrl || null,
+      is_active: isActive,
+      responsible_user_id: responsible?.id ?? null, responsible: responsible?.name ?? null,
+    }, logoFile);
+    setSaving(false);
+    if (saved) onClose();
+    else setError("Nao foi possivel salvar. Confira a mensagem acima e tente novamente.");
+  }
+
+  return <div className="modal-backdrop" role="presentation" onClick={onClose}>
+    <form className="client-profile-dialog glass-panel" role="dialog" aria-modal="true" aria-label={`Editar ${client.name}`} onClick={(event) => event.stopPropagation()} onSubmit={(event) => void submit(event)}>
+      <div className="modal-heading"><h2>Editar cliente</h2><button className="icon-button" type="button" title="Fechar" onClick={onClose}><X size={17} /></button></div>
+      <div className="form-grid">
+        <Field label="Nome do cliente" value={name} onChange={setName} />
+        <Field label="Empresa / unidade" value={company} onChange={setCompany} />
+        <ClientLogoPicker name={name} logoUrl={logoUrl} file={logoFile} onFile={setLogoFile} onRemove={() => { setLogoFile(null); setLogoUrl(""); }} />
+        <SelectField label="Categoria do cliente" value={clientKind} onChange={(value) => setClientKind(value as ClientKind | "")} options={clientKindOptions} emptyLabel="Nao definida" />
+        <SelectField label="Responsavel interno" value={responsibleUserId} onChange={setResponsibleUserId} options={users.filter((user) => user.status === "ativo").map(toOption)} emptyLabel="Sem responsavel" />
+        <label className="client-active-field"><input type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} /> Cliente ativo na lista</label>
+      </div>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div className="inline-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancelar</button><button className="primary-button" type="submit" disabled={saving}>{saving ? <Loader2 className="spin" size={16} /> : <Save size={16} />} Salvar cliente</button></div>
+    </form>
+  </div>;
+}
+
+function ClientLogoPicker({ name, logoUrl, file, onFile, onRemove }: {
+  name: string;
+  logoUrl: string;
+  file: File | null;
+  onFile: (file: File) => void;
+  onRemove: () => void;
+}) {
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!file) { setPreviewUrl(""); return; }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  return <div className="client-logo-field">
+    <span className="field-label">Logo do cliente</span>
+    <div className="client-logo-input-row">
+      <ClientLogo client={{ name, logo_url: previewUrl || logoUrl }} />
+      <label className="secondary-button client-logo-upload"><Upload size={16} /> Escolher imagem<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => { const selected = event.target.files?.[0]; if (selected) { const message = validateClientLogo(selected); setError(message ?? ""); if (!message) onFile(selected); } event.currentTarget.value = ""; }} /></label>
+      {(file || logoUrl) && <button className="icon-button" type="button" title="Remover logo" aria-label="Remover logo" onClick={onRemove}><Trash2 size={16} /></button>}
+    </div>
+    {error && <small className="form-error" role="alert">{error}</small>}
+    <small>PNG, JPEG, WebP ou GIF, ate 3 MB.</small>
+  </div>;
 }
 
 function ClientJourneyView({
@@ -4000,7 +4141,7 @@ function ClientBlockJourneyView({
     <>
       <JourneyContextBar>
         <button className="ghost-button" onClick={onBack}><PanelLeft size={17} /> Clientes</button>
-        <div className="journey-context-copy"><span className="eyebrow">Ramos Jornadas</span><h1>{client.name}</h1><p>{client.company || "Jornada do cliente"}</p></div>
+        <div className="client-journey-identity"><ClientLogo client={client} large /><div className="journey-context-copy"><span className="eyebrow">Ramos Jornadas</span><h1>{client.name} {client.client_kind && <span className="client-kind-badge">{client.client_kind}</span>}</h1><p>{client.company || "Jornada do cliente"}</p></div></div>
         <div className="journey-progress"><strong>{progress}%</strong><div className="progress-bar"><span style={{ width: `${progress}%` }} /></div></div>
       </JourneyContextBar>
       <section className="journey-layout block-journey-layout">
@@ -7603,12 +7744,14 @@ function EmptyProjectJourney({ onBack }: { onBack: () => void }) {
   );
 }
 
-function EmptyClientJourney({ onBack }: { onBack: () => void }) {
+function EmptyClientJourney({ client, onBack, onCreateStep }: { client: Client | null; onBack: () => void; onCreateStep: (clientId: string) => void }) {
   return (
     <div className="empty-state tall">
-      <Users size={42} />
-      <strong>Nenhum cliente aberto</strong>
-      <span>Crie ou selecione um cliente para acompanhar a jornada.</span>
+      {client ? <ClientLogo client={client} large /> : <Users size={42} />}
+      <strong>{client?.name ?? "Nenhum cliente aberto"}</strong>
+      {client?.client_kind && <span className="client-kind-badge">{client.client_kind}</span>}
+      <span>{client ? "Este cliente ainda nao tem etapas de jornada." : "Crie ou selecione um cliente para acompanhar a jornada."}</span>
+      {client && <button className="secondary-button" onClick={() => onCreateStep(client.id)}><Plus size={16} /> Criar primeira etapa</button>}
       <button className="primary-button" onClick={onBack}>
         Voltar para clientes
       </button>
@@ -7616,12 +7759,14 @@ function EmptyClientJourney({ onBack }: { onBack: () => void }) {
   );
 }
 
-function ClientLogo({ client, large = false }: { client: Client; large?: boolean }) {
+function ClientLogo({ client, large = false, small = false }: { client: Pick<Client, "name" | "logo_url">; large?: boolean; small?: boolean }) {
   const initials = getInitials(client.name);
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => setImageFailed(false), [client.logo_url]);
 
   return (
-    <span className={`client-logo ${large ? "large" : ""}`}>
-      {client.logo_url ? <img src={client.logo_url} alt="" /> : <strong>{initials || "CL"}</strong>}
+    <span className={`client-logo ${large ? "large" : ""} ${small ? "small" : ""}`} aria-hidden="true">
+      {client.logo_url && !imageFailed ? <img src={client.logo_url} alt="" onError={() => setImageFailed(true)} /> : <strong>{initials || "CL"}</strong>}
     </span>
   );
 }
@@ -7684,6 +7829,50 @@ function TextArea({
       />
     </label>
   );
+}
+
+function ClientSearchSelect({ label, value, clients, onChange, allowCreate = false }: {
+  label: string;
+  value: string;
+  clients: Client[];
+  onChange: (value: string) => void;
+  allowCreate?: boolean;
+}) {
+  const listId = useId();
+  const selected = clients.find((client) => client.id === value);
+  const selectedLabel = selected?.name ?? (value === "__new" ? "Criar novo cliente" : "");
+  const [search, setSearch] = useState(selectedLabel);
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  useEffect(() => { if (!open) setSearch(selectedLabel); }, [selectedLabel, open]);
+  const normalized = normalizeSearchText(search);
+  const filtered = clients
+    .filter((client) => normalizeSearchText(normalizeSearch(client.name, client.company, client.client_kind)).includes(normalized))
+    .sort((a, b) => Number(b.is_active) - Number(a.is_active) || a.name.localeCompare(b.name))
+    .slice(0, 15);
+  const optionCount = filtered.length + Number(allowCreate);
+
+  function select(nextValue: string) {
+    onChange(nextValue);
+    setSearch(clients.find((client) => client.id === nextValue)?.name ?? "Criar novo cliente");
+    setOpen(false);
+  }
+
+  return <div className="field client-search-select" onBlur={(event) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) { setOpen(false); setSearch(selectedLabel); }
+  }}>
+    <span>{label}</span>
+    <div className="client-search-input"><Search size={16} aria-hidden="true" /><input type="text" role="combobox" aria-label={label} aria-autocomplete="list" aria-expanded={open} aria-controls={listId} placeholder="Digite para buscar cliente" value={search} onFocus={(event) => { setOpen(true); event.currentTarget.select(); }} onChange={(event) => { setSearch(event.target.value); setActiveIndex(0); setOpen(true); }} onKeyDown={(event) => {
+      if (event.key === "Escape") { setOpen(false); setSearch(selectedLabel); }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); setActiveIndex((current) => Math.max(0, Math.min(optionCount - 1, current + (event.key === "ArrowDown" ? 1 : -1)))); }
+      if (event.key === "Enter" && open && optionCount) { event.preventDefault(); select(activeIndex < filtered.length ? filtered[activeIndex].id : "__new"); }
+    }} /></div>
+    {open && <div id={listId} className="client-search-results" role="listbox" aria-label={`Resultados para ${label}`}>
+      {filtered.map((client, index) => <button type="button" role="option" aria-selected={index === activeIndex} className="client-search-result" key={client.id} onClick={() => select(client.id)}><ClientLogo client={client} small /><span>{client.name}</span>{client.client_kind && <span className="client-kind-badge">{client.client_kind}</span>}{!client.is_active && <small>Inativo</small>}</button>)}
+      {!filtered.length && <span className="client-search-empty">Nenhum cliente encontrado</span>}
+      {allowCreate && <button type="button" role="option" aria-selected={activeIndex === filtered.length} className="client-search-result create" onClick={() => select("__new")}><Plus size={16} /> Criar novo cliente</button>}
+    </div>}
+  </div>;
 }
 
 function SelectField({

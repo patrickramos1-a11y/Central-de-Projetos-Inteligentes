@@ -324,6 +324,14 @@
   white-space: nowrap;
 }
 
+.projects-client {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.projects-client > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
 .projects-type {
   color: #665686;
 }
