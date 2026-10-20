@@ -113,9 +113,13 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
     return json({ data: await consolidateSummary(env.DB, id, body.createdBy ?? null) }, 201);
   }
 
+  if (resource === "summaries" && id && action === "state" && request.method === "GET") {
+    return json(await getSummaryState(env.DB, id));
+  }
+
   if (resource === "summaries" && id && action === "prompts" && request.method === "POST") {
-    const body = await request.json<{ itemIds?: string[]; finalPrompt?: string; basePromptId?: string | null; basePromptSnapshot?: string | null; aiToolId?: string | null; createdBy?: string | null; notes?: string | null }>();
-    return json({ data: await saveSummaryPrompt(env.DB, id, body) }, 201);
+    const body = await request.json<{ promptId?: string; itemIds?: string[]; finalPrompt?: string; basePromptId?: string | null; basePromptSnapshot?: string | null; aiToolId?: string | null; createdBy?: string | null; notes?: string | null }>();
+    return json(await saveSummaryPrompt(env.DB, id, body), 201);
   }
 
   if (resource === "journey-files" && id && action && nested) {
@@ -824,17 +828,54 @@ async function consolidateSummary(db: D1Database, summaryId: string, createdBy: 
   return await db.prepare("select * from project_summaries where id = ?").bind(nextId).first();
 }
 
-async function saveSummaryPrompt(db: D1Database, summaryId: string, body: { itemIds?: string[]; finalPrompt?: string; basePromptId?: string | null; basePromptSnapshot?: string | null; aiToolId?: string | null; createdBy?: string | null; notes?: string | null }) {
+async function getSummaryState(db: D1Database, summaryId: string) {
+  const [summary, items, prompts] = await Promise.all([
+    db.prepare("select * from project_summaries where id = ?").bind(summaryId).first<Record<string, unknown>>(),
+    db.prepare("select * from project_summary_items where summary_id = ? order by sort_order asc").bind(summaryId).all<Record<string, unknown>>(),
+    db.prepare("select * from generated_prompts where summary_id = ? order by created_at asc").bind(summaryId).all<Record<string, unknown>>(),
+  ]);
+  if (!summary) throw new Error("Sumario nao encontrado.");
+  return { summary, items: items.results ?? [], prompts: prompts.results ?? [] };
+}
+
+async function saveSummaryPrompt(db: D1Database, summaryId: string, body: { promptId?: string; itemIds?: string[]; finalPrompt?: string; basePromptId?: string | null; basePromptSnapshot?: string | null; aiToolId?: string | null; createdBy?: string | null; notes?: string | null }) {
   const summary = await db.prepare("select * from project_summaries where id = ?").bind(summaryId).first<Record<string, unknown>>();
   if (!summary) throw new Error("Sumario nao encontrado.");
   const itemIds = Array.from(new Set((body.itemIds ?? []).filter(Boolean)));
   const finalPrompt = String(body.finalPrompt ?? "").trim();
   if (!finalPrompt || itemIds.length === 0) throw new Error("Selecione topicos e gere o prompt antes de salvar.");
-  const id = crypto.randomUUID();
+  const items = await db.prepare("select id, parent_id, status from project_summary_items where summary_id = ?").bind(summaryId)
+    .all<{ id: string; parent_id: string | null; status: string }>();
+  const byId = new Map((items.results ?? []).map((item) => [item.id, item]));
+  if (itemIds.some((id) => !byId.has(id))) throw new Error("Um ou mais topicos nao pertencem a este sumario.");
+  const id = body.promptId ?? crypto.randomUUID();
+  const previous = await db.prepare("select summary_id from generated_prompts where id = ?").bind(id).first<{ summary_id: string }>();
+  if (previous && previous.summary_id !== summaryId) throw new Error("Identificador de prompt ja utilizado.");
+  const toStart = new Set<string>();
+  for (const rootId of itemIds) {
+    if (byId.get(rootId)?.status !== "pendente") continue;
+    toStart.add(rootId);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const item of items.results ?? []) {
+        if (item.parent_id && toStart.has(item.parent_id) && !toStart.has(item.id)) {
+          toStart.add(item.id);
+          changed = true;
+        }
+      }
+    }
+  }
   const now = new Date().toISOString();
-  await db.prepare("insert into generated_prompts (id, project_id, summary_id, summary_item_id, base_prompt_id, base_prompt_snapshot, selected_blocks_json, final_prompt, notes, ai_tool_id, created_by, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(id, summary.project_id, summaryId, itemIds[0], body.basePromptId ?? null, body.basePromptSnapshot ?? null, JSON.stringify({ schemaVersion: 1, summaryItemIds: itemIds }), finalPrompt, body.notes ?? `${itemIds.length} topicos selecionados`, body.aiToolId ?? null, body.createdBy ?? null, now).run();
-  return await db.prepare("select * from generated_prompts where id = ?").bind(id).first();
+  if (!previous) {
+    const statements: D1PreparedStatement[] = [db.prepare("insert into generated_prompts (id, project_id, summary_id, summary_item_id, base_prompt_id, base_prompt_snapshot, selected_blocks_json, final_prompt, notes, ai_tool_id, created_by, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, summary.project_id, summaryId, itemIds[0], body.basePromptId ?? null, body.basePromptSnapshot ?? null, JSON.stringify({ schemaVersion: 1, summaryItemIds: itemIds }), finalPrompt, body.notes ?? `${itemIds.length} topicos selecionados`, body.aiToolId ?? null, body.createdBy ?? null, now)];
+    for (const itemId of toStart) {
+      statements.push(db.prepare("update project_summary_items set status = 'em_andamento', updated_at = ? where id = ? and status = 'pendente'").bind(now, itemId));
+    }
+    await db.batch(statements);
+  }
+  return getSummaryState(db, summaryId);
 }
 
 async function handleJourneyFileRequest(request: Request, env: Env, ownerType: OwnerType, stepId: string, blockId: string, fileId: string | undefined, _url: URL) {

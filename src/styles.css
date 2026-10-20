@@ -8429,6 +8429,32 @@ body {
 .sidebar .sidebar-user { min-width: 126px; padding: 6px 9px; border-radius: 7px; }
 .sidebar .sidebar-user span { font-size: 0.66rem; }
 .sidebar .sidebar-user strong { font-size: 0.82rem; }
+.sidebar .sidebar-user { grid-template-columns: minmax(0, 1fr) auto; }
+.sidebar .sidebar-user > span { grid-column: 1; grid-row: 1; }
+.sidebar .sidebar-user > strong { grid-column: 1 / -1; grid-row: 2; }
+.sidebar .sidebar-user > button { grid-column: 1 / -1; grid-row: 3; }
+
+.sidebar .header-sync-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #196b59;
+  grid-column: 2;
+  grid-row: 1;
+}
+.sidebar .header-sync-status span { color: inherit; font-size: inherit; }
+.sidebar .header-sync-status.saving { color: #365f8a; }
+.sidebar .header-sync-status.error { color: #aa4138; }
+.sidebar .header-sync-status button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: inherit;
+  color: inherit;
+  text-decoration: underline;
+}
 
 .collapsible-rail .rail-heading { min-width: 136px; padding-right: 9px; }
 .collapsible-rail .rail-heading > div { display: grid; gap: 1px; }

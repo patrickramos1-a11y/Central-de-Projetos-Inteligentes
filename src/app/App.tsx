@@ -8,7 +8,6 @@ import {
   ChevronUp,
   Clipboard,
   Copy,
-  Database,
   Download,
   Upload,
   FileText,
@@ -38,6 +37,7 @@ import { createSummaryApi } from "../api/summary";
 import { parseProjectSummary } from "../lib/summaryParser";
 import { copyText as copyToClipboard } from "../components/ui/clipboard";
 import { resolveBoundSummary } from "../features/summary/summaryBinding";
+import { replaceSummaryState, shouldApplySummaryState, type SummaryState } from "../features/summary/summaryState";
 import { promptToneHue } from "../features/summary/promptTone";
 import { clientKindOptions, validateClientLogo, type ClientKind } from "../features/clients/clientIdentity";
 import { collapseAllBlockIds, toggleCollapsedBlockIds } from "../features/journey/blockPresentation";
@@ -525,7 +525,6 @@ const configuredApiUrl = (import.meta.env.VITE_API_BASE_URL as string | undefine
 // Keeping the local Wrangler URL out of production prevents browsers from
 // trying to load D1 data from the visitor's own computer.
 const cloudflareApiUrl = import.meta.env.PROD ? "" : configuredApiUrl;
-const hasCloudflareApi = true;
 const supabase = createCloudflareApi(cloudflareApiUrl);
 const journeyApi = createJourneyApi(cloudflareApiUrl);
 const summaryApi = createSummaryApi(cloudflareApiUrl);
@@ -661,6 +660,7 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<"saving" | "updated" | "error">("saving");
   const [hasLoadedCore, setHasLoadedCore] = useState(false);
   const [loadedSecondaryTables, setLoadedSecondaryTables] = useState<Set<keyof Tables>>(() => new Set());
   const [secondaryLoading, setSecondaryLoading] = useState(false);
@@ -675,6 +675,13 @@ export default function App() {
   const coreRequestIdRef = useRef(0);
   const secondaryRequestIdRef = useRef(0);
   const detailRequestIdsRef = useRef(new Map<string, number>());
+  const summaryEpochsRef = useRef(new Map<string, number>());
+  const summaryReadsRef = useRef(new Map<string, { epoch: number; promise: Promise<boolean> }>());
+  const summarySavesRef = useRef(new Map<string, Promise<boolean>>());
+  const pendingPromptIdsRef = useRef(new Map<string, { fingerprint: string; id: string }>());
+  const failedPromptRef = useRef<GeneratedPromptWrite | null>(null);
+  const selectedProjectIdRef = useRef(selectedProjectId);
+  selectedProjectIdRef.current = selectedProjectId;
   const lastAutoRefreshRef = useRef(0);
   const lastViewedAreaRef = useRef<ViewMode>("projects");
   const lastReadFailedRef = useRef(false);
@@ -698,6 +705,7 @@ export default function App() {
 
   const currentSecondaryReady = activeSecondaryTables(view, activeConfig).every((name) => loadedSecondaryTables.has(name));
   const projectFormReady = projectFormTables.every((name) => loadedSecondaryTables.has(name));
+  const headerSyncStatus = syncStatus === "saving" ? "saving" : tableErrors.length > 0 ? "error" : syncStatus;
 
   useEffect(() => {
     void refreshCore();
@@ -717,8 +725,9 @@ export default function App() {
   }, [view, selectedProjectId]);
 
   useEffect(() => {
-    const refreshWhenActive = () => {
-      if (document.visibilityState !== "visible" || Date.now() - lastAutoRefreshRef.current < 15_000) return;
+    const refreshWhenActive = (event: Event) => {
+      const minimumGap = view === "journey" ? 1_000 : 15_000;
+      if (document.visibilityState !== "visible" || (event.type !== "online" && Date.now() - lastAutoRefreshRef.current < minimumGap)) return;
       lastAutoRefreshRef.current = Date.now();
       void refreshActive(false);
     };
@@ -730,7 +739,7 @@ export default function App() {
       window.removeEventListener("focus", refreshWhenActive);
       window.removeEventListener("online", refreshWhenActive);
     };
-  }, [view, selectedProjectId]);
+  }, [view, selectedProjectId, loadedProjectDetails, tables.project_summaries, activeConfig]);
 
   useEffect(() => {
     const showToast = (event: Event) => {
@@ -820,7 +829,10 @@ export default function App() {
     setTableErrors((current) => [...current.filter((name) => !names.includes(name)), ...errors]);
     if (errors.length) {
       lastReadFailedRef.current = true;
+      setSyncStatus("error");
       setNotice(`Falha ao atualizar: ${errors.join(", ")}. Os ultimos dados validos foram mantidos.`);
+    } else if (summarySavesRef.current.size === 0) {
+      setSyncStatus("updated");
     }
   }
 
@@ -958,15 +970,64 @@ export default function App() {
     return promise;
   }
 
+  function applySummaryState(state: SummaryState<ProjectSummary, ProjectSummaryItem, GeneratedPrompt>) {
+    setTables((current) => {
+      const updated = replaceSummaryState({ summaries: current.project_summaries, items: current.project_summary_items, prompts: current.generated_prompts }, state);
+      return { ...current, project_summaries: updated.summaries, project_summary_items: updated.items, generated_prompts: updated.prompts };
+    });
+  }
+
+  function refreshSummaryState(summaryId: string, projectId: string): Promise<boolean> {
+    const epoch = summaryEpochsRef.current.get(summaryId) ?? 0;
+    const current = summaryReadsRef.current.get(summaryId);
+    if (current?.epoch === epoch) return current.promise;
+    const promise = (async () => {
+      try {
+        const state = await summaryApi.getState(summaryId) as SummaryState<ProjectSummary, ProjectSummaryItem, GeneratedPrompt>;
+        if (!shouldApplySummaryState(epoch, summaryEpochsRef.current.get(summaryId) ?? 0, projectId, selectedProjectIdRef.current)) return false;
+        applySummaryState(state);
+        setTableErrors((errors) => errors.filter((name) => name !== "sumario"));
+        return true;
+      } catch {
+        if (!shouldApplySummaryState(epoch, summaryEpochsRef.current.get(summaryId) ?? 0, projectId, selectedProjectIdRef.current)) return false;
+        lastReadFailedRef.current = true;
+        setSyncStatus("error");
+        setTableErrors((errors) => [...new Set([...errors, "sumario"])]);
+        setNotice("Falha ao atualizar o sumario. Os ultimos dados validos foram mantidos.");
+        return false;
+      }
+    })().finally(() => {
+      if (summaryReadsRef.current.get(summaryId)?.promise === promise) summaryReadsRef.current.delete(summaryId);
+    });
+    summaryReadsRef.current.set(summaryId, { epoch, promise });
+    return promise;
+  }
+
   async function refreshActive(announce: boolean) {
-    if (announce) setIsSyncing(true);
+    if (announce) {
+      setIsSyncing(true);
+      setSyncStatus("saving");
+    }
     lastReadFailedRef.current = false;
     try {
+      if (view === "journey" && selectedProjectId && loadedProjectDetails.has(selectedProjectId)) {
+        const summaries = tables.project_summaries.filter((summary) => summary.project_id === selectedProjectId && summary.status !== "archived");
+        if (summaries.length) await Promise.all(summaries.map((summary) => refreshSummaryState(summary.id, selectedProjectId)));
+        else await refreshProjectDetails(selectedProjectId);
+        if (!lastReadFailedRef.current) {
+          setSyncStatus("updated");
+          if (announce) setNotice("Sumario atualizado.");
+        }
+        return;
+      }
       await refreshCore();
       const required = activeSecondaryTables(view, activeConfig);
       if (required.length) await refreshSecondary(required);
       if (view === "journey" && selectedProjectId) await refreshProjectDetails(selectedProjectId);
-      if (announce && !lastReadFailedRef.current) setNotice("Dados sincronizados.");
+      if (!lastReadFailedRef.current) {
+        setSyncStatus("updated");
+        if (announce) setNotice("Dados atualizados.");
+      }
     } finally {
       if (announce) setIsSyncing(false);
     }
@@ -2004,45 +2065,46 @@ export default function App() {
     if (!supabase || !payload.summary_id || !payload.final_prompt.trim()) {
       return false;
     }
-
-    try {
-      const saved = await summaryApi.savePrompt(payload.summary_id, {
-        itemIds: getGeneratedPromptItemIds(payload),
-        finalPrompt: payload.final_prompt,
-        basePromptId: payload.base_prompt_id,
-        basePromptSnapshot: payload.base_prompt_snapshot,
-        aiToolId: payload.ai_tool_id,
-        createdBy: payload.created_by || currentUser?.name || "Patrick",
-        notes: payload.notes,
-      }) as GeneratedPrompt;
-      setTables((current) => ({ ...current, generated_prompts: [...current.generated_prompts, saved] }));
-      setNotice("Prompt salvo no historico do projeto.");
-      return true;
-    } catch {
-      // Compatibility fallback while an older Worker is still serving assets.
-    }
-
-    const { data, error } = await supabase
-      .from<GeneratedPrompt>("generated_prompts")
-      .insert(
-        normalizePayload({
-          ...payload,
-          status: "ativo",
-          archived_at: null,
-          created_by: payload.created_by || currentUser?.name || "Patrick",
-        }),
-      )
-      .select("*")
-      .single();
-
-    if (error || !data) {
-      setNotice(`Erro ao salvar historico do prompt: ${error?.message ?? "erro desconhecido"}`);
-      return false;
-    }
-
-    setTables((current) => ({ ...current, generated_prompts: [...current.generated_prompts, data as GeneratedPrompt] }));
-    setNotice("Prompt salvo no historico do projeto.");
-    return true;
+    const summaryId = payload.summary_id;
+    const inFlight = summarySavesRef.current.get(summaryId);
+    if (inFlight) return inFlight;
+    const fingerprint = JSON.stringify([getGeneratedPromptItemIds(payload), payload.final_prompt, payload.base_prompt_snapshot, payload.notes]);
+    const previous = pendingPromptIdsRef.current.get(summaryId);
+    const promptId = previous?.fingerprint === fingerprint ? previous.id : crypto.randomUUID();
+    pendingPromptIdsRef.current.set(summaryId, { fingerprint, id: promptId });
+    const epoch = (summaryEpochsRef.current.get(summaryId) ?? 0) + 1;
+    summaryEpochsRef.current.set(summaryId, epoch);
+    localMutationVersionRef.current += 1;
+    setSyncStatus("saving");
+    const promise = (async () => {
+      try {
+        const state = await summaryApi.savePrompt(summaryId, {
+          promptId,
+          itemIds: getGeneratedPromptItemIds(payload),
+          finalPrompt: payload.final_prompt,
+          basePromptId: payload.base_prompt_id,
+          basePromptSnapshot: payload.base_prompt_snapshot,
+          aiToolId: payload.ai_tool_id,
+          createdBy: payload.created_by || currentUser?.name || "Patrick",
+          notes: payload.notes,
+        }) as SummaryState<ProjectSummary, ProjectSummaryItem, GeneratedPrompt>;
+        if (shouldApplySummaryState(epoch, summaryEpochsRef.current.get(summaryId) ?? 0, payload.project_id, selectedProjectIdRef.current)) applySummaryState(state);
+        pendingPromptIdsRef.current.delete(summaryId);
+        failedPromptRef.current = null;
+        setTableErrors((errors) => errors.filter((name) => name !== "sumario"));
+        setSyncStatus("updated");
+        setNotice("Prompt e topicos do sumario atualizados.");
+        return true;
+      } catch (error) {
+        failedPromptRef.current = payload;
+        setSyncStatus("error");
+        setTableErrors((errors) => [...new Set([...errors, "sumario"])]);
+        setNotice(`Erro ao salvar o prompt do sumario: ${error instanceof Error ? error.message : "tente novamente"}. Os ultimos dados validos foram mantidos.`);
+        return false;
+      }
+    })().finally(() => summarySavesRef.current.delete(summaryId));
+    summarySavesRef.current.set(summaryId, promise);
+    return promise;
   }
 
   async function archiveGeneratedPrompt(promptId: string, summaryItemId?: string) {
@@ -2758,6 +2820,11 @@ export default function App() {
           <span>Usuario atual</span>
           <strong>{currentUser.name}</strong>
           <button onClick={() => setCurrentUserId("")}>Trocar usuario</button>
+          <div className={`header-sync-status ${headerSyncStatus}`} role="status" aria-live="polite" title={headerSyncStatus === "saving" ? "Salvando ou atualizando dados" : headerSyncStatus === "error" ? "Falha na ultima atualizacao" : "Ultima atualizacao confirmada"}>
+            {headerSyncStatus === "saving" ? <Loader2 className="spin" size={15} /> : headerSyncStatus === "error" ? <X size={15} /> : <CheckCircle2 size={15} />}
+            <span>{headerSyncStatus === "saving" ? "Salvando" : headerSyncStatus === "error" ? "Erro" : "Atualizado"}</span>
+            {headerSyncStatus === "error" && <button type="button" title="Tentar novamente" aria-label="Tentar novamente" onClick={() => void (failedPromptRef.current && failedPromptRef.current.project_id === selectedProjectIdRef.current ? saveGeneratedPrompt(failedPromptRef.current) : loadAll())}><RefreshCw size={14} /></button>}
+          </div>
         </div>
 
         {view === "settings" && (
@@ -2777,15 +2844,6 @@ export default function App() {
       </aside>
 
       <main className="workspace">
-        <div className={`setup-alert ${hasCloudflareApi ? "connected" : ""}`}>
-          {isSyncing ? <Loader2 className="spin" size={18} /> : <Database size={18} />}
-          <span>{isSyncing ? "Sincronizando dados..." : tableErrors.length > 0 ? "Existem pendencias de dados para revisar." : hasCloudflareApi ? "Dados conectados ao Cloudflare." : "Configure a API Cloudflare para conectar ao banco D1."}</span>
-          {tableErrors.length > 0 && <span className="table-error-count">{tableErrors.length} pendencia(s)</span>}
-          <button className="ghost-button" onClick={() => void loadAll()}>
-            <RefreshCw size={16} />
-            Sincronizar
-          </button>
-        </div>
         {notice && <div className="ui-toast-stack"><Toast message={notice} tone={notice.startsWith("Erro") || notice.startsWith("Falha") || notice.startsWith("Nao foi") ? "error" : "success"} onDismiss={() => setNotice(null)} /></div>}
 
         {view === "projects" && (
@@ -5591,6 +5649,7 @@ function LegacySummaryOperationalBlock({
 }) {
   const [summarySearch, setSummarySearch] = useState("");
   const [isSavingTemplate, setIsSavingTemplate] = useState(false);
+  const [isSavingPrompt, setIsSavingPrompt] = useState(false);
   const [collapsedTopicIds, setCollapsedTopicIds] = useState<string[]>([]);
   const [promptScopeIds, setPromptScopeIds] = useState<string[]>([]);
   const [selectedPromptOptions, setSelectedPromptOptions] = useState<string[]>([]);
@@ -5679,25 +5738,25 @@ function LegacySummaryOperationalBlock({
   }
 
   async function saveComposedPrompt() {
-    if (!summary || !basePrompt || !finalPrompt.trim() || selectedPromptItems.length === 0) return;
+    if (isSavingPrompt || !summary || !basePrompt || !finalPrompt.trim() || selectedPromptItems.length === 0) return;
+    setIsSavingPrompt(true);
     const summaryItemIds = selectedPromptItems.map((item) => item.id);
-    const saved = await onSaveGeneratedPrompt({
-      project_id: project.id,
-      summary_id: summary.id,
-      summary_item_id: summaryItemIds[0] ?? null,
-      base_prompt_id: null,
-      base_prompt_snapshot: basePrompt.content,
-      selected_blocks_json: JSON.stringify({ schemaVersion: 1, summaryItemIds, promptOptions: selectedPromptAdditions, promptBlocks: [] }),
-      final_prompt: finalPrompt,
-      notes: summaryItemIds.length > 1 ? `${summaryItemIds.length} topicos selecionados` : selectedPromptItems[0] ? `Topico ${selectedPromptItems[0].topic_number} - ${selectedPromptItems[0].title}` : "Prompt geral do sumario",
-      ai_tool_id: null,
-      created_by: currentUser?.name ?? null,
-    });
-    if (!saved) return;
-
-    selectedPromptItems
-      .filter((item) => item.status === "pendente")
-      .forEach((item) => onUpdateItem(item.id, { status: "em_andamento" }));
+    try {
+      await onSaveGeneratedPrompt({
+        project_id: project.id,
+        summary_id: summary.id,
+        summary_item_id: summaryItemIds[0] ?? null,
+        base_prompt_id: null,
+        base_prompt_snapshot: basePrompt.content,
+        selected_blocks_json: JSON.stringify({ schemaVersion: 1, summaryItemIds, promptOptions: selectedPromptAdditions, promptBlocks: [] }),
+        final_prompt: finalPrompt,
+        notes: summaryItemIds.length > 1 ? `${summaryItemIds.length} topicos selecionados` : selectedPromptItems[0] ? `Topico ${selectedPromptItems[0].topic_number} - ${selectedPromptItems[0].title}` : "Prompt geral do sumario",
+        ai_tool_id: null,
+        created_by: currentUser?.name ?? null,
+      });
+    } finally {
+      setIsSavingPrompt(false);
+    }
   }
 
   function updateSummaryItemStatus(item: ProjectSummaryItem, status: SummaryItemStatus) {
@@ -5805,7 +5864,7 @@ function LegacySummaryOperationalBlock({
               );
             }) : <span className="summary-additions-empty">Configure adicionais no editor do sumario.</span>}
           </div>
-          <button className="summary-composer-save-card primary-button" type="button" disabled={!basePrompt} onClick={saveComposedPrompt}><Save size={15} /> Salvar prompt</button>
+          <button className="summary-composer-save-card primary-button" type="button" disabled={!basePrompt || isSavingPrompt} onClick={() => void saveComposedPrompt()}>{isSavingPrompt ? <Loader2 className="spin" size={15} /> : <Save size={15} />} {isSavingPrompt ? "Salvando" : "Salvar prompt"}</button>
           <button className="summary-composer-trigger-card secondary-button" type="button" disabled={!resolvedTriggerPromptText} title={resolvedTriggerPromptText ? "Copiar prompt fixo para iniciar a execucao" : "Configure o prompt de gatilho no editor"} onClick={() => void copyToClipboard(resolvedTriggerPromptText, "Prompt de gatilho")}><Copy size={15} /> Copiar gatilho</button>
         </div>
       )}
@@ -5964,7 +6023,7 @@ function SummaryTechnicalExecutionBlock({
     const summaryItemIds = selectedPromptItems.map((item) => item.id);
     const copied = await copyToClipboard(finalPrompt, "Composicao de prompt");
     if (!copied) return;
-    onSaveGeneratedPrompt({
+    await onSaveGeneratedPrompt({
       project_id: project.id,
       summary_id: summary.id,
       summary_item_id: summaryItemIds[0] ?? null,

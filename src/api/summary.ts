@@ -1,4 +1,5 @@
 export type SummaryPromptInput = {
+  promptId: string;
   itemIds: string[];
   finalPrompt: string;
   basePromptId?: string | null;
@@ -6,6 +7,12 @@ export type SummaryPromptInput = {
   aiToolId?: string | null;
   createdBy?: string | null;
   notes?: string | null;
+};
+
+export type SummaryState<TSummary, TItem, TPrompt> = {
+  summary: TSummary;
+  items: TItem[];
+  prompts: TPrompt[];
 };
 
 type ApiEnvelope<T> = { data?: T; error?: string };
@@ -35,7 +42,12 @@ export function createSummaryApi(baseUrl: string) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(input),
       });
-      return read<Record<string, unknown>>(response);
+      return read<SummaryState<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>>(response);
+    },
+
+    async getState(summaryId: string) {
+      const response = await fetch(`${base}/api/summaries/${encodeURIComponent(summaryId)}/state`);
+      return read<SummaryState<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>>(response);
     },
   };
 }
