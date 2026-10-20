@@ -3462,7 +3462,7 @@ function ManagementView({
   onOpenClient: (id: string) => void;
 }) {
   const [view, setView] = useState<"attention" | "portfolio" | "clients">("attention");
-  const [attentionFilter, setAttentionFilter] = useState<ManagementAttentionKind | "todos">("todos");
+  const [attentionFilter, setAttentionFilter] = useState<ManagementAttentionKind | "ativos">("ativos");
   const [clientFilter, setClientFilter] = useState("todos");
   const [responsibleFilter, setResponsibleFilter] = useState("todos");
   const [typeFilter, setTypeFilter] = useState("todos");
@@ -3486,8 +3486,10 @@ function ManagementView({
   const clientRows = buildManagementClientRows(tables.clients, projectRows).sort((a, b) => b.projectCount - a.projectCount || a.name.localeCompare(b.name));
   const activeProjects = projectRows.filter((row) => !["concluido", "arquivado"].includes(row.status));
   const allAttentionRows = buildManagementAttentionRows(projectRows);
+  const activeAttentionCount = allAttentionRows.filter((row) => row.status !== "concluido").length;
   const filteredAttentionRows = buildManagementAttentionRows(searchedRows);
-  const attentionRows = filteredAttentionRows.filter((row) => attentionFilter === "todos" || row.reasons.includes(attentionFilter));
+  const attentionRows = filteredAttentionRows.filter((row) => attentionFilter === "ativos" ? row.status !== "concluido" : row.reasons.includes(attentionFilter));
+  const visibleActiveProjects = activeProjects.filter((row) => searchedRows.some((searched) => searched.id === row.id));
   const visibleClients = clientRows.filter((client) => client.projectCount > 0 && normalizeSearchText(`${client.name} ${client.company}`).includes(normalizeSearchText(query)));
   const attentionKinds: ManagementAttentionKind[] = ["bloqueado", "sem_cliente", "sem_responsavel", "sem_tipo", "concluido_com_etapas_abertas"];
 
@@ -3511,7 +3513,7 @@ function ManagementView({
         </article>
         <article className="metric-card">
           <span>Precisam de revisao</span>
-          <strong>{allAttentionRows.length}</strong>
+          <strong>{activeAttentionCount}</strong>
         </article>
         <article className="metric-card">
           <span>Clientes com projetos</span>
@@ -3521,7 +3523,7 @@ function ManagementView({
 
       <div className="management-view-bar">
         <div className="projects-segment" role="group" aria-label="Visao da gestao">
-          <button type="button" aria-pressed={view === "attention"} onClick={() => setView("attention")}><ListChecks size={16} />Atencao <span>{allAttentionRows.length}</span></button>
+          <button type="button" aria-pressed={view === "attention"} onClick={() => setView("attention")}><ListChecks size={16} />Acompanhar <span>{activeProjects.length}</span></button>
           <button type="button" aria-pressed={view === "portfolio"} onClick={() => setView("portfolio")}><Layers3 size={16} />Carteira</button>
           <button type="button" aria-pressed={view === "clients"} onClick={() => setView("clients")}><Users size={16} />Clientes</button>
         </div>
@@ -3529,9 +3531,9 @@ function ManagementView({
       </div>
 
       {view === "attention" && <section className="list-panel management-panel management-attention">
-        <div className="panel-heading"><div><h2>Fila de atencao</h2><p>Situacoes registradas e dados de cadastro a revisar. Sem prazos presumidos.</p></div></div>
+        <div className="panel-heading"><div><h2>Fila de atencao</h2><p>Bloqueios e vinculos a revisar; conclusoes manuais ficam em uma revisao separada.</p></div></div>
         <div className="management-attention-filters" role="group" aria-label="Filtrar motivos de atencao">
-          <button type="button" aria-pressed={attentionFilter === "todos"} onClick={() => setAttentionFilter("todos")}>Todos <span>{filteredAttentionRows.length}</span></button>
+          <button type="button" aria-pressed={attentionFilter === "ativos"} onClick={() => setAttentionFilter("ativos")}>Projetos ativos <span>{filteredAttentionRows.filter((row) => row.status !== "concluido").length}</span></button>
           {attentionKinds.map((kind) => <button type="button" key={kind} aria-pressed={attentionFilter === kind} onClick={() => setAttentionFilter(kind)}>{managementAttentionLabels[kind]} <span>{filteredAttentionRows.filter((row) => row.reasons.includes(kind)).length}</span></button>)}
         </div>
         <div className="management-attention-list">
@@ -3542,6 +3544,16 @@ function ManagementView({
             <button type="button" className="secondary-button" onClick={() => onOpenProject(row.id)}>Abrir <ChevronRight size={15} /></button>
           </div>)}
           {attentionRows.length === 0 && <div className="empty-state"><CheckCircle2 size={28} /><strong>Nenhum projeto nesta fila</strong><span>Os filtros atuais nao mostram pendencias de cadastro ou bloqueios.</span></div>}
+        </div>
+        <div className="management-execution-heading"><h3>Projetos abertos</h3><span>{visibleActiveProjects.length} projeto(s)</span></div>
+        <div className="management-attention-list">
+          {visibleActiveProjects.map((row) => <div className="management-attention-item" key={row.id}>
+            <div className="management-attention-identity"><button type="button" className="management-link" onClick={() => onOpenProject(row.id)}>{row.name}</button><small>{row.clientName} | {row.responsibleName || "Sem responsavel"}</small></div>
+            <span className="management-next-step">{row.nextStepName ? `Proxima etapa: ${row.nextStepName}` : "Sem proxima etapa registrada"}</span>
+            <span className="management-attention-progress">{row.completedSteps}/{row.totalSteps} etapas</span>
+            <button type="button" className="secondary-button" onClick={() => onOpenProject(row.id)}>Abrir <ChevronRight size={15} /></button>
+          </div>)}
+          {visibleActiveProjects.length === 0 && <div className="empty-state"><CheckCircle2 size={28} /><strong>Nenhum projeto aberto encontrado</strong></div>}
         </div>
       </section>}
 

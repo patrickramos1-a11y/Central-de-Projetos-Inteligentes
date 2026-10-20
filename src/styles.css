@@ -735,7 +735,11 @@ button {
 .management-reason.sem_cliente { color: #225995; background: #e6f0fb; }
 .management-reason.sem_responsavel { color: #68489a; background: #f0eafb; }
 .management-attention-progress { color: #536a62; font-size: 12px; white-space: nowrap; }
+.management-next-step { min-width: 0; overflow: hidden; color: #36594f; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .management-attention-item .secondary-button { min-height: 32px; padding: 5px 9px; font-size: 12px; }
+.management-execution-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 13px 18px 9px; border-top: 1px solid #d9e5df; }
+.management-execution-heading h3 { margin: 0; font-size: 14px; }
+.management-execution-heading span { color: #66736f; font-size: 12px; }
 
 .management-tools {
   flex-wrap: wrap;
@@ -849,6 +853,7 @@ button {
   .management-view-bar .projects-segment button { flex: 1; justify-content: center; }
   .management-attention-item { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
   .management-attention-reasons { grid-column: 1 / -1; grid-row: 2; }
+  .management-next-step { grid-column: 1 / -1; grid-row: 2; }
   .management-attention-progress { grid-column: 1; grid-row: 3; }
   .management-attention-item .secondary-button { grid-column: 2; grid-row: 1; }
   .management-tools {

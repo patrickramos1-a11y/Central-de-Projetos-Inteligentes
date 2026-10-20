@@ -35,6 +35,8 @@ export type ManagementUser = {
 export type ManagementStep = {
   id: string;
   project_id: string;
+  name?: string | null;
+  step_order?: number | null;
   status: string;
   is_not_applicable?: boolean | null;
 };
@@ -55,6 +57,7 @@ export type ManagementProjectRow = {
   progress: number;
   totalSteps: number;
   completedSteps: number;
+  nextStepName: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -215,6 +218,9 @@ export function buildManagementProjectRows(input: {
     const client = resolveProjectClient(project, input.clients);
     const projectTypeId = inferProjectTypeId(project, input.projectTypes);
     const progress = calculateProjectProgress(project.id, input.steps);
+    const nextStep = input.steps
+      .filter((step) => step.project_id === project.id && !step.is_not_applicable && step.status !== "concluido")
+      .sort((a, b) => (a.step_order ?? 0) - (b.step_order ?? 0))[0];
     const inferredType = inferProjectTypeName(project.name);
     const typeName = input.projectTypes.find((type) => type.id === projectTypeId)?.name ?? inferredType;
 
@@ -233,6 +239,7 @@ export function buildManagementProjectRows(input: {
       status: project.status,
       createdAt: project.created_at ?? "",
       updatedAt: project.updated_at ?? project.created_at ?? "",
+      nextStepName: nextStep?.name?.trim() ?? "",
       ...progress,
     };
   });

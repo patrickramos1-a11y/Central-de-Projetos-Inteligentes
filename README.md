@@ -30,6 +30,10 @@ VITE_API_BASE_URL=
 
 Use `VITE_API_BASE_URL` vazio quando o frontend e a API estiverem no mesmo dominio. A publicacao atual usa o proprio Worker para servir frontend e API, entao o build final usa esta variavel vazia.
 
+Para desenvolver com Vite, use `VITE_API_BASE_URL=http://127.0.0.1:8787` e mantenha `bun run cf:dev` rodando em outro terminal. O frontend Vite sozinho abre a pagina, mas nao carrega dados se o Worker nessa porta estiver parado.
+
+O D1 local comeca vazio. Para testar com uma copia dos dados atuais sem alterar a producao, crie um snapshot com `bun run cf:d1:backup` e restaure-o com `bun scripts/restore-d1-local.ts cloudflare/backups/NOME-DO-SNAPSHOT.json`. O restaurador aceita somente snapshots na pasta ignorada pelo Git e recusa sobrescrever um D1 local que ja contenha projetos. Arquivos R2 nao sao copiados por esse comando.
+
 ## Cloudflare
 
 Arquivos principais:

@@ -78,8 +78,8 @@ describe("managementModel", () => {
         },
       ],
       steps: [
-        { id: "step-1", project_id: "project-1", status: "concluido" },
-        { id: "step-2", project_id: "project-1", status: "pendente" },
+        { id: "step-1", project_id: "project-1", name: "Inicio", step_order: 1, status: "concluido" },
+        { id: "step-2", project_id: "project-1", name: "Contexto", step_order: 2, status: "pendente" },
         { id: "step-3", project_id: "project-1", status: "concluido", is_not_applicable: true },
       ],
     });
@@ -94,6 +94,7 @@ describe("managementModel", () => {
       progress: 50,
       totalSteps: 2,
       completedSteps: 1,
+      nextStepName: "Contexto",
     });
 
     expect(filterManagementProjectRows(rows, { search: "advance", clientId: "todos" })).toHaveLength(1);
