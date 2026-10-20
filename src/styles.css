@@ -674,6 +674,69 @@ button {
   margin-bottom: 16px;
 }
 
+.management-view-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 18px 0 12px;
+}
+
+.management-view-bar .search-field { flex: 1 1 280px; max-width: 440px; }
+.management-view-bar .projects-segment { max-width: 100%; }
+.management-view-bar .projects-segment button { min-height: 38px; gap: 6px; }
+.management-view-bar .projects-segment button span { font-size: 11px; font-weight: 800; }
+
+.management-attention-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 18px 14px;
+}
+
+.management-attention-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid #d8e2de;
+  border-radius: 6px;
+  color: #38564e;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.management-attention-filters button[aria-pressed="true"] { border-color: #047857; color: #075c45; background: #e5f5ec; }
+.management-attention-filters button span { color: #697b74; }
+.management-attention-filters button:focus-visible,
+.management-attention-item button:focus-visible { outline: 2px solid #166dd1; outline-offset: 2px; }
+
+.management-attention-list { border-top: 1px solid #e3ebe7; }
+.management-attention-item {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(230px, 2fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 18px;
+  border-bottom: 1px solid #e7eeeb;
+}
+.management-attention-item:last-child { border-bottom: 0; }
+.management-attention-identity { display: grid; gap: 3px; min-width: 0; }
+.management-attention-identity .management-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.management-attention-identity small { color: #66736f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.management-attention-reasons { display: flex; flex-wrap: wrap; gap: 5px; }
+.management-reason { padding: 4px 7px; border-radius: 4px; background: #eaf1ef; color: #36594f; font-size: 11px; font-weight: 700; }
+.management-reason.bloqueado { color: #923c3c; background: #fbe8e8; }
+.management-reason.concluido_com_etapas_abertas { color: #865314; background: #fff1d5; }
+.management-reason.sem_cliente { color: #225995; background: #e6f0fb; }
+.management-reason.sem_responsavel { color: #68489a; background: #f0eafb; }
+.management-attention-progress { color: #536a62; font-size: 12px; white-space: nowrap; }
+.management-attention-item .secondary-button { min-height: 32px; padding: 5px 9px; font-size: 12px; }
+
 .management-tools {
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -781,6 +844,13 @@ button {
 }
 
 @media (max-width: 720px) {
+  .management-view-bar .search-field { max-width: none; }
+  .management-view-bar .projects-segment { width: 100%; }
+  .management-view-bar .projects-segment button { flex: 1; justify-content: center; }
+  .management-attention-item { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
+  .management-attention-reasons { grid-column: 1 / -1; grid-row: 2; }
+  .management-attention-progress { grid-column: 1; grid-row: 3; }
+  .management-attention-item .secondary-button { grid-column: 2; grid-row: 1; }
   .management-tools {
     align-items: stretch;
   }

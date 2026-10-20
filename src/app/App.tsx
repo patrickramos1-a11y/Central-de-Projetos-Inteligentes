@@ -43,10 +43,13 @@ import { clientKindOptions, validateClientLogo, type ClientKind } from "../featu
 import { collapseAllBlockIds, toggleCollapsedBlockIds } from "../features/journey/blockPresentation";
 import { interpolateJourneyPrompt, journeyPromptVariableSuggestions } from "../features/journey/promptInterpolation";
 import {
+  buildManagementAttentionRows,
   buildManagementClientRows,
   buildManagementProjectRows,
   filterManagementProjectRows,
   getProjectClientName,
+  managementAttentionLabels,
+  type ManagementAttentionKind,
   type ManagementStatus,
 } from "../features/management/managementModel";
 import {
@@ -3458,6 +3461,8 @@ function ManagementView({
   onOpenProject: (id: string) => void;
   onOpenClient: (id: string) => void;
 }) {
+  const [view, setView] = useState<"attention" | "portfolio" | "clients">("attention");
+  const [attentionFilter, setAttentionFilter] = useState<ManagementAttentionKind | "todos">("todos");
   const [clientFilter, setClientFilter] = useState("todos");
   const [responsibleFilter, setResponsibleFilter] = useState("todos");
   const [typeFilter, setTypeFilter] = useState("todos");
@@ -3477,10 +3482,14 @@ function ManagementView({
     projectTypeId: typeFilter,
     status: statusFilter,
   });
+  const searchedRows = filterManagementProjectRows(projectRows, { search: query });
   const clientRows = buildManagementClientRows(tables.clients, projectRows).sort((a, b) => b.projectCount - a.projectCount || a.name.localeCompare(b.name));
   const activeProjects = projectRows.filter((row) => !["concluido", "arquivado"].includes(row.status));
-  const averageProgress = projectRows.length ? Math.round(projectRows.reduce((total, row) => total + row.progress, 0) / projectRows.length) : 0;
-  const uncategorizedCount = projectRows.filter((row) => !row.projectTypeId).length;
+  const allAttentionRows = buildManagementAttentionRows(projectRows);
+  const filteredAttentionRows = buildManagementAttentionRows(searchedRows);
+  const attentionRows = filteredAttentionRows.filter((row) => attentionFilter === "todos" || row.reasons.includes(attentionFilter));
+  const visibleClients = clientRows.filter((client) => client.projectCount > 0 && normalizeSearchText(`${client.name} ${client.company}`).includes(normalizeSearchText(query)));
+  const attentionKinds: ManagementAttentionKind[] = ["bloqueado", "sem_cliente", "sem_responsavel", "sem_tipo", "concluido_com_etapas_abertas"];
 
   return (
     <>
@@ -3497,30 +3506,52 @@ function ManagementView({
           <strong>{activeProjects.length}</strong>
         </article>
         <article className="metric-card">
+          <span>Bloqueados</span>
+          <strong>{projectRows.filter((row) => row.status === "bloqueado").length}</strong>
+        </article>
+        <article className="metric-card">
+          <span>Precisam de revisao</span>
+          <strong>{allAttentionRows.length}</strong>
+        </article>
+        <article className="metric-card">
           <span>Clientes com projetos</span>
           <strong>{clientRows.filter((row) => row.projectCount > 0).length}</strong>
         </article>
-        <article className="metric-card">
-          <span>Progresso medio</span>
-          <strong>{averageProgress}%</strong>
-        </article>
-        <article className="metric-card">
-          <span>Sem tipo definido</span>
-          <strong>{uncategorizedCount}</strong>
-        </article>
       </section>
 
-      <section className="list-panel management-panel">
+      <div className="management-view-bar">
+        <div className="projects-segment" role="group" aria-label="Visao da gestao">
+          <button type="button" aria-pressed={view === "attention"} onClick={() => setView("attention")}><ListChecks size={16} />Atencao <span>{allAttentionRows.length}</span></button>
+          <button type="button" aria-pressed={view === "portfolio"} onClick={() => setView("portfolio")}><Layers3 size={16} />Carteira</button>
+          <button type="button" aria-pressed={view === "clients"} onClick={() => setView("clients")}><Users size={16} />Clientes</button>
+        </div>
+        <label className="search-field"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar projeto ou cliente" aria-label="Buscar na gestao" /></label>
+      </div>
+
+      {view === "attention" && <section className="list-panel management-panel management-attention">
+        <div className="panel-heading"><div><h2>Fila de atencao</h2><p>Situacoes registradas e dados de cadastro a revisar. Sem prazos presumidos.</p></div></div>
+        <div className="management-attention-filters" role="group" aria-label="Filtrar motivos de atencao">
+          <button type="button" aria-pressed={attentionFilter === "todos"} onClick={() => setAttentionFilter("todos")}>Todos <span>{filteredAttentionRows.length}</span></button>
+          {attentionKinds.map((kind) => <button type="button" key={kind} aria-pressed={attentionFilter === kind} onClick={() => setAttentionFilter(kind)}>{managementAttentionLabels[kind]} <span>{filteredAttentionRows.filter((row) => row.reasons.includes(kind)).length}</span></button>)}
+        </div>
+        <div className="management-attention-list">
+          {attentionRows.map((row) => <div className="management-attention-item" key={row.id}>
+            <div className="management-attention-identity"><button type="button" className="management-link" onClick={() => onOpenProject(row.id)}>{row.name}</button><small>{row.clientName} | {row.responsibleName || "Sem responsavel"}</small></div>
+            <div className="management-attention-reasons">{row.reasons.map((reason) => <span key={reason} className={`management-reason ${reason}`}>{managementAttentionLabels[reason]}</span>)}</div>
+            <span className="management-attention-progress">{row.completedSteps}/{row.totalSteps} etapas</span>
+            <button type="button" className="secondary-button" onClick={() => onOpenProject(row.id)}>Abrir <ChevronRight size={15} /></button>
+          </div>)}
+          {attentionRows.length === 0 && <div className="empty-state"><CheckCircle2 size={28} /><strong>Nenhum projeto nesta fila</strong><span>Os filtros atuais nao mostram pendencias de cadastro ou bloqueios.</span></div>}
+        </div>
+      </section>}
+
+      {view === "portfolio" && <section className="list-panel management-panel">
         <div className="panel-heading">
           <div>
             <h2>Carteira de projetos</h2>
-            <p>Filtre por cliente, responsavel, tipo e status para priorizar a execucao.</p>
+            <p>Visao consolidada por cliente, responsavel, tipo e status.</p>
           </div>
           <div className="panel-tools management-tools">
-            <label className="search-field">
-              <Search size={16} />
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar na gestao" />
-            </label>
             <select className="compact-select" value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}>
               <option value="todos">Todos clientes</option>
               {tables.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
@@ -3572,9 +3603,9 @@ function ManagementView({
             <span>Ajuste os filtros para visualizar a carteira.</span>
           </div>
         )}
-      </section>
+      </section>}
 
-      <section className="list-panel management-panel">
+      {view === "clients" && <section className="list-panel management-panel">
         <div className="panel-heading">
           <div>
             <h2>Clientes consolidados</h2>
@@ -3582,7 +3613,7 @@ function ManagementView({
           </div>
         </div>
         <div className="management-client-grid">
-          {clientRows.map((client) => (
+          {visibleClients.map((client) => (
             <button className="management-client-card" type="button" key={client.id} onClick={() => onOpenClient(client.id)}>
               <span className="management-client-title"><ClientLogo client={tables.clients.find((item) => item.id === client.id) ?? { name: client.name, logo_url: null }} /><strong>{client.name}</strong>{tables.clients.find((item) => item.id === client.id)?.client_kind && <span className="client-kind-badge">{tables.clients.find((item) => item.id === client.id)?.client_kind}</span>}</span>
               <span>{client.company || "Cliente sem unidade informada"}</span>
@@ -3596,7 +3627,8 @@ function ManagementView({
             </button>
           ))}
         </div>
-      </section>
+        {visibleClients.length === 0 && <div className="empty-state"><Users size={28} /><strong>Nenhum cliente encontrado</strong></div>}
+      </section>}
     </>
   );
 }

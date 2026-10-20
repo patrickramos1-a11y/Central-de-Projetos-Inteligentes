@@ -43,11 +43,13 @@ export type ManagementProjectRow = {
   id: string;
   name: string;
   clientId: string | null;
+  hasClientLink: boolean;
   clientName: string;
   legacyCompany: string;
   responsibleUserId: string;
   responsibleName: string;
   projectTypeId: string;
+  hasProjectTypeLink: boolean;
   projectTypeName: string;
   status: ManagementStatus;
   progress: number;
@@ -75,6 +77,37 @@ export type ManagementFilters = {
   projectTypeId?: string;
   status?: ManagementStatus | "todos";
 };
+
+export type ManagementAttentionKind = "bloqueado" | "sem_cliente" | "sem_responsavel" | "sem_tipo" | "concluido_com_etapas_abertas";
+
+export const managementAttentionLabels: Record<ManagementAttentionKind, string> = {
+  bloqueado: "Bloqueado",
+  sem_cliente: "Cliente nao vinculado",
+  sem_responsavel: "Sem responsavel",
+  sem_tipo: "Tipo nao vinculado",
+  concluido_com_etapas_abertas: "Concluido com etapas abertas",
+};
+
+export type ManagementAttentionRow = ManagementProjectRow & { reasons: ManagementAttentionKind[] };
+
+export function buildManagementAttentionRows(rows: ManagementProjectRow[]): ManagementAttentionRow[] {
+  return rows.flatMap((row) => {
+    if (row.status === "arquivado") return [];
+    const reasons: ManagementAttentionKind[] = [];
+    if (row.status === "bloqueado") reasons.push("bloqueado");
+    if (row.status === "concluido") {
+      if (row.totalSteps > 0 && row.completedSteps < row.totalSteps) reasons.push("concluido_com_etapas_abertas");
+    } else {
+      if (!row.hasClientLink) reasons.push("sem_cliente");
+      if (!row.responsibleName) reasons.push("sem_responsavel");
+      if (!row.hasProjectTypeLink) reasons.push("sem_tipo");
+    }
+    return reasons.length ? [{ ...row, reasons }] : [];
+  }).sort((a, b) => {
+    const priority = (row: ManagementAttentionRow) => row.reasons.includes("bloqueado") ? 0 : row.reasons.includes("concluido_com_etapas_abertas") ? 1 : 2;
+    return priority(a) - priority(b) || new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime();
+  });
+}
 
 const PROJECT_TYPE_ALIASES: Array<{ idHint: string; label: string; match: RegExp }> = [
   { idHint: "rca-pca", label: "RCA/PCA", match: /\bRCA\b[\s/+-]*(?:E\s+)?\bPCA\b|\bPCA\b[\s/+-]*(?:E\s+)?\bRCA\b/ },
@@ -189,11 +222,13 @@ export function buildManagementProjectRows(input: {
       id: project.id,
       name: project.name,
       clientId: client?.id ?? project.client_id ?? null,
+      hasClientLink: Boolean(project.client_id && client?.id === project.client_id),
       clientName: client?.name ?? project.company?.trim() ?? "Sem cliente vinculado",
       legacyCompany: project.company?.trim() ?? "",
       responsibleUserId: resolveResponsibleUserId(project, input.users),
       responsibleName: resolveResponsibleName(project, input.users),
       projectTypeId,
+      hasProjectTypeLink: Boolean(project.project_type_id && input.projectTypes.some((type) => type.id === project.project_type_id)),
       projectTypeName: typeName || "Sem tipo definido",
       status: project.status,
       createdAt: project.created_at ?? "",

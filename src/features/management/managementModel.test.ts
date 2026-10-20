@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  buildManagementAttentionRows,
   buildManagementClientRows,
   buildManagementProjectRows,
   filterManagementProjectRows,
@@ -86,7 +87,9 @@ describe("managementModel", () => {
     expect(rows[0]).toMatchObject({
       clientId: "client-1",
       clientName: "Bento Sushi",
+      hasClientLink: false,
       projectTypeId: "type-pca",
+      hasProjectTypeLink: false,
       responsibleUserId: "user-patrick",
       progress: 50,
       totalSteps: 2,
@@ -98,5 +101,28 @@ describe("managementModel", () => {
 
     const clientRows = buildManagementClientRows(clients, rows);
     expect(clientRows.find((client) => client.id === "client-1")).toMatchObject({ projectCount: 1, averageProgress: 50 });
+  });
+
+  test("prioritizes blocked projects and only reports attention from recorded data", () => {
+    const rows = buildManagementProjectRows({
+      clients,
+      projectTypes,
+      users,
+      projects: [
+        { id: "missing", name: "Personalizado", status: "em_andamento", created_at: "2026-01-01" },
+        { id: "done", name: "RIA Advance", client_id: "client-2", responsible: "Patrick", project_type_id: "type-ria", status: "concluido", created_at: "2026-01-02" },
+        { id: "blocked", name: "PCA Bento", client_id: "client-1", responsible: "Patrick", project_type_id: "type-pca", status: "bloqueado", created_at: "2026-01-03" },
+        { id: "archived", name: "Arquivo", status: "arquivado" },
+      ],
+      steps: [
+        { id: "step-1", project_id: "done", status: "concluido" },
+        { id: "step-2", project_id: "done", status: "pendente" },
+      ],
+    });
+    const attention = buildManagementAttentionRows(rows);
+    expect(attention.map((row) => row.id)).toEqual(["blocked", "done", "missing"]);
+    expect(attention.find((row) => row.id === "done")?.reasons).toEqual(["concluido_com_etapas_abertas"]);
+    expect(attention.find((row) => row.id === "missing")?.reasons).toEqual(["sem_cliente", "sem_responsavel", "sem_tipo"]);
+    expect(attention.some((row) => row.id === "archived")).toBe(false);
   });
 });
