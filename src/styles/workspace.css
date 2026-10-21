@@ -16,9 +16,21 @@
 .workspace-na { display: flex; align-items: center; gap: 7px; margin: 8px 0; font-size: .85rem; }
 .workspace-empty { margin: 10px 0 0; color: var(--text-soft, #647873); font-size: .85rem; }
 .workspace-reference-list { display: grid; gap: 1px; margin-top: 10px; border: 1px solid #d8e4df; border-radius: 6px; overflow: hidden; }
-.workspace-reference { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 9px 11px; background: rgba(255,255,255,.75); }
+.workspace-reference { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 9px 11px; border-left: 3px solid transparent; background: rgba(255,255,255,.75); }
+.workspace-reference[data-provider="server"], .client-workspace-project li[data-provider="server"] { border-left-color: #3180a6; background: #f0f8fc; }
+.workspace-reference[data-provider="chatgpt"], .client-workspace-project li[data-provider="chatgpt"] { border-left-color: #16856b; background: #f0faf6; }
+.workspace-reference[data-provider="claude"], .client-workspace-project li[data-provider="claude"] { border-left-color: #ce6a50; background: #fff5f1; }
+.workspace-reference[data-provider="notebooklm"], .client-workspace-project li[data-provider="notebooklm"] { border-left-color: #567dc0; background: #f2f6ff; }
+.workspace-reference[data-provider="google-drive"], .client-workspace-project li[data-provider="google-drive"] { border-left-color: #d2a422; background: #fffbef; }
 .workspace-reference + .workspace-reference { border-top: 1px solid #e2ebe7; }
-.workspace-reference-copy { display: grid; gap: 2px; min-width: 0; }
+.workspace-reference-copy { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.workspace-provider-badge { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 108px; width: 108px; min-height: 30px; box-sizing: border-box; padding: 4px 6px; border: 1px solid #b7cfd9; border-radius: 5px; color: #24516a; background: #fff; font-size: .72rem; font-weight: 700; white-space: nowrap; }
+.workspace-provider-badge img { width: 18px; height: 18px; object-fit: contain; background: #fff; }
+.workspace-provider-badge[data-provider="chatgpt"] { border-color: #a9d9c9; color: #126751; }
+.workspace-provider-badge[data-provider="claude"] { border-color: #ecc1b3; color: #99452e; }
+.workspace-provider-badge[data-provider="notebooklm"] { border-color: #b9cbec; color: #3b5996; }
+.workspace-provider-badge[data-provider="google-drive"] { border-color: #e9d99f; color: #786215; }
+.workspace-provider-badge[data-provider="link"] { border-color: #cad5d2; color: #536b66; }
 .workspace-reference-copy strong, .workspace-reference-copy span, .workspace-reference-copy small { overflow-wrap: anywhere; }
 .workspace-reference-copy span { color: #276d70; font-size: .85rem; }
 .workspace-reference-copy small { color: #637773; }
@@ -39,8 +51,7 @@
 .client-workspace-project > header > div { display: grid; flex: 1; min-width: 150px; }
 .client-workspace-project > header small { color: #607b74; }
 .client-workspace-project ul { margin: 8px 0; padding: 0; list-style: none; }
-.client-workspace-project li { display: flex; align-items: center; gap: 7px; padding: 5px 0; border-top: 1px solid #e8efec; }
-.workspace-kind-label { width: 68px; color: #647873; font-size: .73rem; }
+.client-workspace-project li { display: flex; align-items: center; gap: 7px; padding: 7px 8px; border-top: 1px solid #e8efec; border-left: 3px solid transparent; }
 .workspace-ref-text { display: grid; flex: 1; min-width: 0; }
 .workspace-ref-text strong, .workspace-ref-text small { overflow-wrap: anywhere; }
 .workspace-ref-text small { color: #397578; }
@@ -54,7 +65,10 @@
   .template-preview-modal:has(.template-workspace-guidance) { box-sizing: border-box; width: 100%; max-width: 100%; max-height: calc(100vh - 16px); overflow-y: auto; }
   .workspace-stage-body { padding: 12px; }
   .workspace-stage-intro { flex-wrap: wrap; }
-  .workspace-reference { display: block; }
+  .workspace-reference { flex-wrap: wrap; }
+  .workspace-reference-copy { flex-basis: calc(100% - 132px); }
+  .client-workspace-project li { flex-wrap: wrap; }
+  .client-workspace-project .workspace-ref-text { flex-basis: calc(100% - 125px); }
   .workspace-reference-actions { margin-top: 7px; flex-wrap: wrap; }
   .modal-backdrop:has(.client-workspaces-dialog) { padding: 8px; }
   .client-workspaces-dialog { width: 100%; }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { browserAccessibleUrl, workspaceMissing, workspaceStatus } from "./workspaceModel";
+import { browserAccessibleUrl, workspaceMissing, workspaceProvider, workspaceStatus } from "./workspaceModel";
 import { buildManagementAttentionRows, buildManagementClientRows, buildManagementProjectRows } from "../management/managementModel";
 import { buildProjectListRows, filterProjectListRows } from "../projects/projectListModel";
 
@@ -22,6 +22,15 @@ describe("local de trabalho", () => {
     expect(browserAccessibleUrl("C:\\Projetos\\Cliente")).toBeNull();
     expect(browserAccessibleUrl("file:///C:/Projetos")).toBeNull();
     expect(browserAccessibleUrl("javascript:alert(1)")).toBeNull();
+  });
+
+  test("identifies provider badges from the destination without changing the reference kind", () => {
+    expect(workspaceProvider("directory", "\\\\Servidor\\Projetos\\PCA")).toBe("server");
+    expect(workspaceProvider("conversation", "https://chatgpt.com/g/project/c/123")).toBe("chatgpt");
+    expect(workspaceProvider("conversation", "https://claude.ai/chat/123")).toBe("claude");
+    expect(workspaceProvider("support", "https://notebooklm.google.com/notebook/123")).toBe("notebooklm");
+    expect(workspaceProvider("support", "https://drive.google.com/drive/folders/123")).toBe("google-drive");
+    expect(workspaceProvider("support", "https://example.com/file")).toBe("link");
   });
 
   test("historically completed project needs regularization without changing its saved status", () => {

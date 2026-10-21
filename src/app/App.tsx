@@ -58,6 +58,7 @@ import {
   filterProjectListRows,
   getProjectAge,
   groupProjectListRows,
+  projectPrimaryAction,
   type ProjectGroupBy,
   type ProjectListRow,
   type ProjectListStatusFilter,
@@ -3250,6 +3251,7 @@ function ProjectsView({
                     key={row.id}
                     row={row}
                     client={tables.clients.find((client) => client.id === row.clientId) ?? null}
+                    workspace={workspaces.find((item) => item.projectId === row.id)}
                     onOpen={() => onOpen(row.id)}
                     onEdit={() => { const project = tables.projects.find((item) => item.id === row.id); if (project) openProjectEditor(project); }}
                     onComplete={() => completeProject(row)}
@@ -3307,9 +3309,10 @@ function projectOwnerTone(name: string) {
   return (hash % 5) + 1;
 }
 
-function ProjectPortfolioRow({ row, client, onOpen, onEdit, onComplete, onReopen, onDelete }: {
+function ProjectPortfolioRow({ row, client, workspace, onOpen, onEdit, onComplete, onReopen, onDelete }: {
   row: ProjectListRow;
   client: Client | null;
+  workspace?: WorkspaceOverview;
   onOpen: () => void;
   onEdit: () => void;
   onComplete: () => void;
@@ -3321,8 +3324,10 @@ function ProjectPortfolioRow({ row, client, onOpen, onEdit, onComplete, onReopen
     ? row.responsibleName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()
     : "?";
   const age = getProjectAge(row);
-  const canReopen = row.historicalStatus === "concluido" && !row.regularizationPending && row.progress < 100;
-  const completionDisabled = (row.displayStatus === "concluido" && !canReopen) || row.status === "arquivado";
+  const primaryAction = projectPrimaryAction(row, workspace);
+  const primaryActionLabel = primaryAction === "workspace"
+    ? `Completar local de trabalho de ${row.name}${workspace && !workspace.directoryCount ? ": falta diretorio do servidor" : ""}`
+    : primaryAction === "reopen" ? `Reabrir ${row.name}` : primaryAction === "disabled" ? "Projeto ja concluido ou arquivado" : `Concluir ${row.name}`;
 
   return (
     <article className="projects-row" role="listitem" data-status={row.displayStatus}>
@@ -3346,7 +3351,7 @@ function ProjectPortfolioRow({ row, client, onOpen, onEdit, onComplete, onReopen
       </span>
       <span className="projects-cell projects-status">{row.regularizationPending ? <StatusPill status="regularizacao_pendente" /> : <StatusPill status={row.displayStatus} />}</span>
       <div className="projects-cell projects-actions">
-        <button className="projects-action-button complete" type="button" title={row.regularizationPending ? `Regularizar local de trabalho de ${row.name}` : canReopen ? `Reabrir ${row.name}` : completionDisabled ? "Projeto ja concluido ou arquivado" : `Concluir ${row.name}`} aria-label={row.regularizationPending ? `Regularizar local de trabalho de ${row.name}` : canReopen ? `Reabrir ${row.name}` : row.status === "arquivado" ? `${row.name} arquivado` : `Concluir ${row.name}`} disabled={completionDisabled} onClick={row.regularizationPending ? onOpen : canReopen ? onReopen : onComplete}>{row.regularizationPending ? <FolderOpen size={16} aria-hidden="true" /> : canReopen ? <RefreshCw size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />}</button>
+        <button className="projects-action-button complete" type="button" title={primaryActionLabel} aria-label={primaryActionLabel} disabled={primaryAction === "disabled"} onClick={primaryAction === "workspace" ? onOpen : primaryAction === "reopen" ? onReopen : onComplete}>{primaryAction === "workspace" ? <FolderOpen size={16} aria-hidden="true" /> : primaryAction === "reopen" ? <RefreshCw size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />}</button>
         <button className="projects-action-button edit" type="button" title={`Editar ${row.name}`} aria-label={`Editar ${row.name}`} onClick={onEdit}><Pencil size={16} aria-hidden="true" /></button>
         <button className="projects-action-button danger" type="button" title={`Excluir ${row.name}`} aria-label={`Excluir ${row.name}`} onClick={onDelete}><Trash2 size={16} aria-hidden="true" /></button>
       </div>

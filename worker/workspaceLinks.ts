@@ -96,22 +96,11 @@ export async function readLinkedWorkspaceReferences(db: D1Database, projectId?: 
       select 1 from journey_step_documents newer where newer.owner_type = 'project' and newer.step_id = d.step_id and newer.state = 'draft'
     )) ${filter}
     union all
-    select s.project_id, s.id, s.name, b.value ->> '$.title',
-      'config', d.id || ':' || (b.value ->> '$.id'), l.value ->> '$.id', cast(l.key as text),
-      l.value ->> '$.title', l.value ->> '$.url', coalesce(d.updated_at, d.created_at)
-    from journey_step_documents d
-    join project_steps s on s.id = d.step_id and s.project_id = d.owner_id
-    join json_each(d.document_json, '$.blocks') b on b.value ->> '$.type' = 'materials'
-    join json_each(b.value, '$.config.links') l
-    where d.owner_type = 'project' and d.state in ('draft', 'published') and (d.state = 'draft' or not exists (
-      select 1 from journey_step_documents newer where newer.owner_type = 'project' and newer.step_id = d.step_id and newer.state = 'draft'
-    )) ${filter}
-    union all
     select s.project_id, s.id, s.name, 'Links da etapa',
       'legacy', l.id, l.id, cast(l.link_order as text), l.title, l.url, l.created_at
     from project_step_links l join project_steps s on s.id = l.project_step_id
     where 1 = 1 ${filter}`;
-  const bindings = projectId ? [projectId, projectId, projectId] : [];
+  const bindings = projectId ? [projectId, projectId] : [];
   const rows = await db.prepare(sql).bind(...bindings).all<LinkedRow>();
   return (rows.results ?? []).map(toLinkedReference).filter((ref): ref is WorkspaceReference => Boolean(ref));
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { buildManagementProjectRows } from "../management/managementModel";
-import { buildProjectListRows, filterProjectListRows, getProjectAge, groupProjectListRows } from "./projectListModel";
+import { buildProjectListRows, filterProjectListRows, getProjectAge, groupProjectListRows, projectPrimaryAction } from "./projectListModel";
 
 const baseRows = buildManagementProjectRows({
   clients: [{ id: "client-1", name: "Bento Sushi" }, { id: "client-2", name: "Advance" }],
@@ -14,6 +14,14 @@ const baseRows = buildManagementProjectRows({
 });
 
 describe("projectListModel", () => {
+  test("shows a folder action until the work location is organized", () => {
+    const row = { historicalStatus: "em_andamento" as const, displayStatus: "em_andamento" as const, status: "em_andamento" as const, progress: 22 };
+    expect(projectPrimaryAction(row)).toBe("workspace");
+    expect(projectPrimaryAction(row, { status: "parcial" })).toBe("workspace");
+    expect(projectPrimaryAction(row, { status: "organizado" })).toBe("complete");
+    expect(projectPrimaryAction({ ...row, historicalStatus: "concluido", progress: 80 }, { status: "organizado" })).toBe("reopen");
+    expect(projectPrimaryAction({ ...row, status: "arquivado" }, { status: "organizado" })).toBe("disabled");
+  });
   test("uses the same summary-aware progress as the project cards", () => {
     const steps = [
       { project_id: "pca", name: "Contexto", status: "concluido" },

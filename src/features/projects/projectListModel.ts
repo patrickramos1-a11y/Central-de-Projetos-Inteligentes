@@ -41,6 +41,16 @@ export type ProjectAge = {
   available: boolean;
 };
 
+export function projectPrimaryAction(
+  row: Pick<ProjectListRow, "historicalStatus" | "displayStatus" | "status" | "progress">,
+  workspace?: Pick<WorkspaceOverview, "status">,
+): "workspace" | "reopen" | "complete" | "disabled" {
+  if (workspace?.status !== "organizado") return "workspace";
+  if (row.historicalStatus === "concluido" && row.progress < 100) return "reopen";
+  if (row.displayStatus === "concluido" || row.status === "arquivado") return "disabled";
+  return "complete";
+}
+
 export function getProjectAge(row: Pick<ProjectListRow, "createdAt" | "displayStatus">, now = new Date()): ProjectAge {
   const created = new Date(row.createdAt);
   if (!row.createdAt || !Number.isFinite(created.getTime())) {

@@ -53,13 +53,14 @@ describe("linked workspace references", () => {
       insert into project_workspaces (project_id, conversation_not_applicable, revision) values ('p', 0, 0);
       insert into project_steps values ('step', 'p', 'INICIAR PROJETOS');
       insert into journey_step_documents values ('doc', 'project', 'p', 'step', 'draft',
-        '{"blocks":[{"id":"block","type":"materials","title":"Links e materiais","config":{"links":[{"id":"folder","title":"Pasta do projeto","url":"https://drive.google.com/drive/folders/folder"}]}}]}', '2026-01-01', '2026-01-01');
+        '{"blocks":[{"id":"block","type":"materials","title":"Links e materiais","config":{"links":[{"id":"folder","title":"Pasta de Trabalho","url":"https://chatgpt.com/g/g-p-template/project"}]}}]}', '2026-01-01', '2026-01-01');
       insert into journey_step_values values ('value', 'project', 'doc', 'block',
         '{"links":[{"id":"chat","title":"Conversa do projeto","url":"https://chatgpt.com/c/chat"}]}', '2026-01-01', '2026-01-01');`);
     let overview = (await readWorkspaceOverview(d1))[0];
-    expect(overview).toMatchObject({ directoryCount: 0, conversationCount: 1, supportCount: 1, status: "parcial" });
+    expect(overview).toMatchObject({ directoryCount: 0, conversationCount: 1, supportCount: 0, status: "parcial" });
     let linked = await readLinkedWorkspaceReferences(d1, "p");
-    expect(linked).toHaveLength(2);
+    expect(linked).toHaveLength(1);
+    expect(linked.some((ref) => ref.title === "Pasta de Trabalho")).toBe(false);
     expect(linked.find((ref) => ref.kind === "conversation")?.origin?.stepName).toBe("INICIAR PROJETOS");
 
     sqlite.query("update journey_step_values set value_json = ? where id = 'value'").run(JSON.stringify({ links: [
@@ -68,11 +69,11 @@ describe("linked workspace references", () => {
     ] }));
     linked = await readLinkedWorkspaceReferences(d1, "p");
     expect(linked.find((ref) => ref.kind === "conversation")?.title).toBe("Conversa atualizada");
-    expect((await readWorkspaceOverview(d1))[0].supportCount).toBe(2);
+    expect((await readWorkspaceOverview(d1))[0].supportCount).toBe(1);
 
     sqlite.query("update journey_step_values set value_json = ? where id = 'value'").run(JSON.stringify({ links: [] }));
     overview = (await readWorkspaceOverview(d1))[0];
-    expect(overview).toMatchObject({ directoryCount: 0, conversationCount: 0, supportCount: 1, status: "nao_iniciado" });
+    expect(overview).toMatchObject({ directoryCount: 0, conversationCount: 0, supportCount: 0, status: "nao_iniciado" });
     sqlite.close();
   });
 
@@ -94,6 +95,18 @@ describe("linked workspace references", () => {
       insert into project_workspace_references values ('two', 'p', 'support', 'PCA - RCA', 'https://chatgpt.com/g/g-p-project/c/chat-id', null, 1, '2026-01-01', '2026-01-01');`);
     expect((await readWorkspaceOverview(d1))[0]).toMatchObject({ directoryCount: 0, conversationCount: 1, supportCount: 1, status: "parcial" });
     expect(sqlite.query("select kind from project_workspace_references where id = 'one'").get()).toMatchObject({ kind: "directory" });
+    sqlite.close();
+  });
+
+  test("keeps links entered in legacy project steps while ignoring template configuration", async () => {
+    const { sqlite, d1 } = database();
+    sqlite.exec(`insert into projects values ('p', null);
+      insert into project_steps values ('step', 'p', 'CONTEXTO');
+      insert into project_step_links values ('consultant-link', 'step', 'Pasta do cliente', 'https://drive.google.com/drive/folders/client', 0, '2026-01-01');
+      insert into journey_step_documents values ('doc', 'project', 'p', 'step', 'draft',
+        '{"blocks":[{"id":"block","type":"materials","title":"Links","config":{"links":[{"id":"template-link","title":"Pasta de Trabalho","url":"https://chatgpt.com/g/template/project"}]}}]}', '2026-01-01', '2026-01-01');`);
+    const linked = await readLinkedWorkspaceReferences(d1, "p");
+    expect(linked).toMatchObject([{ title: "Pasta do cliente", kind: "support", origin: { stepName: "CONTEXTO" } }]);
     sqlite.close();
   });
 

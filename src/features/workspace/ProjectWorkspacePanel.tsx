@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpRight, CheckCircle2, Copy, ExternalLink, Pencil, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
 import { copyText } from "../../components/ui/clipboard";
-import { browserAccessibleUrl, serverDirectoryPath, workspaceMissing, workspaceStatusLabel, type ProjectWorkspace, type WorkspaceKind, type WorkspaceOverview, type WorkspaceReference } from "./workspaceModel";
+import { browserAccessibleUrl, serverDirectoryPath, workspaceMissing, workspaceProvider, workspaceStatusLabel, type ProjectWorkspace, type WorkspaceKind, type WorkspaceOverview, type WorkspaceReference } from "./workspaceModel";
+import { WorkspaceProviderBadge } from "./WorkspaceProviderBadge";
 
 type Draft = { id: string; kind: WorkspaceKind; title: string; target: string; notes: string };
 const emptyDraft = (kind: WorkspaceKind): Draft => ({ id: crypto.randomUUID(), kind, title: "", target: "", notes: "" });
@@ -131,7 +132,8 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, onChanged, onOpenSte
           const accessible = browserAccessibleUrl(ref.target);
           const manualKind = workspace.manualReferences.filter((item) => item.kind === kind);
           const manualIndex = manualKind.findIndex((item) => item.id === ref.id);
-          return <article className="workspace-reference" key={ref.id}>
+          return <article className="workspace-reference" data-provider={workspaceProvider(ref.kind, ref.target)} key={ref.id}>
+            <WorkspaceProviderBadge kind={ref.kind} target={ref.target} />
             <div className="workspace-reference-copy"><strong>{ref.title}</strong><span title={ref.target}>{ref.target}</span>{ref.notes && <small>{ref.notes}</small>}{ref.origin ? <small>Da etapa: {ref.origin.stepName}</small> : ref.updated_at && <small>Atualizado em {new Date(ref.updated_at).toLocaleDateString("pt-BR")}</small>}</div>
             <div className="workspace-reference-actions">
               <button className="icon-button" type="button" title={kind === "directory" ? "Copiar caminho" : "Copiar link"} aria-label={`Copiar ${ref.title}`} onClick={() => void copyText(ref.target)}><Copy size={16} /></button>
@@ -151,6 +153,7 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, onChanged, onOpenSte
       <div className="workspace-form-heading"><strong>{workspace.manualReferences.some((ref) => ref.id === draft.id) ? "Editar" : "Adicionar"} {kindLabels[draft.kind].toLowerCase()}</strong><button className="icon-button" type="button" title="Cancelar" onClick={() => setDraft(null)}><X size={17} /></button></div>
       <label>Nome<input value={draft.title} maxLength={160} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
       <label>{draft.kind === "directory" ? "Caminho no servidor" : "Link"}<input value={draft.target} maxLength={4000} placeholder={draft.kind === "directory" ? "\\\\Servidor\\Projetos\\..." : "https://..."} onChange={(event) => setDraft({ ...draft, target: event.target.value })} /></label>
+      {(draft.target || draft.kind === "directory") && <WorkspaceProviderBadge kind={draft.kind} target={draft.target} />}
       <label>Observacao (opcional)<textarea value={draft.notes} maxLength={2000} rows={2} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} /></label>
       <button className="primary-button" type="button" disabled={saving} onClick={saveDraft}><Save size={16} /> {saving ? "Salvando..." : "Salvar referencia"}</button>
     </div>}

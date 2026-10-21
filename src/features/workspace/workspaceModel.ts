@@ -1,6 +1,7 @@
 export const WORKSPACE_STEP_ID = "__project_workspace__";
 
 export type WorkspaceKind = "directory" | "conversation" | "support";
+export type WorkspaceProvider = "server" | "chatgpt" | "claude" | "notebooklm" | "google-drive" | "link";
 export type WorkspaceStatus = "nao_iniciado" | "parcial" | "organizado";
 
 export type WorkspaceReference = {
@@ -60,4 +61,16 @@ export function browserAccessibleUrl(target: string): string | null {
 
 export function serverDirectoryPath(target: string): boolean {
   return /^(?:[a-z]:[\\/]|\\\\|\/\/)/i.test(target.trim());
+}
+
+export function workspaceProvider(kind: WorkspaceKind, target: string): WorkspaceProvider {
+  if (kind === "directory") return "server";
+  const webUrl = browserAccessibleUrl(target);
+  if (!webUrl) return "link";
+  const host = new URL(webUrl).hostname.toLowerCase();
+  if (host === "chatgpt.com" || host === "chat.openai.com") return "chatgpt";
+  if (host === "claude.ai") return "claude";
+  if (host === "notebooklm.google.com" || host === "notebook.google.com") return "notebooklm";
+  if (host === "drive.google.com") return "google-drive";
+  return "link";
 }
