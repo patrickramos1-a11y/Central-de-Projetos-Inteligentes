@@ -16,6 +16,7 @@ export type ProjectListStep = {
 
 export type ProjectListRow = ManagementProjectRow & {
   displayStatus: ManagementStatus;
+  workspaceGap: Exclude<ProjectWorkspaceGap, "todos">;
 };
 
 export type ProjectGroupBy = "client" | "type" | "none";
@@ -24,6 +25,7 @@ export type ProjectSortColumn = "name" | "client" | "type" | "responsible" | "pr
 export type ProjectSortDirection = "asc" | "desc";
 export type ProjectProgressBand = "todos" | "0" | "1-49" | "50-99" | "100";
 export type ProjectAgeBand = "todos" | "0-7" | "8-30" | "31+" | "unknown";
+export type ProjectWorkspaceGap = "todos" | "organized" | "directory" | "conversation" | "both" | "unknown";
 
 export type ProjectListFilters = {
   search: string;
@@ -34,6 +36,7 @@ export type ProjectListFilters = {
   client?: string;
   progressBand?: ProjectProgressBand;
   ageBand?: ProjectAgeBand;
+  workspaceGap?: ProjectWorkspaceGap;
 };
 
 export type ProjectListGroup = {
@@ -57,6 +60,16 @@ export function projectPrimaryAction(
   if (row.historicalStatus === "concluido" && row.progress < 100) return "reopen";
   if (row.displayStatus === "concluido" || row.status === "arquivado") return "disabled";
   return "complete";
+}
+
+export function projectWorkspaceGap(workspace?: Pick<WorkspaceOverview, "directoryCount" | "conversationCount" | "conversationNotApplicable">): Exclude<ProjectWorkspaceGap, "todos"> {
+  if (!workspace) return "unknown";
+  const missingDirectory = workspace.directoryCount === 0;
+  const missingConversation = workspace.conversationCount === 0 && !workspace.conversationNotApplicable;
+  if (missingDirectory && missingConversation) return "both";
+  if (missingDirectory) return "directory";
+  if (missingConversation) return "conversation";
+  return "organized";
 }
 
 export function getProjectAge(row: Pick<ProjectListRow, "createdAt" | "displayStatus">, now = new Date()): ProjectAge {
@@ -137,7 +150,7 @@ export function buildProjectListRows(rows: ManagementProjectRow[], steps: Projec
         ? "concluido"
         : progress > 0 ? "em_andamento" : row.status;
 
-    return { ...row, completedSteps: completedWithWorkspace, totalSteps: totalWithWorkspace, progress, displayStatus };
+    return { ...row, completedSteps: completedWithWorkspace, totalSteps: totalWithWorkspace, progress, displayStatus, workspaceGap: projectWorkspaceGap(workspaceByProject?.get(row.id)) };
   }).sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
 }
 
@@ -150,6 +163,7 @@ export function filterProjectListRows(rows: ProjectListRow[], filters: ProjectLi
     if (filters.status === "em_andamento" && (row.displayStatus === "concluido" || row.displayStatus === "arquivado")) return false;
     if (filters.responsible !== "todos" && row.responsibleName !== filters.responsible) return false;
     if (filters.type !== "todos" && row.projectTypeName !== filters.type) return false;
+    if (filters.workspaceGap && filters.workspaceGap !== "todos" && row.workspaceGap !== filters.workspaceGap) return false;
     if (project && !normalizeManagementText(row.name).includes(project)) return false;
     if (filters.client && filters.client !== "todos" && row.clientName !== filters.client) return false;
     if (filters.progressBand && filters.progressBand !== "todos") {

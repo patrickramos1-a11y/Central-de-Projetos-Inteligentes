@@ -71,6 +71,7 @@ import {
   type ProjectProgressBand,
   type ProjectSortColumn,
   type ProjectSortDirection,
+  type ProjectWorkspaceGap,
 } from "../features/projects/projectListModel";
 import { resolvePromptContent } from "../../shared/stepBuilder";
 import { mergeSuccessfulTables, replaceProjectRows, shouldApplyRefresh, type TableResult } from "../features/data/refreshState";
@@ -3115,6 +3116,7 @@ function ProjectsView({
   const [clientFilter, setClientFilter] = useState("todos");
   const [progressBand, setProgressBand] = useState<ProjectProgressBand>("todos");
   const [ageBand, setAgeBand] = useState<ProjectAgeBand>("todos");
+  const [workspaceGapFilter, setWorkspaceGapFilter] = useState<ProjectWorkspaceGap>("todos");
   const [sortColumn, setSortColumn] = useState<ProjectSortColumn | null>(null);
   const [sortDirection, setSortDirection] = useState<ProjectSortDirection>("asc");
   const [groupBy, setGroupBy] = useState<ProjectGroupBy>("none");
@@ -3152,7 +3154,8 @@ function ProjectsView({
     client: clientFilter,
     progressBand,
     ageBand,
-  }), [projectRows, query, statusFilter, responsibleFilter, typeFilter, projectFilter, clientFilter, progressBand, ageBand]);
+    workspaceGap: workspaceGapFilter,
+  }), [projectRows, query, statusFilter, responsibleFilter, typeFilter, projectFilter, clientFilter, progressBand, ageBand, workspaceGapFilter]);
   const sortedRows = useMemo(() => sortColumn ? sortProjectListRows(filteredRows, sortColumn, sortDirection) : filteredRows, [filteredRows, sortColumn, sortDirection]);
   const groupedRows = useMemo(() => groupProjectListRows(sortedRows, groupBy), [sortedRows, groupBy]);
   const responsibleOptions = useMemo(() => [...new Set(projectRows.map((row) => row.responsibleName).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [projectRows]);
@@ -3171,11 +3174,14 @@ function ProjectsView({
     if (column === "responsible") return <select aria-label="Filtrar por responsavel" value={responsibleFilter} onChange={(event) => setResponsibleFilter(event.target.value)}><option value="todos">Todos os responsaveis</option>{responsibleOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>;
     if (column === "progress") return <select aria-label="Filtrar por execucao" value={progressBand} onChange={(event) => setProgressBand(event.target.value as ProjectProgressBand)}><option value="todos">Qualquer progresso</option><option value="0">0%</option><option value="1-49">1-49%</option><option value="50-99">50-99%</option><option value="100">100%</option></select>;
     if (column === "age") return <select aria-label="Filtrar por tempo" value={ageBand} onChange={(event) => setAgeBand(event.target.value as ProjectAgeBand)}><option value="todos">Qualquer tempo</option><option value="0-7">Ate 7 dias</option><option value="8-30">8 a 30 dias</option><option value="31+">Mais de 30 dias</option><option value="unknown">Sem tempo registrado</option></select>;
-    return <select aria-label="Filtrar por status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ProjectListStatusFilter)}><option value="todos">Todos</option><option value="em_andamento">Em andamento</option><option value="concluido">Concluidos</option></select>;
+    return <div className="projects-status-filter-fields">
+      <select aria-label="Filtrar por status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ProjectListStatusFilter)}><option value="todos">Todos os status</option><option value="em_andamento">Em andamento</option><option value="concluido">Concluidos</option></select>
+      <select aria-label="Filtrar pendencias do local de trabalho" value={workspaceGapFilter} onChange={(event) => setWorkspaceGapFilter(event.target.value as ProjectWorkspaceGap)}><option value="todos">Qualquer situacao</option><option value="directory">Diretorio pendente</option><option value="conversation">Conversa pendente</option><option value="both">Diretorio e conversa pendentes</option><option value="organized">Local organizado</option></select>
+    </div>;
   }
 
   function columnFilterActive(column: ProjectSortColumn) {
-    return column === "name" ? Boolean(projectFilter) : column === "client" ? clientFilter !== "todos" : column === "type" ? typeFilter !== "todos" : column === "responsible" ? responsibleFilter !== "todos" : column === "progress" ? progressBand !== "todos" : column === "age" ? ageBand !== "todos" : statusFilter !== "todos";
+    return column === "name" ? Boolean(projectFilter) : column === "client" ? clientFilter !== "todos" : column === "type" ? typeFilter !== "todos" : column === "responsible" ? responsibleFilter !== "todos" : column === "progress" ? progressBand !== "todos" : column === "age" ? ageBand !== "todos" : statusFilter !== "todos" || workspaceGapFilter !== "todos";
   }
 
   function toggleGroup(key: string) {
@@ -3284,7 +3290,7 @@ function ProjectsView({
               const [column, direction] = event.target.value.split(":") as [ProjectSortColumn, ProjectSortDirection];
               setSortColumn(column); setSortDirection(direction);
             }}><option value="recent">Atualizacao recente</option>{projectColumns.flatMap(({ key, label }) => [<option key={`${key}:asc`} value={`${key}:asc`}>{label} crescente</option>, <option key={`${key}:desc`} value={`${key}:desc`}>{label} decrescente</option>])}</select></label>
-            <details className="projects-mobile-filters"><summary><Filter size={15} /> Filtros das colunas</summary><div>{projectColumns.map(({ key, label }) => <label key={key}>{label}{columnFilterControl(key)}</label>)}</div></details>
+            <details className="projects-mobile-filters"><summary><Filter size={15} /> Filtros das colunas</summary><div>{projectColumns.map(({ key, label }) => <div className="projects-mobile-filter-field" key={key}><span>{label}</span>{columnFilterControl(key)}</div>)}</div></details>
           </div>
         </div>
 
@@ -3386,9 +3392,17 @@ function ProjectPortfolioRow({ row, client, workspace, onOpen, onEdit, onComplet
     ? row.responsibleName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()
     : "?";
   const age = getProjectAge(row);
+  const workspaceGapLabel = {
+    directory: "Diretorio pendente",
+    conversation: "Link de conversa pendente",
+    both: "Diretorio e link pendentes",
+    organized: "Local organizado",
+    unknown: "",
+  }[row.workspaceGap];
+  const showWorkspaceGap = workspaceGapLabel && (row.displayStatus !== "concluido" && row.displayStatus !== "arquivado" || row.regularizationPending);
   const primaryAction = projectPrimaryAction(row, workspace);
   const primaryActionLabel = primaryAction === "workspace"
-    ? `Completar local de trabalho de ${row.name}${workspace && !workspace.directoryCount ? ": falta diretorio do servidor" : ""}`
+    ? `Completar local de trabalho de ${row.name}${workspaceGapLabel ? `: ${workspaceGapLabel.toLowerCase()}` : ""}`
     : primaryAction === "reopen" ? `Reabrir ${row.name}` : primaryAction === "disabled" ? "Projeto ja concluido ou arquivado" : `Concluir ${row.name}`;
 
   return (
@@ -3411,7 +3425,7 @@ function ProjectPortfolioRow({ row, client, workspace, onOpen, onEdit, onComplet
       <span className={`projects-cell projects-age ${age.available ? "" : "unavailable"}`} title={age.title} aria-label={age.title}>
         <strong>{age.label}</strong><small>{age.detail}</small>
       </span>
-      <span className="projects-cell projects-status">{row.regularizationPending ? <StatusPill status="regularizacao_pendente" /> : <StatusPill status={row.displayStatus} />}</span>
+      <span className="projects-cell projects-status">{row.regularizationPending ? <StatusPill status="regularizacao_pendente" /> : <StatusPill status={row.displayStatus} />}{showWorkspaceGap && <small className={`projects-workspace-gap ${row.workspaceGap}`} title={`Local de trabalho: ${workspaceGapLabel}`}>{workspaceGapLabel}</small>}</span>
       <div className="projects-cell projects-actions">
         <button className="projects-action-button complete" type="button" title={primaryActionLabel} aria-label={primaryActionLabel} disabled={primaryAction === "disabled"} onClick={primaryAction === "workspace" ? onOpen : primaryAction === "reopen" ? onReopen : onComplete}>{primaryAction === "workspace" ? <FolderOpen size={16} aria-hidden="true" /> : primaryAction === "reopen" ? <RefreshCw size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />}</button>
         <button className="projects-action-button edit" type="button" title={`Editar ${row.name}`} aria-label={`Editar ${row.name}`} onClick={onEdit}><Pencil size={16} aria-hidden="true" /></button>

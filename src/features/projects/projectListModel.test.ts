@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { buildManagementProjectRows } from "../management/managementModel";
-import { buildProjectListRows, filterProjectListRows, getProjectAge, groupProjectListRows, projectPrimaryAction, sortProjectListRows } from "./projectListModel";
+import { buildProjectListRows, filterProjectListRows, getProjectAge, groupProjectListRows, projectPrimaryAction, projectWorkspaceGap, sortProjectListRows } from "./projectListModel";
 
 const baseRows = buildManagementProjectRows({
   clients: [{ id: "client-1", name: "Bento Sushi" }, { id: "client-2", name: "Advance" }],
@@ -61,6 +61,25 @@ describe("projectListModel", () => {
     expect(filterProjectListRows(rows, { ...defaults, project: "Bento", client: "Bento Sushi", progressBand: "0" }).map((row) => row.id)).toEqual(["pca"]);
     expect(filterProjectListRows(rows, { ...defaults, progressBand: "100" }).map((row) => row.id)).toEqual(["ria"]);
     expect(filterProjectListRows(rows, { ...defaults, ageBand: "unknown" }).map((row) => row.id)).toEqual(original);
+  });
+
+  test("distinguishes directory, conversation, both, and organized without changing project status", () => {
+    expect(projectWorkspaceGap()).toBe("unknown");
+    expect(projectWorkspaceGap({ directoryCount: 0, conversationCount: 0, conversationNotApplicable: false })).toBe("both");
+    expect(projectWorkspaceGap({ directoryCount: 0, conversationCount: 1, conversationNotApplicable: false })).toBe("directory");
+    expect(projectWorkspaceGap({ directoryCount: 1, conversationCount: 0, conversationNotApplicable: false })).toBe("conversation");
+    expect(projectWorkspaceGap({ directoryCount: 1, conversationCount: 0, conversationNotApplicable: true })).toBe("organized");
+
+    const rows = buildProjectListRows(baseRows, [], [], [
+      { projectId: "pca", directoryCount: 0, conversationCount: 1, supportCount: 1, conversationNotApplicable: false, revision: 1, status: "parcial" },
+      { projectId: "ria", directoryCount: 1, conversationCount: 0, supportCount: 0, conversationNotApplicable: true, revision: 1, status: "organizado" },
+    ]);
+    expect(rows.find((row) => row.id === "pca")).toMatchObject({ displayStatus: "em_andamento", workspaceGap: "directory" });
+    expect(rows.find((row) => row.id === "ria")?.workspaceGap).toBe("organized");
+    const defaults = { search: "", status: "em_andamento" as const, responsible: "todos", type: "todos" };
+    expect(filterProjectListRows(rows, { ...defaults, workspaceGap: "directory" }).map((row) => row.id)).toEqual(["pca"]);
+    expect(filterProjectListRows(rows, { ...defaults, workspaceGap: "organized" }).map((row) => row.id)).toEqual(["ria"]);
+    expect(filterProjectListRows(rows, { ...defaults, workspaceGap: "both" })).toEqual([]);
   });
 
   test("keeps explicit project completion even with pending steps", () => {
