@@ -1,4 +1,5 @@
 import { workspaceStatus, type WorkspaceKind, type WorkspaceReference } from "../src/features/workspace/workspaceModel";
+import { mergeWorkspaceReferences, readLinkedWorkspaceReferences } from "./workspaceLinks";
 
 type Env = { DB: D1Database };
 type WorkspaceRow = { project_id: string; conversation_not_applicable: number; revision: number };
@@ -21,33 +22,47 @@ export function toWorkspaceOverview(row: WorkspaceRow, counts?: CountRow) {
   };
 }
 
-const countSql = `select project_id,
-  sum(case when kind = 'directory' then 1 else 0 end) as directory_count,
-  sum(case when kind = 'conversation' then 1 else 0 end) as conversation_count,
-  sum(case when kind = 'support' then 1 else 0 end) as support_count
-  from project_workspace_references group by project_id`;
+function overviewWithReferences(row: WorkspaceRow, references: WorkspaceReference[]) {
+  const counts = {
+    project_id: row.project_id,
+    directory_count: references.filter((ref) => ref.kind === "directory").length,
+    conversation_count: references.filter((ref) => ref.kind === "conversation").length,
+    support_count: references.filter((ref) => ref.kind === "support").length,
+  };
+  return toWorkspaceOverview({ ...row, conversation_not_applicable: counts.conversation_count ? 0 : row.conversation_not_applicable }, counts);
+}
 
 export async function readWorkspaceOverview(db: D1Database) {
-  const [rows, counts] = await Promise.all([
+  const [rows, manual, linked] = await Promise.all([
     db.prepare("select project_id, conversation_not_applicable, revision from project_workspaces").all<WorkspaceRow>(),
-    db.prepare(countSql).all<CountRow>(),
+    db.prepare("select id, project_id, kind, title, target, notes, sort_order, created_at, updated_at from project_workspace_references").all<WorkspaceReference>(),
+    readLinkedWorkspaceReferences(db),
   ]);
-  const byProject = new Map((counts.results ?? []).map((row) => [row.project_id, row]));
-  return (rows.results ?? []).map((row) => toWorkspaceOverview(row, byProject.get(row.project_id)));
+  const group = (references: WorkspaceReference[]) => {
+    const byProject = new Map<string, WorkspaceReference[]>();
+    for (const ref of references) byProject.set(ref.project_id, [...(byProject.get(ref.project_id) ?? []), ref]);
+    return byProject;
+  };
+  const manualByProject = group(manual.results ?? []);
+  const linkedByProject = group(linked);
+  return (rows.results ?? []).map((row) => overviewWithReferences(row,
+    mergeWorkspaceReferences(manualByProject.get(row.project_id) ?? [], linkedByProject.get(row.project_id) ?? [])));
 }
 
 async function readWorkspace(db: D1Database, projectId: string) {
-  const [row, refs, counts, project] = await Promise.all([
+  const [row, manual, linked, project] = await Promise.all([
     db.prepare("select project_id, conversation_not_applicable, revision from project_workspaces where project_id = ?").bind(projectId).first<WorkspaceRow>(),
     db.prepare("select id, project_id, kind, title, target, notes, sort_order, created_at, updated_at from project_workspace_references where project_id = ? order by kind, sort_order, created_at").bind(projectId).all<WorkspaceReference>(),
-    db.prepare(`select * from (${countSql}) where project_id = ?`).bind(projectId).first<CountRow>(),
+    readLinkedWorkspaceReferences(db, projectId),
     db.prepare("select id, journey_template_id from projects where id = ?").bind(projectId).first<{ id: string; journey_template_id: string | null }>(),
   ]);
   if (!row || !project) return null;
   const guidance = project.journey_template_id
     ? await db.prepare("select guidance from template_workspace_guidance where template_id = ?").bind(project.journey_template_id).first<{ guidance: string }>()
     : null;
-  return { ...toWorkspaceOverview(row, counts ?? undefined), references: refs.results ?? [], guidance: guidance?.guidance ?? "" };
+  const manualReferences = manual.results ?? [];
+  const references = mergeWorkspaceReferences(manualReferences, linked);
+  return { ...overviewWithReferences(row, references), references, manualReferences, guidance: guidance?.guidance ?? "" };
 }
 
 type SubmittedReference = Pick<WorkspaceReference, "id" | "kind" | "title" | "target" | "notes">;
@@ -103,8 +118,9 @@ export async function handleProjectWorkspaceRequest(request: Request, env: Env, 
     const before = await readWorkspace(env.DB, projectId);
     if (!before) return fail("Projeto nao encontrado.", 404);
     if (before.revision !== submitted.expectedRevision) return fail("O local de trabalho foi alterado em outra sessao. Atualize antes de salvar.", 409);
+    if (submitted.conversationNotApplicable && before.references.some((ref) => ref.kind === "conversation" && ref.origin)) return fail("A jornada ja possui um link de conversa. Remova-o na etapa de origem antes de marcar Nao se aplica.", 400);
     const now = new Date().toISOString();
-    const existing = new Map(before.references.map((ref) => [ref.id, ref]));
+    const existing = new Map(before.manualReferences.map((ref) => [ref.id, ref]));
     const statements = [
       env.DB.prepare("delete from project_workspace_references where project_id = ? and (select revision from project_workspaces where project_id = ?) = ?").bind(projectId, projectId, submitted.expectedRevision),
       ...submitted.references.map((ref, index) => env.DB.prepare(`insert into project_workspace_references
@@ -156,10 +172,6 @@ export async function handleProjectWorkspaceRequest(request: Request, env: Env, 
 }
 
 export async function isProjectWorkspaceOrganized(db: D1Database, projectId: string) {
-  const row = await db.prepare(`select w.conversation_not_applicable,
-    sum(case when r.kind = 'directory' then 1 else 0 end) as directory_count,
-    sum(case when r.kind = 'conversation' then 1 else 0 end) as conversation_count
-    from project_workspaces w left join project_workspace_references r on r.project_id = w.project_id
-    where w.project_id = ? group by w.project_id`).bind(projectId).first<{ conversation_not_applicable: number; directory_count: number; conversation_count: number }>();
-  return Boolean(row && row.directory_count > 0 && (row.conversation_count > 0 || row.conversation_not_applicable));
+  const workspace = await readWorkspace(db, projectId);
+  return workspace?.status === "organizado";
 }

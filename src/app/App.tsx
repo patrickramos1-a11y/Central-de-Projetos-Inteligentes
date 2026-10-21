@@ -71,7 +71,7 @@ import { AppShell, CommandBar, JourneyContextBar, WorkCanvas } from "../componen
 import { ProjectWorkspacePanel } from "../features/workspace/ProjectWorkspacePanel";
 import { ClientWorkspacesDialog } from "../features/workspace/ClientWorkspacesDialog";
 import { TemplateWorkspaceGuidance } from "../features/workspace/TemplateWorkspaceGuidance";
-import { WORKSPACE_STEP_ID, type WorkspaceOverview } from "../features/workspace/workspaceModel";
+import { WORKSPACE_STEP_ID, type ProjectWorkspace, type WorkspaceOverview } from "../features/workspace/workspaceModel";
 
 type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
 type ProjectStatus = "planejado" | "em_andamento" | "concluido" | "bloqueado" | "arquivado";
@@ -680,6 +680,21 @@ export default function App() {
       return { ...current, workspaces: [...current.workspaces.filter((item) => item.projectId !== workspace.projectId), workspace] };
     });
   }, []);
+  const workspaceRefreshIdsRef = useRef(new Map<string, number>());
+  const refreshProjectWorkspace = useCallback(async (projectId: string) => {
+    if (!projectId) return;
+    const requestId = (workspaceRefreshIdsRef.current.get(projectId) ?? 0) + 1;
+    workspaceRefreshIdsRef.current.set(projectId, requestId);
+    try {
+      const response = await fetch(`${cloudflareApiUrl}/api/projects/${encodeURIComponent(projectId)}/workspace`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Falha ao atualizar o local de trabalho.");
+      const body = await response.json() as { data?: ProjectWorkspace };
+      if (!body.data) throw new Error("Resposta incompleta do local de trabalho.");
+      if (workspaceRefreshIdsRef.current.get(projectId) === requestId) onWorkspaceChanged(body.data);
+    } catch {
+      if (workspaceRefreshIdsRef.current.get(projectId) === requestId) setNotice("O link foi salvo, mas a Etapa 0 nao foi atualizada. Tente abrir o local de trabalho novamente.");
+    }
+  }, [onWorkspaceChanged]);
   const coreInFlightRef = useRef<Promise<void> | null>(null);
   const secondaryInFlightRef = useRef<Promise<void> | null>(null);
   const secondaryInFlightScopeRef = useRef("");
@@ -2196,6 +2211,7 @@ export default function App() {
     }
 
     setTables((current) => ({ ...current, project_step_links: [...current.project_step_links, data as ProjectStepLink] }));
+    void refreshProjectWorkspace(tables.project_steps.find((step) => step.id === stepId)?.project_id ?? "");
   }
 
   async function uploadStepFile(stepId: string, file: File) {
@@ -2222,6 +2238,7 @@ export default function App() {
     const orderedSteps = tables.project_steps.filter((step) => step.project_id === selectedProjectId).sort(byOrder);
     const index = orderedSteps.findIndex((step) => step.id === stepId);
     await deleteRecord("project_steps", stepId);
+    if (selectedProjectId) void refreshProjectWorkspace(selectedProjectId);
 
     if (selectedStepId === stepId) {
       setSelectedStepId(orderedSteps[index + 1]?.id ?? orderedSteps[index - 1]?.id ?? "");
@@ -2910,7 +2927,7 @@ export default function App() {
           <section className="journey-hero journey-context-bar"><button className="ghost-button" type="button" onClick={() => setView("projects")}><PanelLeft size={17} /> Projetos</button><div className="journey-context-copy"><span className="eyebrow">Ramos Jornadas</span><h1>{selectedProject.name}</h1><p>{selectedProject.company || "Projeto sem empresa definida"}</p></div></section>
           <section className="journey-layout block-journey-layout">
             <JourneyStepRail ownerType="project" ownerId={selectedProject.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "concluido" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "em_andamento" : "pendente", status_label: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "Organizado" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "Parcial" : "Nao iniciado" }, ...projectSteps]} selectedStepId={WORKSPACE_STEP_ID} onSelectStep={setSelectedStepId} />
-            <section className="work-surface block-work-surface"><ProjectWorkspacePanel key={selectedProject.id} baseUrl={cloudflareApiUrl} projectId={selectedProject.id} onChanged={onWorkspaceChanged} /></section>
+            <section className="work-surface block-work-surface"><ProjectWorkspacePanel key={selectedProject.id} baseUrl={cloudflareApiUrl} projectId={selectedProject.id} onChanged={onWorkspaceChanged} onOpenStep={setSelectedStepId} /></section>
           </section>
         </>}
 
@@ -2938,7 +2955,7 @@ export default function App() {
             onDeletePrompt={(id) => deleteRecord("project_step_prompts", id)}
             onAddLink={addStepLink}
             onUploadFile={uploadStepFile}
-            onDeleteLink={(id) => deleteRecord("project_step_links", id)}
+            onDeleteLink={(id) => { void deleteRecord("project_step_links", id).then(() => refreshProjectWorkspace(selectedProject.id)); }}
             onAddPhase={addProjectStepPhase}
             onUpdatePhase={updateProjectStepPhase}
             onDeletePhase={deleteProjectStepPhase}
@@ -2961,6 +2978,7 @@ export default function App() {
             onSaveGeneratedPrompt={saveGeneratedPrompt}
             onArchiveGeneratedPrompt={archiveGeneratedPrompt}
             onCreatePromptFromBlock={createPromptFromBlock}
+            onRefreshWorkspace={refreshProjectWorkspace}
           />
         )}
 
@@ -4513,6 +4531,7 @@ function JourneyView({
   onSaveGeneratedPrompt,
   onArchiveGeneratedPrompt,
   onCreatePromptFromBlock,
+  onRefreshWorkspace,
 }: {
   project: Project;
   workspace?: WorkspaceOverview;
@@ -4555,6 +4574,7 @@ function JourneyView({
   onSaveGeneratedPrompt: (payload: GeneratedPromptWrite) => Promise<boolean>;
   onArchiveGeneratedPrompt: (promptId: string, summaryItemId?: string) => void;
   onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
+  onRefreshWorkspace: (projectId: string) => Promise<void>;
 }) {
   const applicableSteps = steps.filter((step) => !step.is_not_applicable);
   const doneSteps = applicableSteps.filter((step) => step.status === "concluido").length;
@@ -4620,10 +4640,12 @@ function JourneyView({
   async function updateBlock(blockId: string, patch: Partial<StepBuilderBlock>) {
     const next = await stepRequest(`/blocks/${encodeURIComponent(blockId)}`, { method: "PATCH", body: JSON.stringify(patch) });
     setPayload(next);
+    if (payload?.document.blocks.some((block) => block.id === blockId && block.type === "materials")) void onRefreshWorkspace(project.id);
   }
 
   async function deleteBlock(blockId: string) {
     setPayload(await stepRequest(`/blocks/${encodeURIComponent(blockId)}`, { method: "DELETE" }));
+    if (payload?.document.blocks.some((block) => block.id === blockId && block.type === "materials")) void onRefreshWorkspace(project.id);
   }
 
   async function duplicateBlock(block: StepBuilderBlock) {
@@ -4648,6 +4670,7 @@ function JourneyView({
         config: block.config,
       }),
     }));
+    if (block.type === "materials") void onRefreshWorkspace(project.id);
   }
 
   async function moveBlock(blockId: string, direction: -1 | 1) {
@@ -4663,6 +4686,7 @@ function JourneyView({
   async function saveBlockValue(blockId: string, value: unknown) {
     const next = await stepRequest(`/block-values/${encodeURIComponent(blockId)}`, { method: "PATCH", body: JSON.stringify({ value, updatedBy: currentUser?.name ?? "Patrick" }) });
     setPayload(next);
+    if (next.document.blocks.some((block) => block.id === blockId && block.type === "materials")) void onRefreshWorkspace(project.id);
     if (!selectedStep.is_not_applicable && next.completion.status !== selectedStep.status) onUpdateStep(selectedStep.id, { status: next.completion.status });
   }
 

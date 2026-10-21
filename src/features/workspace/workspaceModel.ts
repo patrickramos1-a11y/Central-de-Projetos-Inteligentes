@@ -13,6 +13,7 @@ export type WorkspaceReference = {
   sort_order: number;
   created_at: string;
   updated_at: string;
+  origin?: { type: "journey"; stepId: string; stepName: string; blockTitle: string };
 };
 
 export type WorkspaceOverview = {
@@ -27,6 +28,7 @@ export type WorkspaceOverview = {
 
 export type ProjectWorkspace = WorkspaceOverview & {
   references: WorkspaceReference[];
+  manualReferences: WorkspaceReference[];
   guidance: string;
 };
 
