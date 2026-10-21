@@ -121,12 +121,10 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, onChanged, onOpenSte
     {(["directory", "conversation", "support"] as WorkspaceKind[]).map((kind) => {
       const refs = workspace.references.filter((ref) => ref.kind === kind);
       return <section className="workspace-reference-section" key={kind} aria-label={kindLabels[kind]}>
-        <header><h3>{kindLabels[kind]}</h3><button className="secondary-button" type="button" disabled={saving || (kind === "conversation" && workspace.conversationNotApplicable)} onClick={() => { setDraft(emptyDraft(kind)); setError(""); }}><Plus size={15} /> Adicionar</button></header>
-        {kind === "conversation" && <label className="workspace-na" title={refs.some((ref) => ref.origin) ? "A jornada possui conversas vinculadas. Edite-as na etapa de origem." : undefined}><input type="checkbox" checked={workspace.conversationNotApplicable} disabled={saving || refs.some((ref) => ref.origin)} onChange={(event) => {
-          const checked = event.target.checked;
-          if (checked && refs.length && !window.confirm("Marcar Nao se aplica remove os links de conversa deste projeto. Continuar?")) return;
-          void save(checked ? workspace.manualReferences.filter((ref) => ref.kind !== "conversation") : workspace.manualReferences, checked, () => setDraft(null));
-        }} /> Nao se aplica a este projeto</label>}
+        <header><h3>{kindLabels[kind]}</h3><div className="workspace-header-actions">
+          {kind === "conversation" && refs.length === 0 && <button className="secondary-button workspace-na-button" type="button" aria-pressed={workspace.conversationNotApplicable} disabled={saving} onClick={() => void save(workspace.manualReferences, !workspace.conversationNotApplicable, () => setDraft(null))}>{workspace.conversationNotApplicable ? <RefreshCw size={15} /> : <X size={15} />}{workspace.conversationNotApplicable ? "Reativar" : "Nao se aplica"}</button>}
+          <button className="secondary-button" type="button" disabled={saving || (kind === "conversation" && workspace.conversationNotApplicable)} onClick={() => { setDraft(emptyDraft(kind)); setError(""); }}><Plus size={15} /> Adicionar</button>
+        </div></header>
         {refs.length === 0 && <p className="workspace-empty">{kind === "support" ? "Nenhum link de apoio cadastrado." : kind === "conversation" && workspace.conversationNotApplicable ? "Conversa marcada como nao aplicavel." : "Nenhuma referencia cadastrada."}</p>}
         <div className="workspace-reference-list">{refs.map((ref) => {
           const accessible = browserAccessibleUrl(ref.target);
@@ -147,15 +145,15 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, onChanged, onOpenSte
             </div>
           </article>;
         })}</div>
+        {draft?.kind === kind && <div className="workspace-reference-form" role="group" aria-label={workspace.manualReferences.some((ref) => ref.id === draft.id) ? "Editar referencia" : "Nova referencia"}>
+          <div className="workspace-form-heading"><strong>{workspace.manualReferences.some((ref) => ref.id === draft.id) ? "Editar" : "Adicionar"} {kindLabels[kind].toLowerCase()}</strong><button className="icon-button" type="button" title="Cancelar" onClick={() => setDraft(null)}><X size={17} /></button></div>
+          <div className="workspace-reference-fields">
+            <label>Nome<input value={draft.title} maxLength={160} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
+            <label>{kind === "directory" ? "Caminho no servidor" : "Link"}<input value={draft.target} maxLength={4000} placeholder={kind === "directory" ? "\\\\Servidor\\Projetos\\..." : "https://..."} onChange={(event) => setDraft({ ...draft, target: event.target.value })} /></label>
+          </div>
+          <div className="workspace-form-actions">{(draft.target || kind === "directory") && <WorkspaceProviderBadge kind={kind} target={draft.target} />}<button className="primary-button" type="button" disabled={saving} onClick={saveDraft}><Save size={16} /> {saving ? "Salvando..." : "Salvar referencia"}</button></div>
+        </div>}
       </section>;
     })}
-    {draft && <div className="workspace-reference-form" role="group" aria-label={workspace.manualReferences.some((ref) => ref.id === draft.id) ? "Editar referencia" : "Nova referencia"}>
-      <div className="workspace-form-heading"><strong>{workspace.manualReferences.some((ref) => ref.id === draft.id) ? "Editar" : "Adicionar"} {kindLabels[draft.kind].toLowerCase()}</strong><button className="icon-button" type="button" title="Cancelar" onClick={() => setDraft(null)}><X size={17} /></button></div>
-      <label>Nome<input value={draft.title} maxLength={160} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
-      <label>{draft.kind === "directory" ? "Caminho no servidor" : "Link"}<input value={draft.target} maxLength={4000} placeholder={draft.kind === "directory" ? "\\\\Servidor\\Projetos\\..." : "https://..."} onChange={(event) => setDraft({ ...draft, target: event.target.value })} /></label>
-      {(draft.target || draft.kind === "directory") && <WorkspaceProviderBadge kind={draft.kind} target={draft.target} />}
-      <label>Observacao (opcional)<textarea value={draft.notes} maxLength={2000} rows={2} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} /></label>
-      <button className="primary-button" type="button" disabled={saving} onClick={saveDraft}><Save size={16} /> {saving ? "Salvando..." : "Salvar referencia"}</button>
-    </div>}
   </section>;
 }

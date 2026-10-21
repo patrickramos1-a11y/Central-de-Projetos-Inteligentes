@@ -110,6 +110,23 @@ describe("linked workspace references", () => {
     sqlite.close();
   });
 
+  test("uses a conversation URL saved as the title when the destination is a ChatGPT project", async () => {
+    const { sqlite, d1 } = database();
+    sqlite.exec(`insert into projects values ('p', null);
+      insert into project_workspaces values ('p', 1, 0, '2026-01-01');
+      insert into project_steps values ('step', 'p', 'CONTEXTO');
+      insert into journey_step_documents values ('doc', 'project', 'p', 'step', 'draft',
+        '{"blocks":[{"id":"block","type":"materials","title":"Links","config":{"links":[]}}]}', '2026-01-01', '2026-01-01');
+      insert into journey_step_values values ('value', 'project', 'doc', 'block',
+        '{"links":[{"id":"chat","title":"https://chatgpt.com/share/e/conversation-id","url":"https://chatgpt.com/g/g-p-project/project"}]}', '2026-01-01', '2026-01-01');`);
+    const response = await handleProjectWorkspaceRequest(new Request("http://local/api/projects/p/workspace"), { DB: d1 }, ["api", "projects", "p", "workspace"]);
+    const body = await response?.json() as { data: { references: WorkspaceReference[]; conversationCount: number; conversationNotApplicable: boolean } };
+    expect(body.data).toMatchObject({ conversationCount: 1, conversationNotApplicable: false });
+    expect(body.data.references).toMatchObject([{ title: "Conversa do projeto", target: "https://chatgpt.com/share/e/conversation-id", kind: "conversation" }]);
+    expect(sqlite.query("select value_json from journey_step_values where id = 'value'").get()).toMatchObject({ value_json: expect.stringContaining("https://chatgpt.com/g/g-p-project/project") });
+    sqlite.close();
+  });
+
   test("saving manual references never copies or deletes links owned by the journey", async () => {
     const { sqlite, d1 } = database();
     sqlite.exec(`insert into projects values ('p', null);

@@ -1,5 +1,8 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type SetStateAction } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   Bot,
   Check,
   CheckCircle2,
@@ -11,6 +14,7 @@ import {
   Download,
   Upload,
   FileText,
+  Filter,
   FolderOpen,
   GitBranch,
   GripVertical,
@@ -59,9 +63,14 @@ import {
   getProjectAge,
   groupProjectListRows,
   projectPrimaryAction,
+  sortProjectListRows,
+  type ProjectAgeBand,
   type ProjectGroupBy,
   type ProjectListRow,
   type ProjectListStatusFilter,
+  type ProjectProgressBand,
+  type ProjectSortColumn,
+  type ProjectSortDirection,
 } from "../features/projects/projectListModel";
 import { resolvePromptContent } from "../../shared/stepBuilder";
 import { mergeSuccessfulTables, replaceProjectRows, shouldApplyRefresh, type TableResult } from "../features/data/refreshState";
@@ -3059,6 +3068,16 @@ type NewClientFormState = {
   notes: string;
 };
 
+const projectColumns: { key: ProjectSortColumn; label: string }[] = [
+  { key: "name", label: "Projeto" },
+  { key: "client", label: "Cliente" },
+  { key: "type", label: "Tipo" },
+  { key: "responsible", label: "Responsavel" },
+  { key: "progress", label: "Execucao" },
+  { key: "age", label: "Tempo" },
+  { key: "status", label: "Status" },
+];
+
 function ProjectsView({
   tables,
   workspaces,
@@ -3092,6 +3111,12 @@ function ProjectsView({
   const [statusFilter, setStatusFilter] = useState<ProjectListStatusFilter>("em_andamento");
   const [responsibleFilter, setResponsibleFilter] = useState("todos");
   const [typeFilter, setTypeFilter] = useState("todos");
+  const [projectFilter, setProjectFilter] = useState("");
+  const [clientFilter, setClientFilter] = useState("todos");
+  const [progressBand, setProgressBand] = useState<ProjectProgressBand>("todos");
+  const [ageBand, setAgeBand] = useState<ProjectAgeBand>("todos");
+  const [sortColumn, setSortColumn] = useState<ProjectSortColumn | null>(null);
+  const [sortDirection, setSortDirection] = useState<ProjectSortDirection>("asc");
   const [groupBy, setGroupBy] = useState<ProjectGroupBy>("none");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [editingProject, setEditingProject] = useState<Project | null>(null);
@@ -3123,10 +3148,35 @@ function ProjectsView({
     status: statusFilter,
     responsible: responsibleFilter,
     type: typeFilter,
-  }), [projectRows, query, statusFilter, responsibleFilter, typeFilter]);
-  const groupedRows = useMemo(() => groupProjectListRows(filteredRows, groupBy), [filteredRows, groupBy]);
+    project: projectFilter,
+    client: clientFilter,
+    progressBand,
+    ageBand,
+  }), [projectRows, query, statusFilter, responsibleFilter, typeFilter, projectFilter, clientFilter, progressBand, ageBand]);
+  const sortedRows = useMemo(() => sortColumn ? sortProjectListRows(filteredRows, sortColumn, sortDirection) : filteredRows, [filteredRows, sortColumn, sortDirection]);
+  const groupedRows = useMemo(() => groupProjectListRows(sortedRows, groupBy), [sortedRows, groupBy]);
   const responsibleOptions = useMemo(() => [...new Set(projectRows.map((row) => row.responsibleName).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [projectRows]);
   const typeOptions = useMemo(() => [...new Set(projectRows.map((row) => row.projectTypeName))].sort((a, b) => a.localeCompare(b)), [projectRows]);
+  const clientOptions = useMemo(() => [...new Set(projectRows.map((row) => row.clientName))].sort((a, b) => a.localeCompare(b)), [projectRows]);
+
+  function toggleSort(column: ProjectSortColumn) {
+    if (sortColumn === column) setSortDirection((current) => current === "asc" ? "desc" : "asc");
+    else { setSortColumn(column); setSortDirection("asc"); }
+  }
+
+  function columnFilterControl(column: ProjectSortColumn) {
+    if (column === "name") return <input aria-label="Filtrar por projeto" placeholder="Nome do projeto" value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)} />;
+    if (column === "client") return <select aria-label="Filtrar por cliente" value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}><option value="todos">Todos os clientes</option>{clientOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>;
+    if (column === "type") return <select aria-label="Filtrar por tipo" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}><option value="todos">Todos os tipos</option>{typeOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>;
+    if (column === "responsible") return <select aria-label="Filtrar por responsavel" value={responsibleFilter} onChange={(event) => setResponsibleFilter(event.target.value)}><option value="todos">Todos os responsaveis</option>{responsibleOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>;
+    if (column === "progress") return <select aria-label="Filtrar por execucao" value={progressBand} onChange={(event) => setProgressBand(event.target.value as ProjectProgressBand)}><option value="todos">Qualquer progresso</option><option value="0">0%</option><option value="1-49">1-49%</option><option value="50-99">50-99%</option><option value="100">100%</option></select>;
+    if (column === "age") return <select aria-label="Filtrar por tempo" value={ageBand} onChange={(event) => setAgeBand(event.target.value as ProjectAgeBand)}><option value="todos">Qualquer tempo</option><option value="0-7">Ate 7 dias</option><option value="8-30">8 a 30 dias</option><option value="31+">Mais de 30 dias</option><option value="unknown">Sem tempo registrado</option></select>;
+    return <select aria-label="Filtrar por status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ProjectListStatusFilter)}><option value="todos">Todos</option><option value="em_andamento">Em andamento</option><option value="concluido">Concluidos</option></select>;
+  }
+
+  function columnFilterActive(column: ProjectSortColumn) {
+    return column === "name" ? Boolean(projectFilter) : column === "client" ? clientFilter !== "todos" : column === "type" ? typeFilter !== "todos" : column === "responsible" ? responsibleFilter !== "todos" : column === "progress" ? progressBand !== "todos" : column === "age" ? ageBand !== "todos" : statusFilter !== "todos";
+  }
 
   function toggleGroup(key: string) {
     setExpandedGroups((current) => {
@@ -3228,10 +3278,22 @@ function ProjectsView({
               <button type="button" aria-pressed={groupBy === "type"} title="Agrupar por tipo, inicialmente recolhido" onClick={() => selectGrouping("type")}><Layers3 size={15} aria-hidden="true" /><span>Tipo</span></button>
             </div>
           </div>
+          <div className="projects-mobile-controls">
+            <label>Ordenar por<select aria-label="Ordenar projetos" value={sortColumn ? `${sortColumn}:${sortDirection}` : "recent"} onChange={(event) => {
+              if (event.target.value === "recent") { setSortColumn(null); return; }
+              const [column, direction] = event.target.value.split(":") as [ProjectSortColumn, ProjectSortDirection];
+              setSortColumn(column); setSortDirection(direction);
+            }}><option value="recent">Atualizacao recente</option>{projectColumns.flatMap(({ key, label }) => [<option key={`${key}:asc`} value={`${key}:asc`}>{label} crescente</option>, <option key={`${key}:desc`} value={`${key}:desc`}>{label} decrescente</option>])}</select></label>
+            <details className="projects-mobile-filters"><summary><Filter size={15} /> Filtros das colunas</summary><div>{projectColumns.map(({ key, label }) => <label key={key}>{label}{columnFilterControl(key)}</label>)}</div></details>
+          </div>
         </div>
 
-        <div className="projects-column-head" aria-hidden="true">
-          <span>Projeto</span><span>Cliente</span><span>Tipo</span><span>Responsavel</span><span>Execucao</span><span>Tempo</span><span>Status</span><span>Acoes</span>
+        <div className="projects-column-head">
+          {projectColumns.map(({ key, label }) => <div className="projects-column-control" key={key}>
+            <button className="projects-column-sort" type="button" aria-label={`Ordenar por ${label.toLowerCase()}${sortColumn === key ? `, ordem ${sortDirection === "asc" ? "crescente" : "decrescente"}` : ""}`} aria-pressed={sortColumn === key} onClick={() => toggleSort(key)}><span>{label}</span>{sortColumn !== key ? <ArrowUpDown size={13} /> : sortDirection === "asc" ? <ArrowUp size={13} /> : <ArrowDown size={13} />}</button>
+            <details className="projects-column-filter" data-active={columnFilterActive(key)}><summary title={`Filtrar ${label.toLowerCase()}`} aria-label={`Filtrar ${label.toLowerCase()}`}><Filter size={13} /></summary><div className="projects-column-filter-menu"><strong>{label}</strong>{columnFilterControl(key)}</div></details>
+          </div>)}
+          <span>Acoes</span>
         </div>
         {groupedRows.map((group) => {
           const isCollapsed = groupBy !== "none" && !expandedGroups.has(group.key);

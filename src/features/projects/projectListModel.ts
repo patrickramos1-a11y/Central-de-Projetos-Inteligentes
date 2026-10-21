@@ -20,12 +20,20 @@ export type ProjectListRow = ManagementProjectRow & {
 
 export type ProjectGroupBy = "client" | "type" | "none";
 export type ProjectListStatusFilter = "todos" | "em_andamento" | "concluido";
+export type ProjectSortColumn = "name" | "client" | "type" | "responsible" | "progress" | "age" | "status";
+export type ProjectSortDirection = "asc" | "desc";
+export type ProjectProgressBand = "todos" | "0" | "1-49" | "50-99" | "100";
+export type ProjectAgeBand = "todos" | "0-7" | "8-30" | "31+" | "unknown";
 
 export type ProjectListFilters = {
   search: string;
   status: ProjectListStatusFilter;
   responsible: string;
   type: string;
+  project?: string;
+  client?: string;
+  progressBand?: ProjectProgressBand;
+  ageBand?: ProjectAgeBand;
 };
 
 export type ProjectListGroup = {
@@ -75,6 +83,29 @@ export function getProjectAge(row: Pick<ProjectListRow, "createdAt" | "displaySt
   };
 }
 
+function elapsedProjectDays(row: Pick<ProjectListRow, "createdAt" | "displayStatus">, now: Date): number | null {
+  if (row.displayStatus === "concluido" || row.displayStatus === "arquivado") return null;
+  const started = new Date(row.createdAt).getTime();
+  return row.createdAt && Number.isFinite(started) ? Math.max(0, Math.floor((now.getTime() - started) / 86_400_000)) : null;
+}
+
+export function sortProjectListRows(rows: ProjectListRow[], column: ProjectSortColumn, direction: ProjectSortDirection, now = new Date()): ProjectListRow[] {
+  const textFor = (row: ProjectListRow) => column === "name" ? row.name : column === "client" ? row.clientName : column === "type" ? row.projectTypeName : column === "responsible" ? row.responsibleName : row.displayStatus;
+  const numberFor = (row: ProjectListRow) => column === "progress" ? row.progress : elapsedProjectDays(row, now);
+  return [...rows].sort((a, b) => {
+    if (column === "progress" || column === "age") {
+      const left = numberFor(a);
+      const right = numberFor(b);
+      if (left == null || right == null) return left == null && right == null ? a.name.localeCompare(b.name, "pt-BR") : left == null ? 1 : -1;
+      if (left !== right) return (left - right) * (direction === "asc" ? 1 : -1);
+    } else {
+      const difference = textFor(a).localeCompare(textFor(b), "pt-BR", { sensitivity: "base", numeric: true });
+      if (difference) return difference * (direction === "asc" ? 1 : -1);
+    }
+    return a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base", numeric: true }) || a.id.localeCompare(b.id);
+  });
+}
+
 function isSummaryStep(step: ProjectListStep) {
   return normalizeManagementText([step.name, step.description, step.objective].filter(Boolean).join(" ")).includes("SUMARIO");
 }
@@ -110,14 +141,31 @@ export function buildProjectListRows(rows: ManagementProjectRow[], steps: Projec
   }).sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
 }
 
-export function filterProjectListRows(rows: ProjectListRow[], filters: ProjectListFilters) {
+export function filterProjectListRows(rows: ProjectListRow[], filters: ProjectListFilters, now = new Date()) {
   const search = normalizeManagementText(filters.search);
+  const project = normalizeManagementText(filters.project ?? "");
 
   return rows.filter((row) => {
     if (filters.status === "concluido" && row.displayStatus !== "concluido") return false;
     if (filters.status === "em_andamento" && (row.displayStatus === "concluido" || row.displayStatus === "arquivado")) return false;
     if (filters.responsible !== "todos" && row.responsibleName !== filters.responsible) return false;
     if (filters.type !== "todos" && row.projectTypeName !== filters.type) return false;
+    if (project && !normalizeManagementText(row.name).includes(project)) return false;
+    if (filters.client && filters.client !== "todos" && row.clientName !== filters.client) return false;
+    if (filters.progressBand && filters.progressBand !== "todos") {
+      const progress = row.progress;
+      if (filters.progressBand === "0" && progress !== 0) return false;
+      if (filters.progressBand === "1-49" && (progress < 1 || progress > 49)) return false;
+      if (filters.progressBand === "50-99" && (progress < 50 || progress > 99)) return false;
+      if (filters.progressBand === "100" && progress !== 100) return false;
+    }
+    if (filters.ageBand && filters.ageBand !== "todos") {
+      const days = elapsedProjectDays(row, now);
+      if (filters.ageBand === "unknown" ? days !== null : days === null) return false;
+      if (days !== null && filters.ageBand === "0-7" && days > 7) return false;
+      if (days !== null && filters.ageBand === "8-30" && (days < 8 || days > 30)) return false;
+      if (days !== null && filters.ageBand === "31+" && days < 31) return false;
+    }
     if (!search) return true;
 
     return normalizeManagementText([

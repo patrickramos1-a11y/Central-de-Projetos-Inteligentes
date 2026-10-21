@@ -13,9 +13,11 @@
 .workspace-reference-section { padding: 15px 0; border-top: 1px solid #d8e4df; }
 .workspace-reference-section h3 { margin: 5px 0 0; font-family: Outfit, sans-serif; font-size: 1rem; }
 .workspace-reference-section .secondary-button { padding: 7px 10px; font-size: .8rem; }
-.workspace-na { display: flex; align-items: center; gap: 7px; margin: 8px 0; font-size: .85rem; }
+.workspace-header-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
+.workspace-na-button[aria-pressed="true"] { color: #815619; border-color: #d9b970; background: #fff6df; }
 .workspace-empty { margin: 10px 0 0; color: var(--text-soft, #647873); font-size: .85rem; }
 .workspace-reference-list { display: grid; gap: 1px; margin-top: 10px; border: 1px solid #d8e4df; border-radius: 6px; overflow: hidden; }
+.workspace-reference-list:empty { display: none; }
 .workspace-reference { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 9px 11px; border-left: 3px solid transparent; background: rgba(255,255,255,.75); }
 .workspace-reference[data-provider="server"], .client-workspace-project li[data-provider="server"] { border-left-color: #3180a6; background: #f0f8fc; }
 .workspace-reference[data-provider="chatgpt"], .client-workspace-project li[data-provider="chatgpt"] { border-left-color: #16856b; background: #f0faf6; }
@@ -36,7 +38,9 @@
 .workspace-reference-copy small { color: #637773; }
 .workspace-reference-actions { display: flex; flex: 0 0 auto; gap: 2px; }
 .workspace-reference-actions .icon-button { width: 32px; height: 32px; }
-.workspace-reference-form { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid #d8e4df; }
+.workspace-reference-form { display: grid; gap: 10px; margin-top: 12px; padding: 12px; border: 1px solid #cadbd5; border-radius: 6px; background: #f7fbf9; }
+.workspace-reference-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 10px; }
+.workspace-form-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
 .workspace-reference-form label, .template-workspace-guidance label { display: grid; gap: 4px; font-size: .82rem; font-weight: 650; }
 .workspace-reference-form input, .workspace-reference-form textarea, .template-workspace-guidance textarea { width: 100%; box-sizing: border-box; padding: 9px 11px; border: 1px solid #b7cfca; border-radius: 5px; background: white; color: #173e36; font: inherit; }
 .workspace-reference-form .primary-button { justify-self: start; }
@@ -65,6 +69,8 @@
   .template-preview-modal:has(.template-workspace-guidance) { box-sizing: border-box; width: 100%; max-width: 100%; max-height: calc(100vh - 16px); overflow-y: auto; }
   .workspace-stage-body { padding: 12px; }
   .workspace-stage-intro { flex-wrap: wrap; }
+  .workspace-reference-section > header { flex-wrap: wrap; }
+  .workspace-reference-fields { grid-template-columns: minmax(0, 1fr); }
   .workspace-reference { flex-wrap: wrap; }
   .workspace-reference-copy { flex-basis: calc(100% - 132px); }
   .client-workspace-project li { flex-wrap: wrap; }

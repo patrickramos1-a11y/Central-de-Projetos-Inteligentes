@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { buildManagementProjectRows } from "../management/managementModel";
-import { buildProjectListRows, filterProjectListRows, getProjectAge, groupProjectListRows, projectPrimaryAction } from "./projectListModel";
+import { buildProjectListRows, filterProjectListRows, getProjectAge, groupProjectListRows, projectPrimaryAction, sortProjectListRows } from "./projectListModel";
 
 const baseRows = buildManagementProjectRows({
   clients: [{ id: "client-1", name: "Bento Sushi" }, { id: "client-2", name: "Advance" }],
@@ -49,6 +49,18 @@ describe("projectListModel", () => {
     expect(filterProjectListRows(rows, { ...defaults, status: "concluido" }).map((row) => row.id)).toEqual(["ria"]);
     expect(filterProjectListRows(rows, { ...defaults, search: "bento", type: "PCA", responsible: "Patrick" }).map((row) => row.id)).toEqual(["pca"]);
     expect(filterProjectListRows(rows, { ...defaults, search: "advance" }).map((row) => row.id)).toEqual(["ria"]);
+  });
+
+  test("sorts data columns and combines column filters without mutating the source rows", () => {
+    const rows = buildProjectListRows(baseRows, [{ project_id: "ria", name: "Iniciar", status: "concluido" }], []);
+    const original = rows.map((row) => row.id);
+    expect(sortProjectListRows(rows, "progress", "asc").map((row) => row.id)).toEqual(["pca", "ria"]);
+    expect(sortProjectListRows(rows, "client", "desc").map((row) => row.id)).toEqual(["pca", "ria"]);
+    expect(rows.map((row) => row.id)).toEqual(original);
+    const defaults = { search: "", status: "todos" as const, responsible: "todos", type: "todos" };
+    expect(filterProjectListRows(rows, { ...defaults, project: "Bento", client: "Bento Sushi", progressBand: "0" }).map((row) => row.id)).toEqual(["pca"]);
+    expect(filterProjectListRows(rows, { ...defaults, progressBand: "100" }).map((row) => row.id)).toEqual(["ria"]);
+    expect(filterProjectListRows(rows, { ...defaults, ageBand: "unknown" }).map((row) => row.id)).toEqual(original);
   });
 
   test("keeps explicit project completion even with pending steps", () => {

@@ -67,12 +67,18 @@ export function toLinkedReference(row: LinkedRow): WorkspaceReference | null {
   const target = row.target?.trim();
   if (!target) return null;
   const title = row.title?.trim() || "Link da jornada";
+  const titleUrl = browserAccessibleUrl(title);
+  const destination = browserAccessibleUrl(target);
+  const targetUrl = destination ? new URL(destination) : null;
+  const conversationInTitle = titleUrl && classifyJourneyLink("", titleUrl) === "conversation";
+  const isChatGptProject = targetUrl && ["chatgpt.com", "chat.openai.com"].includes(targetUrl.hostname.toLowerCase()) && targetUrl.pathname.endsWith("/project");
+  const resolvedTarget = titleUrl && conversationInTitle && isChatGptProject ? titleUrl : target;
   return {
     id: `journey:${row.source_type}:${row.source_id}:${row.link_id || row.link_index}`,
     project_id: row.project_id,
-    kind: classifyJourneyLink(title, target),
-    title,
-    target,
+    kind: classifyJourneyLink(title, resolvedTarget),
+    title: resolvedTarget !== target ? "Conversa do projeto" : title,
+    target: resolvedTarget,
     notes: null,
     sort_order: 0,
     created_at: row.updated_at || "",
