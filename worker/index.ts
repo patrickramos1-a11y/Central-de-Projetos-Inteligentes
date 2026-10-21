@@ -1,6 +1,7 @@
 import { handleProjectStepRequest } from "./blockBuilder";
 import { handleJourneyDomainRequest } from "./journeyDomain";
 import { buildTableReadQuery } from "./tableRead";
+import { handleProjectWorkspaceRequest, isProjectWorkspaceOrganized, readWorkspaceOverview } from "./projectWorkspace";
 
 type Env = {
   DB: D1Database;
@@ -46,7 +47,7 @@ const booleanColumns = new Set(["is_done", "is_required", "requires_previous_pha
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
+  "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   "access-control-allow-headers": "content-type,cf-access-jwt-assertion",
 };
 
@@ -65,15 +66,20 @@ export default {
       }
 
       if (url.pathname === "/api/overview" && request.method === "GET") {
-        const [promptCount, summaryProjects] = await Promise.all([
+        const [promptCount, summaryProjects, workspaces] = await Promise.all([
           env.DB.prepare("select count(*) as total from prompts").first<{ total: number }>(),
           env.DB.prepare("select distinct project_id from project_summaries where status != 'archived'").all<{ project_id: string }>(),
+          readWorkspaceOverview(env.DB),
         ]);
         return json({ data: {
           promptCount: promptCount?.total ?? 0,
           summaryProjectIds: (summaryProjects.results ?? []).map((row) => row.project_id),
+          workspaces,
         } });
       }
+
+      const workspaceResponse = await handleProjectWorkspaceRequest(request, env, parts);
+      if (workspaceResponse) return workspaceResponse;
 
       const domainResponse = await handleJourneyDomainRequest(request, env, parts, url);
       if (domainResponse) {
@@ -126,6 +132,9 @@ async function handleTableRequest(request: Request, env: Env, tableName = "", id
     const body = await request.json();
     const rows = Array.isArray(body) ? body : [body];
     const inserted = [];
+    if (tableName === "projects" && rows.some((row) => (row as DataRecord)?.status === "concluido")) {
+      return jsonError("Organize a Etapa 0 antes de concluir o projeto.", 409);
+    }
 
     for (const row of rows) {
       const normalized = normalizeRecord(row as DataRecord, columns, true);
@@ -139,6 +148,9 @@ async function handleTableRequest(request: Request, env: Env, tableName = "", id
   if (request.method === "PATCH" && id) {
     const body = (await request.json()) as DataRecord;
     const normalized = normalizeRecord(body, columns, false);
+    if (tableName === "projects" && normalized.status === "concluido" && !(await isProjectWorkspaceOrganized(env.DB, id))) {
+      return jsonError("Organize a Etapa 0 antes de concluir o projeto.", 409);
+    }
     await updateRecord(env.DB, tableName, id, normalized);
     return json({ data: normalizeRows([await getById(env.DB, tableName, id)].filter(Boolean)) });
   }

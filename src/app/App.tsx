@@ -11,6 +11,7 @@ import {
   Download,
   Upload,
   FileText,
+  FolderOpen,
   GitBranch,
   GripVertical,
   Layers3,
@@ -67,6 +68,10 @@ import { Toast } from "../components/ui/Toast";
 import { ProgressBar } from "../components/ui/ProgressBar";
 import { StatusBadge, type StatusTone } from "../components/ui/StatusBadge";
 import { AppShell, CommandBar, JourneyContextBar, WorkCanvas } from "../components/ui/LayoutPrimitives";
+import { ProjectWorkspacePanel } from "../features/workspace/ProjectWorkspacePanel";
+import { ClientWorkspacesDialog } from "../features/workspace/ClientWorkspacesDialog";
+import { TemplateWorkspaceGuidance } from "../features/workspace/TemplateWorkspaceGuidance";
+import { WORKSPACE_STEP_ID, type WorkspaceOverview } from "../features/workspace/workspaceModel";
 
 type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
 type ProjectStatus = "planejado" | "em_andamento" | "concluido" | "bloqueado" | "arquivado";
@@ -79,7 +84,7 @@ function compactStepLabel(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).join(" ");
 }
 
-type RailStep = { id: string; name: string; step_order: number; status: StepStatus; is_not_applicable?: boolean };
+type RailStep = { id: string; name: string; step_order: number; status: StepStatus; is_not_applicable?: boolean; compact_label?: string; status_label?: string };
 
 function JourneyStepRail({ ownerType, ownerId, currentUser, steps, selectedStepId, onSelectStep, onOrganize }: { ownerType: "project" | "client"; ownerId: string; currentUser: AppUser | null; steps: RailStep[]; selectedStepId: string; onSelectStep: (id: string) => void; onOrganize?: () => void }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -121,8 +126,8 @@ function JourneyStepRail({ ownerType, ownerId, currentUser, steps, selectedStepI
     <div className="rail-heading"><div><strong>Etapas</strong>{isExpanded && <span>{steps.filter((step) => step.status === "concluido").length} concluidas</span>}</div><button className="icon-button rail-toggle-button" type="button" title={compactLabel} aria-label={compactLabel} onClick={toggleRail}><PanelLeft size={16} /></button>{isExpanded && onOrganize && <button className="rail-edit-button" type="button" title="Organizar etapas" onClick={onOrganize}><Pencil size={14} /> Editar</button>}</div>
     <nav className="step-rail-list">{steps.map((step) => {
       const status = step.is_not_applicable ? "nao-aplicavel" : step.status;
-      const statusLabel = step.is_not_applicable ? "Nao se aplica" : formatStepStatus(step.status);
-      return <button key={step.id} className={`step-item ${status} ${selectedStepId === step.id ? "active" : ""}`} type="button" title={`${step.name} - ${statusLabel}`} aria-current={selectedStepId === step.id ? "step" : undefined} onClick={() => onSelectStep(step.id)}><span className={`step-dot ${status}`}>{step.status === "concluido" && !step.is_not_applicable ? <Check size={13} /> : step.step_order}</span><span className="step-rail-short-label" aria-hidden="true">{compactStepLabel(step.name)}</span><span className="step-rail-details"><strong>{step.name}</strong><small>{statusLabel}</small></span></button>;
+      const statusLabel = step.status_label ?? (step.is_not_applicable ? "Nao se aplica" : formatStepStatus(step.status));
+      return <button key={step.id} className={`step-item ${status} ${selectedStepId === step.id ? "active" : ""}`} type="button" title={`${step.name} - ${statusLabel}`} aria-label={`${step.name} - ${statusLabel}`} aria-current={selectedStepId === step.id ? "step" : undefined} onClick={() => onSelectStep(step.id)}><span className={`step-dot ${status}`}>{step.status === "concluido" && !step.is_not_applicable ? <Check size={13} /> : step.step_order}</span><span className="step-rail-short-label" aria-hidden="true">{step.compact_label ?? compactStepLabel(step.name)}</span><span className="step-rail-details"><strong>{step.name}</strong><small>{statusLabel}</small></span></button>;
     })}</nav>
   </aside>;
 }
@@ -573,18 +578,18 @@ const initialReadColumns: Partial<Record<keyof Tables, string>> = {
   project_types: "id,name,description,status,created_at",
   journey_templates: "id,name,description,project_type_id,context,status,created_at",
 };
-function activeSecondaryTables(view: ViewMode, activeConfig: ConfigModuleKey): Array<keyof Tables> {
+function activeSecondaryTables(view: ViewMode, activeConfig: ConfigModuleKey, selectedStepId?: string | null): Array<keyof Tables> {
   if (view === "projectTemplates") return ["journey_steps", "step_prompts"];
   if (view === "clients") return ["client_steps", "journey_steps"];
   if (view === "clientJourney") return ["client_steps", "client_step_checklist_items", "client_step_links", "prompts", "ai_tools", "prompt_blocks"];
   if (view === "settings") return [...new Set<keyof Tables>([activeConfig, "ai_tools", "prompt_categories", "project_types", "journey_steps"])];
-  if (view === "journey") return ["prompts", "ai_tools", "prompt_blocks", "project_step_prompts", "project_step_checklist_items", "project_step_links", "project_step_phases", "project_step_contexts", "journey_steps", "step_prompts"];
+  if (view === "journey") return selectedStepId === WORKSPACE_STEP_ID ? [] : ["prompts", "ai_tools", "prompt_blocks", "project_step_prompts", "project_step_checklist_items", "project_step_links", "project_step_phases", "project_step_contexts", "journey_steps", "step_prompts"];
   return [];
 }
 
 const projectFormTables: Array<keyof Tables> = ["journey_steps", "step_prompts"];
 
-type Overview = { promptCount: number; summaryProjectIds: string[] };
+type Overview = { promptCount: number; summaryProjectIds: string[]; workspaces: WorkspaceOverview[] };
 
 const configModules: Array<{ key: ConfigModuleKey; label: string; icon: typeof Bot; description: string }> = [
   {
@@ -667,7 +672,14 @@ export default function App() {
   const [loadedProjectDetails, setLoadedProjectDetails] = useState<Set<string>>(() => new Set());
   const [loadingProjectDetails, setLoadingProjectDetails] = useState<Set<string>>(() => new Set());
   const [projectDetailErrors, setProjectDetailErrors] = useState<Record<string, string>>({});
-  const [overview, setOverview] = useState<Overview>({ promptCount: 0, summaryProjectIds: [] });
+  const [overview, setOverview] = useState<Overview>({ promptCount: 0, summaryProjectIds: [], workspaces: [] });
+  const onWorkspaceChanged = useCallback((workspace: WorkspaceOverview) => {
+    setOverview((current) => {
+      const previous = current.workspaces.find((item) => item.projectId === workspace.projectId);
+      if (previous && previous.revision > workspace.revision) return current;
+      return { ...current, workspaces: [...current.workspaces.filter((item) => item.projectId !== workspace.projectId), workspace] };
+    });
+  }, []);
   const coreInFlightRef = useRef<Promise<void> | null>(null);
   const secondaryInFlightRef = useRef<Promise<void> | null>(null);
   const secondaryInFlightScopeRef = useRef("");
@@ -703,7 +715,7 @@ export default function App() {
   const activeUsers = tables.app_users.filter((user) => user.status === "ativo");
   const currentUser = tables.app_users.find((user) => user.id === currentUserId) ?? null;
 
-  const currentSecondaryReady = activeSecondaryTables(view, activeConfig).every((name) => loadedSecondaryTables.has(name));
+  const currentSecondaryReady = activeSecondaryTables(view, activeConfig, selectedStepId).every((name) => loadedSecondaryTables.has(name));
   const projectFormReady = projectFormTables.every((name) => loadedSecondaryTables.has(name));
   const headerSyncStatus = syncStatus === "saving" ? "saving" : tableErrors.length > 0 ? "error" : syncStatus;
 
@@ -714,15 +726,15 @@ export default function App() {
   useEffect(() => {
     const changedArea = lastViewedAreaRef.current !== view;
     lastViewedAreaRef.current = view;
-    const required = activeSecondaryTables(view, activeConfig);
+    const required = activeSecondaryTables(view, activeConfig, selectedStepId);
     const missing = required.filter((name) => !loadedSecondaryTables.has(name));
     if (missing.length) void refreshSecondary(missing);
     else if (changedArea && required.length) void refreshSecondary(required);
-  }, [view, activeConfig, loadedSecondaryTables]);
+  }, [view, activeConfig, selectedStepId, loadedSecondaryTables]);
 
   useEffect(() => {
-    if (view === "journey" && selectedProjectId) void refreshProjectDetails(selectedProjectId);
-  }, [view, selectedProjectId]);
+    if (view === "journey" && selectedProjectId && selectedStepId !== WORKSPACE_STEP_ID) void refreshProjectDetails(selectedProjectId);
+  }, [view, selectedProjectId, selectedStepId]);
 
   useEffect(() => {
     const refreshWhenActive = (event: Event) => {
@@ -757,7 +769,7 @@ export default function App() {
   }, [selectedProjectId, tables.projects]);
 
   useEffect(() => {
-    if (projectSteps.length > 0 && !projectSteps.some((step) => step.id === selectedStepId)) {
+    if (projectSteps.length > 0 && selectedStepId !== WORKSPACE_STEP_ID && !projectSteps.some((step) => step.id === selectedStepId)) {
       setSelectedStepId(projectSteps[0].id);
     }
   }, [projectSteps, selectedStepId]);
@@ -870,7 +882,10 @@ export default function App() {
           }
           return next;
         });
-        if (overviewResult.data) setOverview(overviewResult.data);
+        if (overviewResult.data) setOverview((current) => ({ ...overviewResult.data!, workspaces: overviewResult.data!.workspaces.map((workspace) => {
+          const local = current.workspaces.find((item) => item.projectId === workspace.projectId);
+          return local && local.revision > workspace.revision ? local : workspace;
+        }) }));
         const errors = results.filter((result) => result.error).map((result) => String(result.tableName));
         if (overviewResult.error) errors.push("overview");
         reportReadErrors([...coreTableNames, "overview"], errors);
@@ -1010,6 +1025,7 @@ export default function App() {
     }
     lastReadFailedRef.current = false;
     try {
+      if (view === "journey" && selectedStepId === WORKSPACE_STEP_ID) { await refreshCore(); return; }
       if (view === "journey" && selectedProjectId && loadedProjectDetails.has(selectedProjectId)) {
         const summaries = tables.project_summaries.filter((summary) => summary.project_id === selectedProjectId && summary.status !== "archived");
         if (summaries.length) await Promise.all(summaries.map((summary) => refreshSummaryState(summary.id, selectedProjectId)));
@@ -1021,7 +1037,7 @@ export default function App() {
         return;
       }
       await refreshCore();
-      const required = activeSecondaryTables(view, activeConfig);
+      const required = activeSecondaryTables(view, activeConfig, selectedStepId);
       if (required.length) await refreshSecondary(required);
       if (view === "journey" && selectedProjectId) await refreshProjectDetails(selectedProjectId);
       if (!lastReadFailedRef.current) {
@@ -2849,6 +2865,7 @@ export default function App() {
         {view === "projects" && (
           <ProjectsView
             tables={tables}
+            workspaces={overview.workspaces}
             summaryProjectIds={overview.summaryProjectIds}
             query={query}
             setQuery={setQuery}
@@ -2860,6 +2877,7 @@ export default function App() {
             onUpdate={updateProject}
             onOpen={(id) => {
               setSelectedProjectId(id);
+              setSelectedStepId(WORKSPACE_STEP_ID);
               setView("journey");
             }}
             onDelete={deleteProject}
@@ -2868,15 +2886,17 @@ export default function App() {
 
         {view === "projectTemplates" && (currentSecondaryReady ? <ProjectTemplatesView tables={tables} query={query} setQuery={setQuery} onUpdate={updateJourneyTemplate} onDelete={deleteJourneyTemplate} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
-        {view === "clients" && (currentSecondaryReady ? <ClientsView tables={tables} currentUser={currentUser} query={query} setQuery={setQuery} onCreate={createClientJourney} onSaveIdentity={saveClientIdentity} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
+        {view === "clients" && (currentSecondaryReady ? <ClientsView tables={tables} currentUser={currentUser} query={query} setQuery={setQuery} onCreate={createClientJourney} onSaveIdentity={saveClientIdentity} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} onOpenProject={(id) => { setSelectedProjectId(id); setSelectedStepId(WORKSPACE_STEP_ID); setView("journey"); }} baseUrl={cloudflareApiUrl} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
         {view === "management" && (
           <ManagementView
             tables={tables}
+            workspaces={overview.workspaces}
             query={query}
             setQuery={setQuery}
             onOpenProject={(id) => {
               setSelectedProjectId(id);
+              setSelectedStepId(WORKSPACE_STEP_ID);
               setView("journey");
             }}
             onOpenClient={(id) => {
@@ -2886,13 +2906,22 @@ export default function App() {
           />
         )}
 
-        {view === "journey" && (!currentSecondaryReady || (selectedProjectId && !loadedProjectDetails.has(selectedProjectId))) && (
+        {view === "journey" && selectedStepId === WORKSPACE_STEP_ID && selectedProject && <>
+          <section className="journey-hero journey-context-bar"><button className="ghost-button" type="button" onClick={() => setView("projects")}><PanelLeft size={17} /> Projetos</button><div className="journey-context-copy"><span className="eyebrow">Ramos Jornadas</span><h1>{selectedProject.name}</h1><p>{selectedProject.company || "Projeto sem empresa definida"}</p></div></section>
+          <section className="journey-layout block-journey-layout">
+            <JourneyStepRail ownerType="project" ownerId={selectedProject.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "concluido" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "em_andamento" : "pendente", status_label: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "Organizado" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "Parcial" : "Nao iniciado" }, ...projectSteps]} selectedStepId={WORKSPACE_STEP_ID} onSelectStep={setSelectedStepId} />
+            <section className="work-surface block-work-surface"><ProjectWorkspacePanel key={selectedProject.id} baseUrl={cloudflareApiUrl} projectId={selectedProject.id} onChanged={onWorkspaceChanged} /></section>
+          </section>
+        </>}
+
+        {view === "journey" && selectedStepId !== WORKSPACE_STEP_ID && (!currentSecondaryReady || (selectedProjectId && !loadedProjectDetails.has(selectedProjectId))) && (
           <DataAreaLoading loading={secondaryLoading || Boolean(selectedProjectId && loadingProjectDetails.has(selectedProjectId))} error={selectedProjectId ? projectDetailErrors[selectedProjectId] : undefined} onRetry={() => { void refreshSecondary(activeSecondaryTables(view, activeConfig)); if (selectedProjectId) void refreshProjectDetails(selectedProjectId); }} />
         )}
 
-        {view === "journey" && currentSecondaryReady && selectedProjectId && loadedProjectDetails.has(selectedProjectId) && selectedProject && selectedStep && (
+        {view === "journey" && selectedStepId !== WORKSPACE_STEP_ID && currentSecondaryReady && selectedProjectId && loadedProjectDetails.has(selectedProjectId) && selectedProject && selectedStep && (
           <JourneyView
             project={selectedProject}
+            workspace={overview.workspaces.find((item) => item.projectId === selectedProject.id)}
             steps={projectSteps}
             selectedStep={selectedStep}
             selectedStepId={selectedStep.id}
@@ -2935,7 +2964,7 @@ export default function App() {
           />
         )}
 
-        {view === "journey" && currentSecondaryReady && selectedProjectId && loadedProjectDetails.has(selectedProjectId) && (!selectedProject || !selectedStep) && (
+        {view === "journey" && selectedStepId !== WORKSPACE_STEP_ID && currentSecondaryReady && selectedProjectId && loadedProjectDetails.has(selectedProjectId) && (!selectedProject || !selectedStep) && (
           <EmptyProjectJourney onBack={() => setView("projects")} />
         )}
 
@@ -2944,6 +2973,7 @@ export default function App() {
         {view === "clientJourney" && currentSecondaryReady && selectedClient && selectedClientStep && (
           <ClientBlockJourneyView
             client={selectedClient}
+            onOpenProject={(id) => { setSelectedProjectId(id); setSelectedStepId(WORKSPACE_STEP_ID); setView("journey"); }}
             steps={clientSteps}
             selectedStep={selectedClientStep}
             tables={tables}
@@ -3012,6 +3042,7 @@ type NewClientFormState = {
 
 function ProjectsView({
   tables,
+  workspaces,
   summaryProjectIds,
   supportingDataReady,
   supportingDataLoading,
@@ -3025,6 +3056,7 @@ function ProjectsView({
   onDelete,
 }: {
   tables: Tables;
+  workspaces: WorkspaceOverview[];
   summaryProjectIds: string[];
   supportingDataReady: boolean;
   supportingDataLoading: boolean;
@@ -3055,7 +3087,8 @@ function ProjectsView({
     projectTypes: tables.project_types,
     users: tables.app_users,
     steps: tables.project_steps,
-  }), [tables.projects, tables.clients, tables.project_types, tables.app_users, tables.project_steps]);
+    workspaces,
+  }), [tables.projects, tables.clients, tables.project_types, tables.app_users, tables.project_steps, workspaces]);
   const activeSummaryProjectIds = useMemo(() => [
     ...summaryProjectIds,
     ...tables.project_summaries.filter((summary) => summary.status !== "archived").map((summary) => summary.project_id),
@@ -3064,7 +3097,8 @@ function ProjectsView({
     managementRows,
     tables.project_steps,
     activeSummaryProjectIds,
-  ), [managementRows, tables.project_steps, activeSummaryProjectIds]);
+    workspaces,
+  ), [managementRows, tables.project_steps, activeSummaryProjectIds, workspaces]);
   const filteredRows = useMemo(() => filterProjectListRows(projectRows, {
     search: query,
     status: statusFilter,
@@ -3090,6 +3124,10 @@ function ProjectsView({
   }
 
   function completeProject(row: ProjectListRow) {
+    if (workspaces.find((item) => item.projectId === row.id)?.status !== "organizado") {
+      onOpen(row.id);
+      return;
+    }
     const unfinished = row.totalSteps - row.completedSteps;
     if (unfinished > 0 && !window.confirm(`Concluir o projeto "${row.name}" com ${unfinished} etapa(s) ainda nao concluida(s)? As etapas permanecerao como estao.`)) return;
     onUpdate(row.id, { status: "concluido" });
@@ -3265,7 +3303,7 @@ function ProjectPortfolioRow({ row, client, onOpen, onEdit, onComplete, onReopen
     ? row.responsibleName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()
     : "?";
   const age = getProjectAge(row);
-  const canReopen = row.status === "concluido" && row.progress < 100;
+  const canReopen = row.historicalStatus === "concluido" && !row.regularizationPending && row.progress < 100;
   const completionDisabled = (row.displayStatus === "concluido" && !canReopen) || row.status === "arquivado";
 
   return (
@@ -3288,9 +3326,9 @@ function ProjectPortfolioRow({ row, client, onOpen, onEdit, onComplete, onReopen
       <span className={`projects-cell projects-age ${age.available ? "" : "unavailable"}`} title={age.title} aria-label={age.title}>
         <strong>{age.label}</strong><small>{age.detail}</small>
       </span>
-      <span className="projects-cell projects-status"><StatusPill status={row.displayStatus} /></span>
+      <span className="projects-cell projects-status">{row.regularizationPending ? <StatusPill status="regularizacao_pendente" /> : <StatusPill status={row.displayStatus} />}</span>
       <div className="projects-cell projects-actions">
-        <button className="projects-action-button complete" type="button" title={canReopen ? `Reabrir ${row.name}` : completionDisabled ? "Projeto ja concluido ou arquivado" : `Concluir ${row.name}`} aria-label={canReopen ? `Reabrir ${row.name}` : row.status === "arquivado" ? `${row.name} arquivado` : `Concluir ${row.name}`} disabled={completionDisabled} onClick={canReopen ? onReopen : onComplete}>{canReopen ? <RefreshCw size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />}</button>
+        <button className="projects-action-button complete" type="button" title={row.regularizationPending ? `Regularizar local de trabalho de ${row.name}` : canReopen ? `Reabrir ${row.name}` : completionDisabled ? "Projeto ja concluido ou arquivado" : `Concluir ${row.name}`} aria-label={row.regularizationPending ? `Regularizar local de trabalho de ${row.name}` : canReopen ? `Reabrir ${row.name}` : row.status === "arquivado" ? `${row.name} arquivado` : `Concluir ${row.name}`} disabled={completionDisabled} onClick={row.regularizationPending ? onOpen : canReopen ? onReopen : onComplete}>{row.regularizationPending ? <FolderOpen size={16} aria-hidden="true" /> : canReopen ? <RefreshCw size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />}</button>
         <button className="projects-action-button edit" type="button" title={`Editar ${row.name}`} aria-label={`Editar ${row.name}`} onClick={onEdit}><Pencil size={16} aria-hidden="true" /></button>
         <button className="projects-action-button danger" type="button" title={`Excluir ${row.name}`} aria-label={`Excluir ${row.name}`} onClick={onDelete}><Trash2 size={16} aria-hidden="true" /></button>
       </div>
@@ -3426,7 +3464,9 @@ function ProjectTemplatesView({
               <span>{tables.journey_steps.filter((step) => step.journey_template_id === previewTemplate.id).length} etapas</span>
               <span>{tables.step_prompts.filter((prompt) => tables.journey_steps.some((step) => step.journey_template_id === previewTemplate.id && step.id === prompt.journey_step_id)).length} prompts</span>
             </div>
+            <TemplateWorkspaceGuidance key={previewTemplate.id} baseUrl={cloudflareApiUrl} templateId={previewTemplate.id} />
             <ol className="template-preview-steps">
+              <li><span>0</span>Local de trabalho (obrigatorio)</li>
               {tables.journey_steps.filter((step) => step.journey_template_id === previewTemplate.id).sort(byOrder).map((step, index) => <li key={step.id}><span>{index + 1}</span>{step.name}</li>)}
             </ol>
           </section>
@@ -3508,12 +3548,14 @@ function NewProjectPanel({ tables, currentUser, onCreate, onClose }: { tables: T
 
 function ManagementView({
   tables,
+  workspaces,
   query,
   setQuery,
   onOpenProject,
   onOpenClient,
 }: {
   tables: Tables;
+  workspaces: WorkspaceOverview[];
   query: string;
   setQuery: (query: string) => void;
   onOpenProject: (id: string) => void;
@@ -3532,6 +3574,7 @@ function ManagementView({
     projectTypes: tables.project_types,
     users: tables.app_users,
     steps: tables.project_steps,
+    workspaces,
   }).sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
   const filteredRows = filterManagementProjectRows(projectRows, {
     search: query,
@@ -3549,7 +3592,7 @@ function ManagementView({
   const attentionRows = filteredAttentionRows.filter((row) => attentionFilter === "ativos" ? row.status !== "concluido" : row.reasons.includes(attentionFilter));
   const visibleActiveProjects = activeProjects.filter((row) => searchedRows.some((searched) => searched.id === row.id));
   const visibleClients = clientRows.filter((client) => client.projectCount > 0 && normalizeSearchText(`${client.name} ${client.company}`).includes(normalizeSearchText(query)));
-  const attentionKinds: ManagementAttentionKind[] = ["bloqueado", "sem_cliente", "sem_responsavel", "sem_tipo", "concluido_com_etapas_abertas"];
+  const attentionKinds: ManagementAttentionKind[] = ["regularizacao_pendente", "bloqueado", "sem_cliente", "sem_responsavel", "sem_tipo", "concluido_com_etapas_abertas"];
 
   return (
     <>
@@ -3660,7 +3703,7 @@ function ManagementView({
               <button type="button" className="management-link subtle management-client-name" disabled={!row.clientId} onClick={() => row.clientId && onOpenClient(row.clientId)}>{row.clientId && <ClientLogo client={tables.clients.find((client) => client.id === row.clientId) ?? { name: row.clientName, logo_url: null }} small />}{row.clientName}</button>
               <span>{row.projectTypeName}</span>
               <span>{row.responsibleName || "Sem responsavel"}</span>
-              <span><StatusPill status={row.status} /></span>
+              <span><StatusPill status={row.regularizationPending ? "regularizacao_pendente" : row.status} /></span>
               <span className="management-progress"><span>{row.progress}%</span><div className="progress-bar"><span style={{ width: `${row.progress}%` }} /></div></span>
             </div>
           ))}
@@ -3705,24 +3748,29 @@ function ManagementView({
 
 function ClientsView({
   tables,
+  baseUrl,
   currentUser,
   query,
   setQuery,
   onCreate,
   onSaveIdentity,
   onOpen,
+  onOpenProject,
 }: {
   tables: Tables;
+  baseUrl: string;
   currentUser: AppUser | null;
   query: string;
   setQuery: (query: string) => void;
   onCreate: (form: NewClientFormState) => void;
   onSaveIdentity: (id: string, payload: Partial<Client>, logoFile: File | null) => Promise<boolean>;
   onOpen: (id: string) => void;
+  onOpenProject: (id: string) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [workspaceClient, setWorkspaceClient] = useState<Client | null>(null);
   const normalizedQuery = normalizeSearchText(query);
   const filteredClients = tables.clients
     .filter((client) => (client.is_active || showInactive || normalizedQuery) && normalizeSearchText(normalizeSearch(client.name, client.company, client.client_kind, getResponsibleName(client, tables.app_users))).includes(normalizedQuery))
@@ -3819,6 +3867,7 @@ function ClientsView({
                 {responsibleName && <small>Responsavel: {responsibleName}</small>}
                 </button>
                 <button className="icon-button client-edit-button" type="button" title={`Editar cadastro de ${client.name}`} aria-label={`Editar cadastro de ${client.name}`} onClick={() => setEditingClient(client)}><Pencil size={16} /></button>
+                <button className="secondary-button client-workspaces-button" type="button" onClick={() => setWorkspaceClient(client)}><FolderOpen size={15} /> Locais de projetos</button>
                 {!client.is_active && <button className="secondary-button client-activate-button" type="button" onClick={() => void onSaveIdentity(client.id, { is_active: true }, null)}>Ativar</button>}
               </article>
             );
@@ -3834,6 +3883,7 @@ function ClientsView({
         )}
       </section>
       {editingClient && <ClientProfileDialog key={editingClient.id} client={editingClient} users={tables.app_users} onClose={() => setEditingClient(null)} onSave={onSaveIdentity} />}
+      {workspaceClient && <ClientWorkspacesDialog baseUrl={baseUrl} clientId={workspaceClient.id} clientName={workspaceClient.name} onClose={() => setWorkspaceClient(null)} onOpenProject={onOpenProject} />}
     </>
   );
 }
@@ -4108,6 +4158,7 @@ function ClientJourneyView({
 
 function ClientBlockJourneyView({
   client,
+  onOpenProject,
   steps,
   selectedStep,
   tables,
@@ -4120,6 +4171,7 @@ function ClientBlockJourneyView({
   onCreatePromptFromBlock,
 }: {
   client: Client;
+  onOpenProject: (id: string) => void;
   steps: ClientStep[];
   selectedStep: ClientStep;
   tables: Tables;
@@ -4132,6 +4184,7 @@ function ClientBlockJourneyView({
   onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
 }) {
   const [payload, setPayload] = useState<StepBuilderPayload | null>(null);
+  const [showWorkspaces, setShowWorkspaces] = useState(false);
   const [mode, setMode] = useState<JourneyMode>("execute");
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
@@ -4246,6 +4299,7 @@ function ClientBlockJourneyView({
         <div className="client-journey-identity"><ClientLogo client={client} large /><div className="journey-context-copy"><span className="eyebrow">Ramos Jornadas</span><h1>{client.name} {client.client_kind && <span className="client-kind-badge">{client.client_kind}</span>}</h1><p>{client.company || "Jornada do cliente"}</p></div></div>
         <div className="journey-progress"><strong>{progress}%</strong><div className="progress-bar"><span style={{ width: `${progress}%` }} /></div></div>
       </JourneyContextBar>
+      <div className="client-workspace-shortcut"><button className="secondary-button" type="button" onClick={() => setShowWorkspaces(true)}><FolderOpen size={16} /> Locais de projetos</button></div>
       <section className="journey-layout block-journey-layout">
         <JourneyStepRail ownerType="client" ownerId={client.id} currentUser={currentUser} steps={steps} selectedStepId={selectedStep.id} onSelectStep={onSelectStep} />
         <section className="work-surface block-work-surface">
@@ -4262,6 +4316,7 @@ function ClientBlockJourneyView({
           <div className="block-canvas">{blocks.map((block, index) => <StepBuilderBlockCard key={block.id} block={block} index={index} total={blocks.length} value={payload?.values.find((value) => value.block_id === block.id)?.value} tables={tables} summaries={[]} summaryItems={[]} generatedPrompts={[]} project={projectLike} selectedStep={stepLike} currentUser={currentUser} onUpdateSummaryItem={() => undefined} onSetSummaryItemSelection={() => undefined} onDeleteSummaryItem={() => undefined} onSaveGeneratedPrompt={async () => false} onArchiveGeneratedPrompt={() => undefined} onCreatePromptFromBlock={onCreatePromptFromBlock} mode={mode} isEditing={mode === "edit" && editingBlockId === block.id} isCollapsed={collapsedBlockIds.has(block.id)} onToggleCollapse={() => updatePresentation((current) => toggleCollapsedBlockIds(current, block.id))} onDuplicate={() => void addBlock(block.type)} onEdit={() => setEditingBlockId((current) => current === block.id ? null : block.id)} onUpdate={(patch) => void updateBlock(block.id, patch)} onDelete={() => void request(`/blocks/${encodeURIComponent(block.id)}`, { method: "DELETE" }).then(setPayload)} onMove={move} onSaveValue={(value) => void saveValue(block.id, value)} onOpenSummary={() => undefined} ownerType="client" />)}</div>
         </section>
       </section>
+      {showWorkspaces && <ClientWorkspacesDialog baseUrl={cloudflareApiUrl} clientId={client.id} clientName={client.name} onClose={() => setShowWorkspaces(false)} onOpenProject={onOpenProject} />}
     </>
   );
 }
@@ -4418,6 +4473,7 @@ const blockCatalog: BlockCatalogItem[] = [
 
 function JourneyView({
   project,
+  workspace,
   steps,
   selectedStep,
   selectedStepId,
@@ -4459,6 +4515,7 @@ function JourneyView({
   onCreatePromptFromBlock,
 }: {
   project: Project;
+  workspace?: WorkspaceOverview;
   steps: ProjectStep[];
   selectedStep: ProjectStep;
   selectedStepId: string;
@@ -4501,7 +4558,7 @@ function JourneyView({
 }) {
   const applicableSteps = steps.filter((step) => !step.is_not_applicable);
   const doneSteps = applicableSteps.filter((step) => step.status === "concluido").length;
-  const progress = applicableSteps.length ? Math.round((doneSteps / applicableSteps.length) * 100) : 0;
+  const progress = Math.round(((doneSteps + (workspace?.status === "organizado" ? 1 : 0)) / (applicableSteps.length + 1)) * 100);
   const [payload, setPayload] = useState<StepBuilderPayload | null>(null);
   const [isLoadingBlocks, setIsLoadingBlocks] = useState(false);
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
@@ -4700,7 +4757,7 @@ function JourneyView({
       </section>
 
       <section className="journey-layout block-journey-layout">
-        <JourneyStepRail ownerType="project" ownerId={project.id} currentUser={currentUser} steps={steps} selectedStepId={selectedStepId} onSelectStep={onSelectStep} onOrganize={() => setIsStepManagerOpen(true)} />
+        <JourneyStepRail ownerType="project" ownerId={project.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: workspace?.status === "organizado" ? "concluido" : workspace?.status === "parcial" ? "em_andamento" : "pendente", status_label: workspace?.status === "organizado" ? "Organizado" : workspace?.status === "parcial" ? "Parcial" : "Nao iniciado" }, ...steps]} selectedStepId={selectedStepId} onSelectStep={onSelectStep} onOrganize={() => setIsStepManagerOpen(true)} />
 
         <section className="work-surface block-work-surface">
           <CommandBar mode={journeyMode}>
@@ -8270,6 +8327,7 @@ function formatStatus(status: string) {
     planejado: "Planejado",
     em_implantacao: "Em implantacao",
     em_andamento: "Em andamento",
+    regularizacao_pendente: "Regularizacao pendente",
     concluido: "Concluido",
     desenvolvido: "Desenvolvido",
     em_revisao: "Em revisao",

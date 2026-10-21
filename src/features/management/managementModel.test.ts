@@ -35,6 +35,11 @@ describe("managementModel", () => {
     expect(client?.id).toBe("client-1");
   });
 
+  test("does not auto-link an ambiguous legacy company", () => {
+    expect(resolveProjectClient({ client_id: null, company: "Advance" }, [...clients, { id: "client-3", name: "Advance", company: null }])).toBeNull();
+    expect(resolveProjectClient({ client_id: "missing", company: "Bento Sushi" }, clients)).toBeNull();
+  });
+
   test("infers common project type aliases from project names", () => {
     expect(inferProjectTypeName("PCA do Bento Sushi")).toBe("PCA");
     expect(inferProjectTypeName("RCA + PCA - obra")).toBe("RCA/PCA");

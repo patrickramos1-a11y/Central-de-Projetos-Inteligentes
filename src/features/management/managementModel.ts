@@ -1,5 +1,7 @@
 export type ManagementStatus = "planejado" | "em_andamento" | "concluido" | "bloqueado" | "arquivado";
 
+import type { WorkspaceOverview } from "../workspace/workspaceModel";
+
 export type ManagementProject = {
   id: string;
   name: string;
@@ -54,6 +56,8 @@ export type ManagementProjectRow = {
   hasProjectTypeLink: boolean;
   projectTypeName: string;
   status: ManagementStatus;
+  historicalStatus: ManagementStatus;
+  regularizationPending: boolean;
   progress: number;
   totalSteps: number;
   completedSteps: number;
@@ -81,7 +85,7 @@ export type ManagementFilters = {
   status?: ManagementStatus | "todos";
 };
 
-export type ManagementAttentionKind = "bloqueado" | "sem_cliente" | "sem_responsavel" | "sem_tipo" | "concluido_com_etapas_abertas";
+export type ManagementAttentionKind = "bloqueado" | "sem_cliente" | "sem_responsavel" | "sem_tipo" | "concluido_com_etapas_abertas" | "regularizacao_pendente";
 
 export const managementAttentionLabels: Record<ManagementAttentionKind, string> = {
   bloqueado: "Bloqueado",
@@ -89,6 +93,7 @@ export const managementAttentionLabels: Record<ManagementAttentionKind, string> 
   sem_responsavel: "Sem responsavel",
   sem_tipo: "Tipo nao vinculado",
   concluido_com_etapas_abertas: "Concluido com etapas abertas",
+  regularizacao_pendente: "Regularizacao pendente",
 };
 
 export type ManagementAttentionRow = ManagementProjectRow & { reasons: ManagementAttentionKind[] };
@@ -98,8 +103,9 @@ export function buildManagementAttentionRows(rows: ManagementProjectRow[]): Mana
     if (row.status === "arquivado") return [];
     const reasons: ManagementAttentionKind[] = [];
     if (row.status === "bloqueado") reasons.push("bloqueado");
-    if (row.status === "concluido") {
-      if (row.totalSteps > 0 && row.completedSteps < row.totalSteps) reasons.push("concluido_com_etapas_abertas");
+    if (row.regularizationPending) reasons.push("regularizacao_pendente");
+    if (row.historicalStatus === "concluido") {
+      if (row.totalSteps - row.completedSteps > (row.regularizationPending ? 1 : 0)) reasons.push("concluido_com_etapas_abertas");
     } else {
       if (!row.hasClientLink) reasons.push("sem_cliente");
       if (!row.responsibleName) reasons.push("sem_responsavel");
@@ -143,14 +149,14 @@ function normalizeSearchKey(value: unknown) {
 
 export function resolveProjectClient(project: Pick<ManagementProject, "client_id" | "company">, clients: ManagementClient[]) {
   if (project.client_id) {
-    const linked = clients.find((client) => client.id === project.client_id);
-    if (linked) return linked;
+    return clients.find((client) => client.id === project.client_id) ?? null;
   }
 
   const legacyCompany = normalizeSearchKey(project.company);
   if (!legacyCompany) return null;
 
-  return clients.find((client) => normalizeSearchKey(client.name) === legacyCompany || normalizeSearchKey(client.company) === legacyCompany) ?? null;
+  const matches = clients.filter((client) => normalizeSearchKey(client.name) === legacyCompany || normalizeSearchKey(client.company) === legacyCompany);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export function getProjectClientName(project: Pick<ManagementProject, "client_id" | "company">, clients: ManagementClient[]) {
@@ -213,11 +219,19 @@ export function buildManagementProjectRows(input: {
   projectTypes: ManagementProjectType[];
   users: ManagementUser[];
   steps: ManagementStep[];
+  workspaces?: WorkspaceOverview[];
 }) {
+  const workspaceByProject = input.workspaces ? new Map(input.workspaces.map((workspace) => [workspace.projectId, workspace])) : null;
   return input.projects.map<ManagementProjectRow>((project) => {
     const client = resolveProjectClient(project, input.clients);
     const projectTypeId = inferProjectTypeId(project, input.projectTypes);
-    const progress = calculateProjectProgress(project.id, input.steps);
+    const stepProgress = calculateProjectProgress(project.id, input.steps);
+    const workspace = workspaceByProject?.get(project.id);
+    const organized = workspace?.status === "organizado";
+    const progress = workspaceByProject
+      ? { totalSteps: stepProgress.totalSteps + 1, completedSteps: stepProgress.completedSteps + (organized ? 1 : 0), progress: Math.round(((stepProgress.completedSteps + (organized ? 1 : 0)) / (stepProgress.totalSteps + 1)) * 100) }
+      : stepProgress;
+    const regularizationPending = Boolean(workspaceByProject && project.status === "concluido" && !organized);
     const nextStep = input.steps
       .filter((step) => step.project_id === project.id && !step.is_not_applicable && step.status !== "concluido")
       .sort((a, b) => (a.step_order ?? 0) - (b.step_order ?? 0))[0];
@@ -236,7 +250,9 @@ export function buildManagementProjectRows(input: {
       projectTypeId,
       hasProjectTypeLink: Boolean(project.project_type_id && input.projectTypes.some((type) => type.id === project.project_type_id)),
       projectTypeName: typeName || "Sem tipo definido",
-      status: project.status,
+      status: regularizationPending ? "em_andamento" : project.status,
+      historicalStatus: project.status,
+      regularizationPending,
       createdAt: project.created_at ?? "",
       updatedAt: project.updated_at ?? project.created_at ?? "",
       nextStepName: nextStep?.name?.trim() ?? "",
@@ -249,7 +265,7 @@ export function buildManagementClientRows(clients: ManagementClient[], projectRo
   return clients.map<ManagementClientRow>((client) => {
     const projects = projectRows.filter((project) => project.clientId === client.id);
     const activeProjectCount = projects.filter((project) => !["concluido", "arquivado"].includes(project.status)).length;
-    const completedProjectCount = projects.filter((project) => project.status === "concluido" || project.progress === 100).length;
+    const completedProjectCount = projects.filter((project) => !project.regularizationPending && (project.status === "concluido" || project.progress === 100)).length;
     const averageProgress = projects.length ? Math.round(projects.reduce((sum, project) => sum + project.progress, 0) / projects.length) : 0;
 
     return {

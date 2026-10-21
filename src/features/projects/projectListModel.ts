@@ -3,6 +3,7 @@ import {
   type ManagementProjectRow,
   type ManagementStatus,
 } from "../management/managementModel";
+import type { WorkspaceOverview } from "../workspace/workspaceModel";
 
 export type ProjectListStep = {
   project_id: string;
@@ -68,9 +69,10 @@ function isSummaryStep(step: ProjectListStep) {
   return normalizeManagementText([step.name, step.description, step.objective].filter(Boolean).join(" ")).includes("SUMARIO");
 }
 
-export function buildProjectListRows(rows: ManagementProjectRow[], steps: ProjectListStep[], summaryProjectIds: string[]): ProjectListRow[] {
+export function buildProjectListRows(rows: ManagementProjectRow[], steps: ProjectListStep[], summaryProjectIds: string[], workspaces?: WorkspaceOverview[]): ProjectListRow[] {
   const stepsByProject = new Map<string, ProjectListStep[]>();
   const projectsWithSummary = new Set(summaryProjectIds);
+  const workspaceByProject = workspaces ? new Map(workspaces.map((workspace) => [workspace.projectId, workspace])) : null;
 
   for (const step of steps) {
     const projectSteps = stepsByProject.get(step.project_id) ?? [];
@@ -83,15 +85,18 @@ export function buildProjectListRows(rows: ManagementProjectRow[], steps: Projec
     const completedSteps = applicable.filter((step) =>
       step.status === "concluido" && (projectsWithSummary.has(row.id) || !isSummaryStep(step))
     ).length;
-    const totalSteps = applicable.length;
-    const progress = totalSteps ? Math.round((completedSteps / totalSteps) * 100) : 0;
+    const organized = workspaceByProject?.get(row.id)?.status === "organizado";
+    const totalWithWorkspace = applicable.length + (workspaceByProject ? 1 : 0);
+    const completedWithWorkspace = completedSteps + (workspaceByProject && organized ? 1 : 0);
+    const progress = totalWithWorkspace ? Math.round((completedWithWorkspace / totalWithWorkspace) * 100) : 0;
     const displayStatus = row.status === "bloqueado" || row.status === "arquivado" || row.status === "concluido"
       ? row.status
-      : progress === 100 && totalSteps > 0
+      : row.regularizationPending ? "em_andamento"
+      : progress === 100 && applicable.length > 0
         ? "concluido"
         : progress > 0 ? "em_andamento" : row.status;
 
-    return { ...row, completedSteps, totalSteps, progress, displayStatus };
+    return { ...row, completedSteps: completedWithWorkspace, totalSteps: totalWithWorkspace, progress, displayStatus };
   }).sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
 }
 

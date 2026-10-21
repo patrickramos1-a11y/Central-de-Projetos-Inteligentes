@@ -8,6 +8,7 @@ import "./styles/components.css";
 import "./styles/journey.css";
 import "./styles/admin.css";
 import "./styles/projects.css";
+import "./styles/workspace.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
