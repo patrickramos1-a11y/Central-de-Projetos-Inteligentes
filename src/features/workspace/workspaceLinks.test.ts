@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { handleProjectWorkspaceRequest, readWorkspaceOverview } from "../../../worker/projectWorkspace";
-import { classifyJourneyLink, mergeWorkspaceReferences, readLinkedWorkspaceReferences } from "../../../worker/workspaceLinks";
+import { classifyJourneyLink, mergeWorkspaceReferences, normalizeManualReference, readLinkedWorkspaceReferences } from "../../../worker/workspaceLinks";
 import type { WorkspaceReference } from "./workspaceModel";
 
 function database() {
@@ -37,9 +37,12 @@ function database() {
 }
 
 describe("linked workspace references", () => {
-  test("classifies conversations, folders and NotebookLM without treating all links as conversations", () => {
+  test("uses the destination instead of a misleading title to classify journey links", () => {
     expect(classifyJourneyLink("CHAT DA CONVERSA", "https://chatgpt.com/c/abc")).toBe("conversation");
-    expect(classifyJourneyLink("Pasta do projeto", "https://drive.google.com/drive/u/0/folders/abc")).toBe("directory");
+    expect(classifyJourneyLink("PCA - RCA", "https://chatgpt.com/g/g-p-project/c/chat-id")).toBe("conversation");
+    expect(classifyJourneyLink("Pasta de Trabalho", "https://chatgpt.com/g/g-p-project/project")).toBe("support");
+    expect(classifyJourneyLink("Pasta do projeto", "https://drive.google.com/drive/u/0/folders/abc")).toBe("support");
+    expect(classifyJourneyLink("Projeto", "\\\\luz-engenharia\\projetos\\PCA")).toBe("directory");
     expect(classifyJourneyLink("Notebook do projeto", "https://notebooklm.google.com/notebook/abc")).toBe("support");
     expect(classifyJourneyLink("Relatorio", "https://example.com/report.pdf")).toBe("support");
   });
@@ -54,7 +57,7 @@ describe("linked workspace references", () => {
       insert into journey_step_values values ('value', 'project', 'doc', 'block',
         '{"links":[{"id":"chat","title":"Conversa do projeto","url":"https://chatgpt.com/c/chat"}]}', '2026-01-01', '2026-01-01');`);
     let overview = (await readWorkspaceOverview(d1))[0];
-    expect(overview).toMatchObject({ directoryCount: 1, conversationCount: 1, status: "organizado" });
+    expect(overview).toMatchObject({ directoryCount: 0, conversationCount: 1, supportCount: 1, status: "parcial" });
     let linked = await readLinkedWorkspaceReferences(d1, "p");
     expect(linked).toHaveLength(2);
     expect(linked.find((ref) => ref.kind === "conversation")?.origin?.stepName).toBe("INICIAR PROJETOS");
@@ -65,11 +68,11 @@ describe("linked workspace references", () => {
     ] }));
     linked = await readLinkedWorkspaceReferences(d1, "p");
     expect(linked.find((ref) => ref.kind === "conversation")?.title).toBe("Conversa atualizada");
-    expect((await readWorkspaceOverview(d1))[0].supportCount).toBe(1);
+    expect((await readWorkspaceOverview(d1))[0].supportCount).toBe(2);
 
     sqlite.query("update journey_step_values set value_json = ? where id = 'value'").run(JSON.stringify({ links: [] }));
     overview = (await readWorkspaceOverview(d1))[0];
-    expect(overview).toMatchObject({ directoryCount: 1, conversationCount: 0, supportCount: 0, status: "parcial" });
+    expect(overview).toMatchObject({ directoryCount: 0, conversationCount: 0, supportCount: 1, status: "nao_iniciado" });
     sqlite.close();
   });
 
@@ -77,6 +80,21 @@ describe("linked workspace references", () => {
     const manual = { id: "manual", project_id: "p", kind: "directory", title: "Pasta", target: "https://example.com/folder/", notes: null, sort_order: 0, created_at: "", updated_at: "" } satisfies WorkspaceReference;
     const linked = { ...manual, id: "journey:one", target: "https://example.com/folder", origin: { type: "journey" as const, stepId: "s", stepName: "Etapa", blockTitle: "Links" } };
     expect(mergeWorkspaceReferences([manual], [linked])).toEqual([manual]);
+    expect(normalizeManualReference(manual).kind).toBe("support");
+    expect(normalizeManualReference({ ...manual, kind: "support", title: "PCA - RCA", target: "https://chatgpt.com/g/g-p-project/c/chat-id" }).kind).toBe("conversation");
+    expect(normalizeManualReference({ ...manual, kind: "conversation", title: "Pasta de Trabalho", target: "https://chatgpt.com/g/g-p-project/project" }).kind).toBe("support");
+    expect(normalizeManualReference({ ...manual, target: "\\\\luz-engenharia\\projetos\\PCA" }).kind).toBe("directory");
+  });
+
+  test("reclassifies legacy manual web links in the overview without changing stored rows", async () => {
+    const { sqlite, d1 } = database();
+    sqlite.exec(`insert into projects values ('p', null);
+      insert into project_workspaces values ('p', 0, 0, '2026-01-01');
+      insert into project_workspace_references values ('one', 'p', 'directory', 'Pasta de Trabalho', 'https://chatgpt.com/g/g-p-project/project', null, 0, '2026-01-01', '2026-01-01');
+      insert into project_workspace_references values ('two', 'p', 'support', 'PCA - RCA', 'https://chatgpt.com/g/g-p-project/c/chat-id', null, 1, '2026-01-01', '2026-01-01');`);
+    expect((await readWorkspaceOverview(d1))[0]).toMatchObject({ directoryCount: 0, conversationCount: 1, supportCount: 1, status: "parcial" });
+    expect(sqlite.query("select kind from project_workspace_references where id = 'one'").get()).toMatchObject({ kind: "directory" });
+    sqlite.close();
   });
 
   test("saving manual references never copies or deletes links owned by the journey", async () => {

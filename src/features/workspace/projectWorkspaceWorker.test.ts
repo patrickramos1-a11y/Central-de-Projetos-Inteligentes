@@ -13,6 +13,8 @@ describe("projectWorkspace API validation", () => {
   test("rejects malformed, duplicate, unsafe links and conflicting N/A", () => {
     expect(typeof validateWorkspaceSubmission({ expectedRevision: 0, conversationNotApplicable: false, references: [directory, directory] })).toBe("string");
     expect(typeof validateWorkspaceSubmission({ expectedRevision: 0, conversationNotApplicable: false, references: [{ ...conversation, target: "file:///etc/passwd" }] })).toBe("string");
+    expect(typeof validateWorkspaceSubmission({ expectedRevision: 0, conversationNotApplicable: false, references: [{ ...directory, target: "https://drive.google.com/drive/folders/abc" }] })).toBe("string");
+    expect(typeof validateWorkspaceSubmission({ expectedRevision: 0, conversationNotApplicable: false, references: [{ ...directory, target: "Pasta de Trabalho" }] })).toBe("string");
     expect(typeof validateWorkspaceSubmission({ expectedRevision: 0, conversationNotApplicable: true, references: [conversation] })).toBe("string");
     expect(typeof validateWorkspaceSubmission({ expectedRevision: -1, conversationNotApplicable: false, references: [] })).toBe("string");
   });

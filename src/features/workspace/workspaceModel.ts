@@ -40,7 +40,7 @@ export function workspaceStatus(directoryCount: number, conversationCount: numbe
 
 export function workspaceMissing(value: Pick<WorkspaceOverview, "directoryCount" | "conversationCount" | "conversationNotApplicable">): string[] {
   const missing: string[] = [];
-  if (!value.directoryCount) missing.push("um diretorio");
+  if (!value.directoryCount) missing.push("um diretorio do servidor");
   if (!value.conversationCount && !value.conversationNotApplicable) missing.push("um link de conversa ou a marcacao Nao se aplica");
   return missing;
 }
@@ -56,4 +56,8 @@ export function browserAccessibleUrl(target: string): string | null {
   } catch {
     return null;
   }
+}
+
+export function serverDirectoryPath(target: string): boolean {
+  return /^(?:[a-z]:[\\/]|\\\\|\/\/)/i.test(target.trim());
 }

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpRight, CheckCircle2, Copy, ExternalLink, Pencil, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
 import { copyText } from "../../components/ui/clipboard";
-import { browserAccessibleUrl, workspaceMissing, workspaceStatusLabel, type ProjectWorkspace, type WorkspaceKind, type WorkspaceOverview, type WorkspaceReference } from "./workspaceModel";
+import { browserAccessibleUrl, serverDirectoryPath, workspaceMissing, workspaceStatusLabel, type ProjectWorkspace, type WorkspaceKind, type WorkspaceOverview, type WorkspaceReference } from "./workspaceModel";
 
 type Draft = { id: string; kind: WorkspaceKind; title: string; target: string; notes: string };
 const emptyDraft = (kind: WorkspaceKind): Draft => ({ id: crypto.randomUUID(), kind, title: "", target: "", notes: "" });
-const kindLabels: Record<WorkspaceKind, string> = { directory: "Diretorios e pastas", conversation: "Conversas", support: "Links de apoio" };
+const kindLabels: Record<WorkspaceKind, string> = { directory: "Diretorios do servidor", conversation: "Conversas", support: "Links de apoio" };
 
 async function getWorkspace(baseUrl: string, projectId: string): Promise<ProjectWorkspace> {
   const response = await fetch(`${baseUrl}/api/projects/${encodeURIComponent(projectId)}/workspace`, { cache: "no-store" });
@@ -80,6 +80,7 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, onChanged, onOpenSte
     const title = draft.title.trim();
     const target = draft.target.trim();
     if (!title || !target) { setError("Informe nome e caminho ou endereco."); return; }
+    if (draft.kind === "directory" && !serverDirectoryPath(target)) { setError("Informe um caminho de diretorio do servidor, como \\\\Servidor\\Projetos\\..."); return; }
     if (draft.kind !== "directory" && !browserAccessibleUrl(target)) { setError("Use um link http ou https valido."); return; }
     const old = workspace.manualReferences.find((ref) => ref.id === draft.id);
     const next: WorkspaceReference = {
@@ -149,7 +150,7 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, onChanged, onOpenSte
     {draft && <div className="workspace-reference-form" role="group" aria-label={workspace.manualReferences.some((ref) => ref.id === draft.id) ? "Editar referencia" : "Nova referencia"}>
       <div className="workspace-form-heading"><strong>{workspace.manualReferences.some((ref) => ref.id === draft.id) ? "Editar" : "Adicionar"} {kindLabels[draft.kind].toLowerCase()}</strong><button className="icon-button" type="button" title="Cancelar" onClick={() => setDraft(null)}><X size={17} /></button></div>
       <label>Nome<input value={draft.title} maxLength={160} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
-      <label>{draft.kind === "directory" ? "Caminho ou URL" : "Link"}<input value={draft.target} maxLength={4000} placeholder={draft.kind === "directory" ? "C:\\Projetos\\... ou https://..." : "https://..."} onChange={(event) => setDraft({ ...draft, target: event.target.value })} /></label>
+      <label>{draft.kind === "directory" ? "Caminho no servidor" : "Link"}<input value={draft.target} maxLength={4000} placeholder={draft.kind === "directory" ? "\\\\Servidor\\Projetos\\..." : "https://..."} onChange={(event) => setDraft({ ...draft, target: event.target.value })} /></label>
       <label>Observacao (opcional)<textarea value={draft.notes} maxLength={2000} rows={2} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} /></label>
       <button className="primary-button" type="button" disabled={saving} onClick={saveDraft}><Save size={16} /> {saving ? "Salvando..." : "Salvar referencia"}</button>
     </div>}

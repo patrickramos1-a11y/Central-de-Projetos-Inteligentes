@@ -1,5 +1,5 @@
-import { workspaceStatus, type WorkspaceKind, type WorkspaceReference } from "../src/features/workspace/workspaceModel";
-import { mergeWorkspaceReferences, readLinkedWorkspaceReferences } from "./workspaceLinks";
+import { serverDirectoryPath, workspaceStatus, type WorkspaceKind, type WorkspaceReference } from "../src/features/workspace/workspaceModel";
+import { mergeWorkspaceReferences, normalizeManualReference, readLinkedWorkspaceReferences } from "./workspaceLinks";
 
 type Env = { DB: D1Database };
 type WorkspaceRow = { project_id: string; conversation_not_applicable: number; revision: number };
@@ -43,7 +43,7 @@ export async function readWorkspaceOverview(db: D1Database) {
     for (const ref of references) byProject.set(ref.project_id, [...(byProject.get(ref.project_id) ?? []), ref]);
     return byProject;
   };
-  const manualByProject = group(manual.results ?? []);
+  const manualByProject = group((manual.results ?? []).map(normalizeManualReference));
   const linkedByProject = group(linked);
   return (rows.results ?? []).map((row) => overviewWithReferences(row,
     mergeWorkspaceReferences(manualByProject.get(row.project_id) ?? [], linkedByProject.get(row.project_id) ?? [])));
@@ -60,7 +60,7 @@ async function readWorkspace(db: D1Database, projectId: string) {
   const guidance = project.journey_template_id
     ? await db.prepare("select guidance from template_workspace_guidance where template_id = ?").bind(project.journey_template_id).first<{ guidance: string }>()
     : null;
-  const manualReferences = manual.results ?? [];
+  const manualReferences = (manual.results ?? []).map(normalizeManualReference);
   const references = mergeWorkspaceReferences(manualReferences, linked);
   return { ...overviewWithReferences(row, references), references, manualReferences, guidance: guidance?.guidance ?? "" };
 }
@@ -82,6 +82,7 @@ export function validateWorkspaceSubmission(body: unknown): { expectedRevision: 
     if (ref.kind !== "directory" && ref.kind !== "conversation" && ref.kind !== "support") return "Tipo de referencia invalido.";
     if (typeof ref.title !== "string" || !ref.title.trim() || ref.title.length > 160) return "Informe um nome de ate 160 caracteres.";
     if (typeof ref.target !== "string" || !ref.target.trim() || ref.target.length > 4000) return "Informe um caminho ou endereco de ate 4000 caracteres.";
+    if (ref.kind === "directory" && !serverDirectoryPath(ref.target)) return "Informe um caminho de diretorio do servidor, como \\\\Servidor\\Projetos\\...";
     if (ref.kind !== "directory") {
       try {
         const url = new URL(ref.target);

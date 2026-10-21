@@ -1,4 +1,4 @@
-import type { WorkspaceKind, WorkspaceReference } from "../src/features/workspace/workspaceModel";
+import { browserAccessibleUrl, serverDirectoryPath, type WorkspaceKind, type WorkspaceReference } from "../src/features/workspace/workspaceModel";
 
 type LinkedRow = {
   project_id: string;
@@ -18,11 +18,29 @@ const plain = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]
 
 export function classifyJourneyLink(title: string, target: string): WorkspaceKind {
   const name = plain(title);
-  const url = target.toLowerCase();
-  if (/notebook\s*lm|noteb+ok/.test(name) || url.includes("notebooklm.google.com")) return "support";
-  if (/convers|conservsa|\bchat\b/.test(name) || /chatgpt\.com\/(c|share)\/|chat\.openai\.com\/(c|share)\/|claude\.ai\/chat\//.test(url)) return "conversation";
-  if (/pasta|diretorio|repositor/.test(name) || /drive\.google\.com\/drive\/[^\s]*folders\/|\/folders\//.test(url)) return "directory";
+  if (serverDirectoryPath(target)) return "directory";
+  const webUrl = browserAccessibleUrl(target);
+  if (!webUrl) return "support";
+  const url = new URL(webUrl);
+  const host = url.hostname.toLowerCase();
+  const path = url.pathname.toLowerCase();
+  if (host === "notebooklm.google.com" || /notebook\s*lm|noteb+ok/.test(name)) return "support";
+  if (host === "chatgpt.com" || host === "chat.openai.com") return /\/(?:c|share)\/[^/]+/.test(path) ? "conversation" : "support";
+  if (host === "claude.ai") return /\/chat\/[^/]+/.test(path) ? "conversation" : "support";
+  if (host === "gemini.google.com") return /\/app\/[^/]+/.test(path) ? "conversation" : "support";
+  if (host === "drive.google.com" || host.endsWith(".sharepoint.com") || host === "onedrive.live.com") return "support";
+  if (/convers|conservsa|\bchat\b/.test(name)) return "conversation";
   return "support";
+}
+
+export function normalizeManualReference(ref: WorkspaceReference): WorkspaceReference {
+  const webUrl = browserAccessibleUrl(ref.target);
+  if (!webUrl) return ref;
+  const host = new URL(webUrl).hostname.toLowerCase();
+  const knownService = ["chatgpt.com", "chat.openai.com", "claude.ai", "gemini.google.com", "drive.google.com", "notebooklm.google.com", "onedrive.live.com"].includes(host) || host.endsWith(".sharepoint.com");
+  if (ref.kind !== "directory" && !knownService) return ref;
+  const inferred = classifyJourneyLink(ref.title, ref.target);
+  return inferred === ref.kind ? ref : { ...ref, kind: inferred };
 }
 
 function canonicalTarget(target: string) {
