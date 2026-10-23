@@ -45,6 +45,7 @@ import { resolveBoundSummary } from "../features/summary/summaryBinding";
 import { replaceSummaryState, shouldApplySummaryState, type SummaryState } from "../features/summary/summaryState";
 import { promptToneHue } from "../features/summary/promptTone";
 import { clientKindOptions, validateClientLogo, type ClientKind } from "../features/clients/clientIdentity";
+import { ClientContextLibrary } from "../features/clients/ClientContextLibrary";
 import { collapseAllBlockIds, toggleCollapsedBlockIds } from "../features/journey/blockPresentation";
 import { interpolateJourneyPrompt, journeyPromptVariableSuggestions } from "../features/journey/promptInterpolation";
 import {
@@ -73,6 +74,8 @@ import {
   type ProjectSortDirection,
   type ProjectWorkspaceGap,
 } from "../features/projects/projectListModel";
+import { availableProjectTemplates, templateAfterTypeChange, templateTypeName } from "../features/projects/templateCatalog";
+import { TemplateEditor } from "../features/templates/TemplateEditor";
 import { resolvePromptContent } from "../../shared/stepBuilder";
 import { mergeSuccessfulTables, replaceProjectRows, shouldApplyRefresh, type TableResult } from "../features/data/refreshState";
 import { Toast } from "../components/ui/Toast";
@@ -81,7 +84,6 @@ import { StatusBadge, type StatusTone } from "../components/ui/StatusBadge";
 import { AppShell, CommandBar, JourneyContextBar, WorkCanvas } from "../components/ui/LayoutPrimitives";
 import { ProjectWorkspacePanel } from "../features/workspace/ProjectWorkspacePanel";
 import { ClientWorkspacesDialog } from "../features/workspace/ClientWorkspacesDialog";
-import { TemplateWorkspaceGuidance } from "../features/workspace/TemplateWorkspaceGuidance";
 import { WORKSPACE_STEP_ID, type ProjectWorkspace, type WorkspaceOverview } from "../features/workspace/workspaceModel";
 
 type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
@@ -661,6 +663,14 @@ const configModules: Array<{ key: ConfigModuleKey; label: string; icon: typeof B
 
 export default function App() {
   const [view, setView] = useState<ViewMode>("projects");
+  const [templateEditorTargetId, setTemplateEditorTargetId] = useState<string | null>(null);
+  const [templateEditorDirty, setTemplateEditorDirty] = useState(false);
+  const navigateFromTemplate = useCallback((next: ViewMode) => {
+    if (view === "projectTemplates" && templateEditorDirty && !window.confirm("Ha alteracoes nao salvas no template. Sair do editor?")) return;
+    setTemplateEditorDirty(false);
+    setTemplateEditorTargetId(null);
+    setView(next);
+  }, [view, templateEditorDirty]);
   const [activeConfig, setActiveConfig] = useState<ConfigModuleKey>("prompts");
   const [tables, setTablesState] = useState<Tables>(emptyTables);
   const localMutationVersionRef = useRef(0);
@@ -1203,7 +1213,7 @@ export default function App() {
       return;
     }
 
-    const templateSteps = tables.journey_steps.filter((step) => step.journey_template_id === templateId).sort(byOrder);
+    const templateSteps = tables.journey_steps.filter((step) => step.journey_template_id === templateId && step.status === "ativo").sort(byOrder);
 
     if (templateSteps.length === 0) {
       await createProjectStep(project.id, {
@@ -2276,96 +2286,20 @@ export default function App() {
       const body = await response.json() as { data?: { id: string; name: string; mode?: "created" | "updated" }; error?: string };
       if (response.ok && body.data) {
         await loadAll();
-        setNotice(request.mode === "update" ? `Template "${body.data.name}" atualizado com a estrutura e os contextos da jornada.` : `Template "${body.data.name}" criado com a estrutura da jornada.`);
+        setTemplateEditorTargetId(body.data.id);
+        setView("projectTemplates");
+        setNotice(request.mode === "update" ? `Rascunho de "${body.data.name}" preparado. Revise e publique quando estiver pronto.` : `Template "${body.data.name}" criado. Revise a jornada no editor.`);
         return true;
       }
       setNotice(`Erro ao salvar template: ${body.error ?? "erro desconhecido"}`);
       return false;
-    } catch {
-      if (request.mode === "update") {
-        setNotice("Nao foi possivel atualizar este template agora. Tente sincronizar e repita a operacao.");
-        return false;
-      }
-      // Keep the legacy export only as a compatibility fallback while an older Worker is being served.
-    }
-
-    const templateName = request.name.trim() || `${project.name} - template`;
-    const { data: template, error } = await supabase
-      .from<JourneyTemplate>("journey_templates")
-      .insert(
-        normalizePayload({
-          name: templateName,
-          description: `Criado a partir do projeto ${project.name}.`,
-          project_type_id: project.project_type_id,
-          context: "projeto",
-          status: "ativo",
-        }),
-      )
-      .select("*")
-      .single();
-
-    if (error || !template) {
-      setNotice(`Erro ao salvar template: ${error?.message ?? "erro desconhecido"}`);
+    } catch (error) {
+      setNotice(`Erro ao salvar template: ${error instanceof Error ? error.message : "Worker indisponivel"}`);
       return false;
     }
-
-    const steps = tables.project_steps.filter((step) => step.project_id === project.id).sort(byOrder);
-
-    for (const step of steps) {
-      const checklistText = tables.project_step_checklist_items
-        .filter((item) => item.project_step_id === step.id)
-        .sort(byOrder)
-        .map((item) => item.label)
-        .join("\n");
-
-      const { data: templateStep } = await supabase
-        .from("journey_steps")
-        .insert(
-          normalizePayload({
-            journey_template_id: template.id,
-            name: step.name,
-            description: step.description,
-            step_order: step.step_order,
-            objective: step.objective,
-            ai_tool_id: step.ai_tool_id,
-            expected_output: step.expected_output,
-            checklist: checklistText,
-            execution_instructions: step.execution_instructions,
-            status: "ativo",
-          }),
-        )
-        .select("*")
-        .single();
-
-      if (!templateStep) {
-        continue;
-      }
-
-      const prompts = tables.project_step_prompts.filter((prompt) => prompt.project_step_id === step.id).sort(byOrder);
-      const rows = prompts.map((prompt, index) => ({
-        journey_step_id: templateStep.id,
-        prompt_id: prompt.prompt_id,
-        title: prompt.prompt_id ? null : prompt.title,
-        content: prompt.prompt_id ? null : prompt.content,
-        ai_tool_id: prompt.ai_tool_id,
-        prompt_status: prompt.prompt_status,
-        is_required: prompt.is_required,
-        placeholder_note: prompt.placeholder_note,
-        prompt_order: prompt.prompt_order || index + 1,
-        usage_notes: prompt.usage_notes,
-      }));
-
-      if (rows.length > 0) {
-        await supabase.from("step_prompts").insert(rows);
-      }
-    }
-
-    await loadAll();
-    setNotice(`Template "${templateName}" salvo a partir da execucao real.`);
-    return true;
   }
 
-  async function updateJourneyTemplate(templateId: string, payload: Pick<JourneyTemplate, "name" | "description" | "status">): Promise<boolean> {
+  async function updateJourneyTemplate(templateId: string, payload: Pick<JourneyTemplate, "name" | "description" | "status" | "project_type_id">): Promise<boolean> {
     try {
       const response = await fetch(`${cloudflareApiUrl}/api/journey-templates/${encodeURIComponent(templateId)}`, {
         method: "PATCH",
@@ -2838,23 +2772,23 @@ export default function App() {
         </div>
 
         <nav className="nav-list">
-          <button className={`nav-item ${view === "projects" || view === "journey" ? "active" : ""}`} onClick={() => setView("projects")}>
+          <button className={`nav-item ${view === "projects" || view === "journey" ? "active" : ""}`} onClick={() => navigateFromTemplate("projects")}>
             <PanelLeft size={18} />
             Projetos
           </button>
-          <button className={`nav-item ${view === "projectTemplates" ? "active" : ""}`} onClick={() => setView("projectTemplates")}>
+          <button className={`nav-item ${view === "projectTemplates" ? "active" : ""}`} onClick={() => navigateFromTemplate("projectTemplates")}>
             <Route size={18} />
             Templates
           </button>
-          <button className={`nav-item ${view === "clients" || view === "clientJourney" ? "active" : ""}`} onClick={() => setView("clients")}>
+          <button className={`nav-item ${view === "clients" || view === "clientJourney" ? "active" : ""}`} onClick={() => navigateFromTemplate("clients")}>
             <Users size={18} />
             Clientes
           </button>
-          <button className={`nav-item ${view === "management" ? "active" : ""}`} onClick={() => setView("management")}>
+          <button className={`nav-item ${view === "management" ? "active" : ""}`} onClick={() => navigateFromTemplate("management")}>
             <Layers3 size={18} />
             Gestao
           </button>
-          <button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")}>
+          <button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => navigateFromTemplate("settings")}>
             <Settings size={18} />
             Configuracoes
           </button>
@@ -2912,7 +2846,7 @@ export default function App() {
           />
         )}
 
-        {view === "projectTemplates" && (currentSecondaryReady ? <ProjectTemplatesView tables={tables} query={query} setQuery={setQuery} onUpdate={updateJourneyTemplate} onDelete={deleteJourneyTemplate} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
+        {view === "projectTemplates" && (currentSecondaryReady ? <ProjectTemplatesView tables={tables} query={query} setQuery={setQuery} onUpdate={updateJourneyTemplate} onDelete={deleteJourneyTemplate} onRefresh={loadAll} initialTemplateId={templateEditorTargetId} onEditorClosed={() => setTemplateEditorTargetId(null)} onEditorDirtyChange={setTemplateEditorDirty} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
         {view === "clients" && (currentSecondaryReady ? <ClientsView tables={tables} currentUser={currentUser} query={query} setQuery={setQuery} onCreate={createClientJourney} onSaveIdentity={saveClientIdentity} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} onOpenProject={(id) => { setSelectedProjectId(id); setSelectedStepId(WORKSPACE_STEP_ID); setView("journey"); }} baseUrl={cloudflareApiUrl} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
@@ -3126,6 +3060,7 @@ function ProjectsView({
   const [projectCompanyDraft, setProjectCompanyDraft] = useState("");
   const [projectClientDraft, setProjectClientDraft] = useState("");
   const [projectResponsibleUserDraft, setProjectResponsibleUserDraft] = useState("");
+  const [projectTypeDraft, setProjectTypeDraft] = useState("");
   const activeUsers = tables.app_users.filter((user) => user.status === "ativo");
   const managementRows = useMemo(() => buildManagementProjectRows({
     projects: tables.projects,
@@ -3214,6 +3149,7 @@ function ProjectsView({
     setProjectCompanyDraft(project.company ?? "");
     setProjectClientDraft(project.client_id ?? resolveLegacyClientId(project.company, tables.clients));
     setProjectResponsibleUserDraft(resolveResponsibleUserId(project, tables.app_users));
+    setProjectTypeDraft(project.project_type_id ?? "");
   }
 
   function saveProjectEditor() {
@@ -3226,6 +3162,7 @@ function ProjectsView({
       client_id: linkedClient?.id ?? null,
       responsible: responsibleUser?.name ?? null,
       responsible_user_id: responsibleUser?.id ?? null,
+      project_type_id: projectTypeDraft || null,
     });
     setEditingProject(null);
   }
@@ -3359,6 +3296,7 @@ function ProjectsView({
               <ClientSearchSelect label="Cliente vinculado" value={projectClientDraft} clients={tables.clients} onChange={(value) => { setProjectClientDraft(value); const client = tables.clients.find((item) => item.id === value); if (client) setProjectCompanyDraft(client.name); }} />
               {!projectClientDraft && <Field label="Empresa legada" value={projectCompanyDraft} onChange={setProjectCompanyDraft} />}
               <SelectField label="Responsavel" value={projectResponsibleUserDraft} onChange={setProjectResponsibleUserDraft} options={activeUsers.map(toOption)} />
+              <SelectField label="Tipo de projeto" value={projectTypeDraft} onChange={setProjectTypeDraft} options={tables.project_types.map(toOption)} />
             </div>
             <div className="inline-actions project-editor-actions">
               <button className="secondary-button" type="button" onClick={() => setEditingProject(null)}>Cancelar</button>
@@ -3462,29 +3400,50 @@ function ProjectTemplatesView({
   setQuery,
   onUpdate,
   onDelete,
+  onRefresh,
+  initialTemplateId,
+  onEditorClosed,
+  onEditorDirtyChange,
 }: {
   tables: Tables;
   query: string;
   setQuery: (query: string) => void;
-  onUpdate: (templateId: string, payload: Pick<JourneyTemplate, "name" | "description" | "status">) => Promise<boolean>;
+  onUpdate: (templateId: string, payload: Pick<JourneyTemplate, "name" | "description" | "status" | "project_type_id">) => Promise<boolean>;
   onDelete: (template: JourneyTemplate) => Promise<void>;
+  onRefresh: () => Promise<void>;
+  initialTemplateId: string | null;
+  onEditorClosed: () => void;
+  onEditorDirtyChange: (dirty: boolean) => void;
 }) {
-  const [previewTemplateId, setPreviewTemplateId] = useState<string | null>(null);
-  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
-  const [nameDraft, setNameDraft] = useState("");
-  const [descriptionDraft, setDescriptionDraft] = useState("");
-  const templates = tables.journey_templates
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(initialTemplateId);
+  const [createError, setCreateError] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const allTemplates = tables.journey_templates
     .filter((template) => template.context === "projeto" || template.context === "geral")
-    .filter((template) => normalizeSearch(template.name, template.description).includes(query.toLowerCase()))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const previewTemplate = templates.find((template) => template.id === previewTemplateId) ?? tables.journey_templates.find((template) => template.id === previewTemplateId) ?? null;
-  const editingTemplate = templates.find((template) => template.id === editingTemplateId) ?? tables.journey_templates.find((template) => template.id === editingTemplateId) ?? null;
-
-  function openTemplateEditor(template: JourneyTemplate) {
-    setEditingTemplateId(template.id);
-    setNameDraft(template.name);
-    setDescriptionDraft(template.description ?? "");
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  const templates = allTemplates.filter((template) =>
+    (typeFilter === "all" || (typeFilter === "unclassified" ? !template.project_type_id : template.project_type_id === typeFilter))
+    && normalizeSearch(template.name, template.description, templateTypeName(template, tables.project_types)).includes(query.toLowerCase()),
+  );
+  const templateGroups = [...new Set(templates.map((template) => template.project_type_id || "unclassified"))]
+    .sort((a, b) => {
+      if (a === "unclassified") return 1;
+      if (b === "unclassified") return -1;
+      return templateTypeName({ project_type_id: a }, tables.project_types).localeCompare(templateTypeName({ project_type_id: b }, tables.project_types), "pt-BR");
+    });
+  async function createEmptyTemplate() {
+    setCreateError("");
+    try {
+      const response = await fetch(`${cloudflareApiUrl}/api/journey-templates`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Novo template" }) });
+      const body = await response.json() as { data?: { data?: { id: string } } | { id: string }; error?: string };
+      if (!response.ok || !body.data) throw new Error(body.error ?? "Nao foi possivel criar o template.");
+      const result = (body.data as { data?: { id: string } }).data ?? body.data as { id: string };
+      if (!result?.id) throw new Error("Resposta incompleta ao criar o template.");
+      await onRefresh(); setEditingTemplateId(result.id);
+    } catch (failure) { setCreateError(failure instanceof Error ? failure.message : "Falha ao criar template."); }
   }
+
+  if (editingTemplateId) return <TemplateEditor baseUrl={cloudflareApiUrl} templateId={editingTemplateId} projectTypes={tables.project_types} clients={tables.clients} prompts={tables.prompts.map((prompt) => ({ id: prompt.id, name: prompt.title, content: prompt.content }))} onClose={() => { setEditingTemplateId(null); onEditorClosed(); }} onOpenTemplate={setEditingTemplateId} onPublished={onRefresh} onDirtyChange={onEditorDirtyChange} />;
 
   return (
     <>
@@ -3493,22 +3452,33 @@ function ProjectTemplatesView({
           <h1>Templates</h1>
           <p>Modelos de jornadas que podem ser usados para criar novos projetos.</p>
         </div>
+        <button className="primary-button" type="button" onClick={() => void createEmptyTemplate()}><Plus size={17} /> Novo template</button>
       </section>
+      {createError && <p role="alert" className="form-error">{createError}</p>}
 
       <section className="list-panel">
-        <div className="panel-heading">
+        <div className="panel-heading template-panel-heading">
           <div>
             <h2>Templates de projeto</h2>
             <p>Veja a estrutura salva, as etapas e os prompts pendentes de preenchimento.</p>
           </div>
-          <label className="search-field">
-            <Search size={16} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar template" />
-          </label>
+          <div className="template-toolbar">
+            <label className="search-field">
+              <Search size={16} />
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar template ou tipo" aria-label="Buscar template ou tipo" />
+            </label>
+            <label className="template-type-filter"><span>Tipo de projeto</span><select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
+              <option value="all">Todos ({allTemplates.length})</option>
+              {tables.project_types.filter((type) => allTemplates.some((template) => template.project_type_id === type.id)).sort((a, b) => a.name.localeCompare(b.name, "pt-BR")).map((type) => <option key={type.id} value={type.id}>{type.name} ({allTemplates.filter((template) => template.project_type_id === type.id).length})</option>)}
+              {allTemplates.some((template) => !template.project_type_id) && <option value="unclassified">Sem tipo ({allTemplates.filter((template) => !template.project_type_id).length})</option>}
+            </select></label>
+          </div>
         </div>
 
-        <div className="template-grid">
-          {templates.map((template) => {
+        {templateGroups.map((groupId) => <section className="template-type-group" key={groupId} aria-label={`Templates de ${templateTypeName({ project_type_id: groupId === "unclassified" ? null : groupId }, tables.project_types)}`}>
+          <header className="template-type-heading"><Layers3 size={17} aria-hidden="true" /><h3>{templateTypeName({ project_type_id: groupId === "unclassified" ? null : groupId }, tables.project_types)}</h3><span>{templates.filter((template) => (template.project_type_id || "unclassified") === groupId).length}</span></header>
+          <div className="template-grid">
+          {templates.filter((template) => (template.project_type_id || "unclassified") === groupId).map((template) => {
             const steps = tables.journey_steps.filter((step) => step.journey_template_id === template.id).sort(byOrder);
             const stepIds = new Set(steps.map((step) => step.id));
             const prompts = tables.step_prompts.filter((prompt) => stepIds.has(prompt.journey_step_id));
@@ -3520,8 +3490,8 @@ function ProjectTemplatesView({
                 key={template.id}
                 tabIndex={0}
                 role="button"
-                onClick={() => setPreviewTemplateId(template.id)}
-                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setPreviewTemplateId(template.id); } }}
+                onClick={() => setEditingTemplateId(template.id)}
+                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setEditingTemplateId(template.id); } }}
               >
                 <div className="project-card-head">
                   <strong>{template.name}</strong>
@@ -3529,19 +3499,20 @@ function ProjectTemplatesView({
                 </div>
                 <p>{template.description || "Template sem descricao."}</p>
                 <div className="template-meta">
+                  <span className="template-type-chip">{templateTypeName(template, tables.project_types)}</span>
                   <span>{steps.length} etapas</span>
                   <span>{prompts.length} prompts</span>
                   {pendingPrompts > 0 && <span className="warning-chip">{pendingPrompts} pendentes</span>}
                 </div>
                 <div className="template-card-actions">
-                  <button className="secondary-button compact" type="button" onClick={(event) => { event.stopPropagation(); setPreviewTemplateId(template.id); }}><Route size={16} /> Ver estrutura</button>
-                  <button className="icon-button" type="button" title="Editar template" onClick={(event) => { event.stopPropagation(); openTemplateEditor(template); }}><Pencil size={18} /></button>
+                  <button className="secondary-button compact" type="button" onClick={(event) => { event.stopPropagation(); setEditingTemplateId(template.id); }}><Route size={16} /> Abrir jornada</button>
                   <button className="icon-button danger" type="button" title="Excluir template" onClick={(event) => { event.stopPropagation(); void onDelete(template); }}><Trash2 size={18} /></button>
                 </div>
               </article>
             );
           })}
-        </div>
+          </div>
+        </section>)}
 
         {templates.length === 0 && (
           <div className="empty-state">
@@ -3552,46 +3523,11 @@ function ProjectTemplatesView({
         )}
       </section>
 
-      {previewTemplate && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setPreviewTemplateId(null)}>
-          <section className="template-preview-modal glass-panel" role="dialog" aria-modal="true" aria-label={`Estrutura do template ${previewTemplate.name}`} onMouseDown={(event) => event.stopPropagation()}>
-            <div className="modal-heading">
-              <div><span className="eyebrow">Estrutura salva</span><h2>{previewTemplate.name}</h2><p>{previewTemplate.description || "Template sem descricao."}</p></div>
-              <button className="icon-button" type="button" title="Fechar" onClick={() => setPreviewTemplateId(null)}><X size={18} /></button>
-            </div>
-            <div className="template-preview-stats">
-              <span>{tables.journey_steps.filter((step) => step.journey_template_id === previewTemplate.id).length} etapas</span>
-              <span>{tables.step_prompts.filter((prompt) => tables.journey_steps.some((step) => step.journey_template_id === previewTemplate.id && step.id === prompt.journey_step_id)).length} prompts</span>
-            </div>
-            <TemplateWorkspaceGuidance key={previewTemplate.id} baseUrl={cloudflareApiUrl} templateId={previewTemplate.id} />
-            <ol className="template-preview-steps">
-              <li><span>0</span>Local de trabalho (obrigatorio)</li>
-              {tables.journey_steps.filter((step) => step.journey_template_id === previewTemplate.id).sort(byOrder).map((step, index) => <li key={step.id}><span>{index + 1}</span>{step.name}</li>)}
-            </ol>
-          </section>
-        </div>
-      )}
-
-      {editingTemplate && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setEditingTemplateId(null)}>
-          <form className="template-edit-modal glass-panel" role="dialog" aria-modal="true" aria-label={`Editar template ${editingTemplate.name}`} onMouseDown={(event) => event.stopPropagation()} onSubmit={async (event) => {
-            event.preventDefault();
-            const saved = await onUpdate(editingTemplate.id, { name: nameDraft, description: descriptionDraft || null, status: editingTemplate.status });
-            if (saved) setEditingTemplateId(null);
-          }}>
-            <div className="modal-heading"><div><span className="eyebrow">Editar template</span><h2>Dados do template</h2></div><button className="icon-button" type="button" title="Fechar" onClick={() => setEditingTemplateId(null)}><X size={18} /></button></div>
-            <Field label="Nome do template" value={nameDraft} onChange={setNameDraft} />
-            <label className="field"><span>Descricao</span><textarea value={descriptionDraft} onChange={(event) => setDescriptionDraft(event.target.value)} rows={3} /></label>
-            <div className="inline-actions"><button className="secondary-button" type="button" onClick={() => setEditingTemplateId(null)}>Cancelar</button><button className="primary-button" type="submit"><Save size={16} /> Salvar</button></div>
-          </form>
-        </div>
-      )}
     </>
   );
 }
 
 function NewProjectPanel({ tables, currentUser, onCreate, onClose }: { tables: Tables; currentUser: AppUser | null; onCreate: (form: NewProjectFormState) => void; onClose: () => void }) {
-  const projectTemplates = tables.journey_templates.filter((template) => template.context === "projeto" || template.context === "geral");
   const activeUsers = tables.app_users.filter((user) => user.status === "ativo");
   const [form, setForm] = useState<NewProjectFormState>({
     name: "",
@@ -3603,6 +3539,7 @@ function NewProjectPanel({ tables, currentUser, onCreate, onClose }: { tables: T
     journey_template_id: "",
     notes: "",
   });
+  const projectTemplates = availableProjectTemplates(tables.journey_templates, form.project_type_id);
 
   return (
     <section className="form-panel inline-panel">
@@ -3627,12 +3564,15 @@ function NewProjectPanel({ tables, currentUser, onCreate, onClose }: { tables: T
         {form.client_id === "__new" && <Field label="Novo cliente" value={form.new_client_name} onChange={(value) => setForm({ ...form, new_client_name: value, company: value })} />}
         {!form.client_id && <Field label="Empresa / cliente legado" value={form.company} onChange={(value) => setForm({ ...form, company: value })} />}
         <SelectField label="Responsavel" value={form.responsible_user_id} onChange={(value) => setForm({ ...form, responsible_user_id: value })} options={activeUsers.map(toOption)} />
-        <SelectField label="Tipo de projeto" value={form.project_type_id} onChange={(value) => setForm({ ...form, project_type_id: value })} options={tables.project_types.map(toOption)} />
+        <SelectField label="Tipo de projeto" value={form.project_type_id} onChange={(value) => setForm((current) => ({ ...current, project_type_id: value, journey_template_id: templateAfterTypeChange(current.journey_template_id, value, tables.journey_templates) }))} options={tables.project_types.filter((type) => type.status === "ativo" || type.id === form.project_type_id).map(toOption)} />
         <SelectField
           label="Template"
           value={form.journey_template_id}
-          onChange={(value) => setForm({ ...form, journey_template_id: value })}
-          options={projectTemplates.map(toOption)}
+          onChange={(value) => {
+            const template = tables.journey_templates.find((item) => item.id === value);
+            setForm((current) => ({ ...current, journey_template_id: value, project_type_id: template?.project_type_id ?? current.project_type_id }));
+          }}
+          options={projectTemplates.map((template) => ({ value: template.id, label: `${template.name} · ${templateTypeName(template, tables.project_types)}` }))}
           emptyLabel="Comecar vazio"
         />
         <TextArea label="Observacoes iniciais" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
@@ -3870,6 +3810,7 @@ function ClientsView({
   const [showInactive, setShowInactive] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [workspaceClient, setWorkspaceClient] = useState<Client | null>(null);
+  const [contextClient, setContextClient] = useState<Client | null>(null);
   const normalizedQuery = normalizeSearchText(query);
   const filteredClients = tables.clients
     .filter((client) => (client.is_active || showInactive || normalizedQuery) && normalizeSearchText(normalizeSearch(client.name, client.company, client.client_kind, getResponsibleName(client, tables.app_users))).includes(normalizedQuery))
@@ -3967,6 +3908,7 @@ function ClientsView({
                 </button>
                 <button className="icon-button client-edit-button" type="button" title={`Editar cadastro de ${client.name}`} aria-label={`Editar cadastro de ${client.name}`} onClick={() => setEditingClient(client)}><Pencil size={16} /></button>
                 <button className="secondary-button client-workspaces-button" type="button" onClick={() => setWorkspaceClient(client)}><FolderOpen size={15} /> Locais de projetos</button>
+                <button className="secondary-button client-workspaces-button" type="button" onClick={() => setContextClient(client)}><Layers3 size={15} /> Contextos</button>
                 {!client.is_active && <button className="secondary-button client-activate-button" type="button" onClick={() => void onSaveIdentity(client.id, { is_active: true }, null)}>Ativar</button>}
               </article>
             );
@@ -3983,6 +3925,7 @@ function ClientsView({
       </section>
       {editingClient && <ClientProfileDialog key={editingClient.id} client={editingClient} users={tables.app_users} onClose={() => setEditingClient(null)} onSave={onSaveIdentity} />}
       {workspaceClient && <ClientWorkspacesDialog baseUrl={baseUrl} clientId={workspaceClient.id} clientName={workspaceClient.name} onClose={() => setWorkspaceClient(null)} onOpenProject={onOpenProject} />}
+      {contextClient && <ClientContextLibrary key={contextClient.id} baseUrl={baseUrl} clientId={contextClient.id} clientName={contextClient.name} onClose={() => setContextClient(null)} />}
     </>
   );
 }
@@ -5113,7 +5056,7 @@ function StepBuilderBlockCard({
   onUpdate: (patch: Partial<StepBuilderBlock>) => void;
   onDelete: () => void;
   onMove: (blockId: string, direction: -1 | 1) => void;
-  onSaveValue: (value: unknown) => void;
+  onSaveValue: (value: unknown) => void | Promise<void>;
   onOpenSummary: () => void;
   files?: JourneyRuntimeFile[];
   ownerType?: "project" | "client";
@@ -5320,7 +5263,7 @@ function BlockBody({
   onDeleteSummaryItem: (summaryId: string, itemId: string) => void;
   onSaveGeneratedPrompt: (payload: GeneratedPromptWrite) => Promise<boolean>;
   onArchiveGeneratedPrompt: (promptId: string, summaryItemId?: string) => void;
-  onSaveValue: (value: unknown) => void;
+  onSaveValue: (value: unknown) => void | Promise<void>;
   onOpenSummary: () => void;
   onUpdate: (patch: Partial<StepBuilderBlock>) => void;
   ownerType?: "project" | "client";
@@ -5338,7 +5281,7 @@ function BlockBody({
   }
 
   if (block.type === "context") {
-    return <ContextBlock block={block} value={value} isStructureEditing={mode === "edit"} onUpdate={onUpdate} onSaveValue={onSaveValue} />;
+    return <ContextBlock block={block} value={value} isStructureEditing={mode === "edit"} onUpdate={onUpdate} onSaveValue={onSaveValue} clientId={project.client_id ?? (ownerType === "client" ? project.id : null)} stepId={selectedStep.id} ownerType={ownerType} />;
   }
 
   if (block.type === "materials") {
@@ -6531,7 +6474,7 @@ function MaterialsBlock({ block, value, isStructureEditing, onUpdate, onSaveValu
   );
 }
 
-function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue }: { block: StepBuilderBlock; value: any; isStructureEditing: boolean; onUpdate: (patch: Partial<StepBuilderBlock>) => void; onSaveValue: (value: unknown) => void }) {
+function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue, clientId, stepId, ownerType }: { block: StepBuilderBlock; value: any; isStructureEditing: boolean; onUpdate: (patch: Partial<StepBuilderBlock>) => void; onSaveValue: (value: unknown) => void | Promise<void>; clientId: string | null; stepId: string; ownerType: "project" | "client" }) {
   const contextColors = ["mint", "teal", "amber", "blue", "rose", "slate"];
   const [draftTitle, setDraftTitle] = useState("");
   const [draftContent, setDraftContent] = useState("");
@@ -6539,11 +6482,23 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue 
   const [draftPinned, setDraftPinned] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [autoDraftTitle, setAutoDraftTitle] = useState("");
-  type ContextCard = { id: string; title: string; content: string; color?: string; pinned?: boolean };
+  const [showImport, setShowImport] = useState(false);
+  const [library, setLibrary] = useState<Array<{ id: string; title: string; content: string; category: string | null; version: number }>>([]);
+  const [libraryResults, setLibraryResults] = useState<typeof library>([]);
+  const [librarySearch, setLibrarySearch] = useState("");
+  const [libraryOffset, setLibraryOffset] = useState(0);
+  const [libraryHasMore, setLibraryHasMore] = useState(false);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryRefreshKey, setLibraryRefreshKey] = useState(0);
+  const [selectedLibraryIds, setSelectedLibraryIds] = useState<string[]>([]);
+  const [selectedLocalIds, setSelectedLocalIds] = useState<string[]>([]);
+  const [contextError, setContextError] = useState("");
+  const [saving, setSaving] = useState(false);
+  type ContextCard = { id: string; title: string; content: string; color?: string; pinned?: boolean; sourceContextId?: string; sourceVersion?: number };
   const templateContexts = Array.isArray(block.config.contexts) ? block.config.contexts as ContextCard[] : [];
   const runtimeContexts = Array.isArray(value?.contexts) ? value.contexts as ContextCard[] : [];
   const legacyContent = String(block.config.content ?? "");
-  const legacyContexts = legacyContent.trim()
+  const legacyContexts: ContextCard[] = legacyContent.trim()
     ? [{ id: "legacy-context", title: block.title || "Contexto", content: legacyContent, color: "mint", pinned: true }]
     : [];
   // Execution owns its cards. Only cards explicitly pinned in Edit structure are inherited from a template.
@@ -6551,6 +6506,27 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue 
     ? (templateContexts.length > 0 ? templateContexts : legacyContexts)
     : [...(templateContexts.length > 0 ? templateContexts.filter((item) => item.pinned) : legacyContexts), ...runtimeContexts];
   const isWriting = editingId !== null;
+
+  useEffect(() => {
+    if (!clientId || (!showImport && !runtimeContexts.some((item) => item.sourceContextId))) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setContextError(""); setLibraryLoading(true);
+      void fetch(`${cloudflareApiUrl}/api/clients/${encodeURIComponent(clientId)}/contexts?q=${encodeURIComponent(librarySearch)}&offset=${libraryOffset}`, { signal: controller.signal })
+        .then(async (response) => { const body = await response.json() as { data?: { data?: typeof library } | typeof library; error?: string }; if (!response.ok || !body.data) throw new Error(body.error ?? "Falha ao carregar contextos."); return (body.data as { data?: typeof library }).data ?? body.data as typeof library; })
+        .then((items) => { if (!controller.signal.aborted) { setLibrary((current) => { const byId = new Map(current.map((item) => [item.id, item])); items.forEach((item) => byId.set(item.id, item)); return [...byId.values()]; }); setLibraryResults((current) => libraryOffset ? [...current, ...items.filter((item) => !current.some((previous) => previous.id === item.id))] : items); setLibraryHasMore(items.length === 100); } })
+        .catch((failure) => { if (!controller.signal.aborted) setContextError(failure instanceof Error ? failure.message : "Falha ao carregar contextos."); })
+        .finally(() => { if (!controller.signal.aborted) setLibraryLoading(false); });
+    }, librarySearch ? 180 : 0);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [clientId, showImport, librarySearch, libraryOffset, libraryRefreshKey, runtimeContexts.map((item) => `${item.sourceContextId}:${item.sourceVersion}`).join("|")]);
+
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === "visible") { setLibraryOffset(0); setLibraryRefreshKey((current) => current + 1); } };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", refresh); };
+  }, []);
 
   function resetForm() {
     setEditingId(null);
@@ -6604,11 +6580,13 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue 
     setAutoDraftTitle(nextTitle);
   }
 
-  function saveContext() {
+  async function saveContext(updateClientSource = false) {
     if (!draftTitle.trim() && !draftContent.trim()) return;
     const editableContexts = isStructureEditing ? contexts : runtimeContexts;
     const normalizedContexts = editableContexts.map((item) => ({ ...item, id: item.id === "legacy-context" ? crypto.randomUUID() : item.id }));
+    const original = runtimeContexts.find((item) => item.id === editingId);
     const nextItem: ContextCard = {
+      ...original,
       id: editingId && editingId !== "new" && editingId !== "legacy-context" ? editingId : crypto.randomUUID(),
       title: draftTitle.trim() || "Contexto sem titulo",
       content: draftContent.trim(),
@@ -6618,12 +6596,47 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue 
     const next = editingId && editingId !== "new"
       ? normalizedContexts.map((item) => item.id === editingId || (editingId === "legacy-context" && item.content === legacyContent) ? nextItem : item)
       : [...normalizedContexts, nextItem];
-    if (isStructureEditing) {
-      onUpdate({ config: { contexts: next, content: "" } });
-    } else {
-      onSaveValue({ contexts: next.map((item) => ({ ...item, pinned: false })) });
-    }
-    resetForm();
+    setSaving(true); setContextError("");
+    try {
+      if (updateClientSource && original?.sourceContextId && clientId) {
+        const response = await fetch(`${cloudflareApiUrl}/api/clients/${encodeURIComponent(clientId)}/contexts/${encodeURIComponent(original.sourceContextId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: nextItem.title, content: nextItem.content, expectedVersion: original.sourceVersion }) });
+        const body = await response.json() as { data?: { data?: { version: number } } | { version: number }; error?: string };
+        if (!response.ok || !body.data) throw new Error(body.error ?? "Falha ao atualizar a biblioteca.");
+        nextItem.sourceVersion = (body.data as { data?: { version: number } }).data?.version ?? (body.data as { version: number }).version;
+      }
+      const saved = next.map((item) => item.id === nextItem.id ? nextItem : item);
+      if (isStructureEditing) onUpdate({ config: { contexts: saved, content: "" } });
+      else await onSaveValue({ contexts: saved.map((item) => ({ ...item, pinned: false })) });
+      resetForm();
+    } catch (failure) { setContextError(failure instanceof Error ? failure.message : "Falha ao salvar contexto."); }
+    finally { setSaving(false); }
+  }
+
+  async function importSelected() {
+    const additions = library.filter((item) => selectedLibraryIds.includes(item.id)).map((item) => ({ id: crypto.randomUUID(), title: item.title, content: item.content, color: "mint", pinned: isStructureEditing, sourceContextId: item.id, sourceVersion: item.version }));
+    if (!additions.length) return;
+    setSaving(true); setContextError("");
+    try {
+      if (isStructureEditing) onUpdate({ config: { contexts: [...contexts, ...additions], content: "" } });
+      else await onSaveValue({ contexts: [...runtimeContexts, ...additions] });
+      setSelectedLibraryIds([]); setShowImport(false);
+    } catch (failure) { setContextError(failure instanceof Error ? failure.message : "Falha ao importar contextos."); }
+    finally { setSaving(false); }
+  }
+
+  async function associateSelected() {
+    if (!selectedLocalIds.length || ownerType !== "project") return;
+    setSaving(true); setContextError("");
+    try {
+      const response = await fetch(`${cloudflareApiUrl}/api/journey-steps/project/${encodeURIComponent(stepId)}/contexts/associate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ blockId: block.id, contextIds: selectedLocalIds }) });
+      const body = await response.json() as { data?: { data?: StepBuilderPayload } | StepBuilderPayload; error?: string };
+      const result = body.data && "data" in body.data ? body.data.data : body.data as StepBuilderPayload | undefined;
+      if (!response.ok || !result) throw new Error(body.error ?? "Falha ao associar contextos.");
+      const next = result.values.find((item) => item.block_id === block.id)?.value;
+      await onSaveValue(next);
+      setSelectedLocalIds([]);
+    } catch (failure) { setContextError(failure instanceof Error ? failure.message : "Falha ao associar contextos."); }
+    finally { setSaving(false); }
   }
 
   function patchContext(itemId: string, patch: Partial<ContextCard>) {
@@ -6642,8 +6655,12 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue 
     <div className="context-library compact-context-library">
       <div className="context-library-head">
         <span>{contexts.length ? `${contexts.length} contexto(s)` : "Nenhum contexto salvo neste bloco"}</span>
+        {clientId && <button className="secondary-button" type="button" onClick={() => setShowImport((current) => !current)}><Layers3 size={15} /> Puxar contextos do cliente</button>}
         <button className="secondary-button" type="button" onClick={startNew}><Plus size={15} /> Adicionar contexto</button>
       </div>
+      {contextError && <p className="form-error" role="alert">{contextError}</p>}
+      {ownerType === "project" && clientId && runtimeContexts.some((item) => !item.sourceContextId) && <div className="context-associate-review"><strong>Contextos locais para revisar</strong><p>Este projeto foi vinculado a um cliente. Selecione os textos que devem entrar na biblioteca; nada sera movido automaticamente.</p>{runtimeContexts.filter((item) => !item.sourceContextId).map((item) => <label key={item.id}><input type="checkbox" checked={selectedLocalIds.includes(item.id)} onChange={(event) => setSelectedLocalIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /> {item.title}</label>)}<button className="secondary-button" type="button" disabled={saving || !selectedLocalIds.length} onClick={() => void associateSelected()}>Associar selecionados ({selectedLocalIds.length})</button></div>}
+      {showImport && <div className="context-import-panel"><label className="search-field"><Search size={15} /><input value={librarySearch} onChange={(event) => { setLibrarySearch(event.target.value); setLibraryOffset(0); }} placeholder="Buscar na biblioteca do cliente" /></label><div className="context-import-list">{libraryLoading && <p role="status"><Loader2 className="spin" size={15} /> Buscando contextos...</p>}{libraryResults.map((item) => <label key={item.id}><input type="checkbox" checked={selectedLibraryIds.includes(item.id)} onChange={(event) => setSelectedLibraryIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span><strong>{item.title}</strong><small>{item.category || "Sem categoria"} · v{item.version}</small><em>{item.content}</em></span></label>)}{libraryHasMore && <button className="secondary-button" type="button" disabled={libraryLoading} onClick={() => setLibraryOffset((current) => current + 100)}>Carregar mais</button>}</div><div className="inline-actions"><button className="secondary-button" type="button" onClick={() => setShowImport(false)}>Cancelar</button><button className="primary-button" type="button" disabled={saving || selectedLibraryIds.length === 0} onClick={() => void importSelected()}>Importar selecionados ({selectedLibraryIds.length})</button></div></div>}
 
       {isWriting && (
         <div className="context-compose compact-context-compose">
@@ -6656,7 +6673,8 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue 
             {isStructureEditing && <label className="checkline"><input type="checkbox" checked={draftPinned} onChange={(event) => setDraftPinned(event.target.checked)} /> Fixar no template</label>}
           </div>
           <div className="inline-actions">
-            <button className="primary-button" type="button" onClick={saveContext}><Save size={15} /> Salvar contexto</button>
+            <button className="primary-button" type="button" disabled={saving} onClick={() => void saveContext()}><Save size={15} /> {editingId === "new" ? "Salvar contexto" : "Editar apenas aqui"}</button>
+            {!isStructureEditing && editingId !== "new" && runtimeContexts.some((item) => item.id === editingId && item.sourceContextId) && <button className="secondary-button" type="button" disabled={saving} onClick={() => void saveContext(true)}>Atualizar contexto do cliente</button>}
             <button className="secondary-button" type="button" onClick={resetForm}>Cancelar</button>
           </div>
         </div>
@@ -6666,6 +6684,7 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue 
         {contexts.map((item) => (
           <article className={`context-mini-card compact-context-card ${item.color || "mint"} ${item.pinned ? "pinned" : ""}`} key={item.id} onClick={() => void copyToClipboard(item.content, "Contexto")} title="Clique para copiar o contexto">
             <strong>{item.title}</strong>
+            {item.sourceContextId && <small className="context-source-version">v{item.sourceVersion ?? 1}{library.find((source) => source.id === item.sourceContextId && source.version > Number(item.sourceVersion ?? 0)) ? " · Atualizacao disponivel" : ""}</small>}
             {item.pinned && <span className="context-pin-label" aria-label="Conteúdo do template" title="Conteúdo do template">T</span>}
             {isStructureEditing && <div className="context-mini-actions" onClick={(event) => event.stopPropagation()}>
               <button className={`icon-button ${item.pinned ? "active" : ""}`} type="button" title="Salvar no template" onClick={() => patchContext(item.id, { pinned: !item.pinned })}><Save size={14} /></button>
@@ -6673,7 +6692,7 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue 
               <button className="icon-button" type="button" title="Editar contexto" onClick={() => startEdit(item)}><Pencil size={14} /></button>
               <button className="icon-button danger" type="button" title="Excluir contexto" onClick={() => removeContext(item.id)}><Trash2 size={14} /></button>
             </div>}
-            {!isStructureEditing && !item.pinned && <button className="icon-button context-runtime-delete" type="button" title="Excluir contexto deste projeto" onClick={(event) => { event.stopPropagation(); removeContext(item.id); }}><Trash2 size={14} /></button>}
+            {!isStructureEditing && !item.pinned && <div className="context-mini-actions" onClick={(event) => event.stopPropagation()}><button className="icon-button" type="button" title="Editar apenas aqui" onClick={() => startEdit(item)}><Pencil size={14} /></button>{library.find((source) => source.id === item.sourceContextId && source.version > Number(item.sourceVersion ?? 0)) && <button className="icon-button" type="button" title="Atualizar copia da biblioteca" onClick={() => { const source = library.find((candidate) => candidate.id === item.sourceContextId); if (source && window.confirm("Atualizar esta copia para a versao atual da biblioteca?")) void onSaveValue({ contexts: runtimeContexts.map((candidate) => candidate.id === item.id ? { ...candidate, title: source.title, content: source.content, sourceVersion: source.version } : candidate) }); }}><RefreshCw size={14} /></button>}<button className="icon-button" type="button" title="Copiar contexto" onClick={() => void copyToClipboard(item.content, "Contexto")}><Copy size={14} /></button><button className="icon-button danger" type="button" title="Retirar deste projeto" onClick={() => removeContext(item.id)}><Trash2 size={14} /></button></div>}
           </article>
         ))}
       </div>

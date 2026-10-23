@@ -1,3 +1,7 @@
+import { clientContextList, clientContextReconciliation, contextSnapshots, createClientContext, currentContextVersion, getClientContext, prepareProjectContextSave, updateClientContext } from "./clientContexts";
+import { createEmptyProjectTemplate, duplicateProjectTemplate, getTemplateEditor, publishTemplateDraft, removeTemplateDraftFile, saveTemplateDraft, stageProjectModelFiles, uploadTemplateDraftFile } from "./templateEditor";
+import { sanitizeModelConfig, type TemplateSnapshot } from "../src/features/templates/templateModel";
+
 type Env = { DB: D1Database; FILES?: R2Bucket };
 type OwnerType = "project" | "client" | "template";
 
@@ -32,7 +36,7 @@ type StepDocument = {
 
 const headers = {
   "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
+  "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   "access-control-allow-headers": "content-type,cf-access-jwt-assertion",
   "content-type": "application/json",
 };
@@ -60,7 +64,27 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
   }
 
   if (resource === "journey-steps" && isOwnerType(id) && action) {
+    if (nested === "contexts" && nestedId === "import" && request.method === "POST") {
+      const body = await request.json<{ blockId?: string; contextIds?: string[]; updatedBy?: string }>();
+      return json({ data: await importClientContextsIntoStep(env.DB, id, action, body) });
+    }
+    if (nested === "contexts" && nestedId === "refresh" && request.method === "POST") {
+      const body = await request.json<{ blockId?: string; contextId?: string; updatedBy?: string }>();
+      return json({ data: await refreshClientContextInStep(env.DB, id, action, body) });
+    }
+    if (nested === "contexts" && nestedId === "associate" && request.method === "POST") {
+      const body = await request.json<{ blockId?: string; contextIds?: string[]; updatedBy?: string }>();
+      return json({ data: await associateExistingProjectContexts(env.DB, id, action, body) });
+    }
     return handleGenericStepRequest(request, env, id, action, nested, nestedId, url);
+  }
+
+  if (resource === "clients" && id && action === "contexts") {
+    if (request.method === "GET" && nested === "reconciliation") return json({ data: await clientContextReconciliation(env.DB, id) });
+    if (request.method === "GET" && !nested) return json({ data: await clientContextList(env.DB, id, url.searchParams.get("q") ?? "", url.searchParams.get("archived") === "1", url.searchParams.get("category") ?? "", Number(url.searchParams.get("offset") ?? 0)) });
+    if (request.method === "POST" && !nested) return json({ data: await createClientContext(env.DB, id, await request.json()) }, 201);
+    if (request.method === "GET" && nested) return json({ data: await getClientContext(env.DB, id, nested) });
+    if (request.method === "PATCH" && nested) return json({ data: await updateClientContext(env.DB, id, nested, await request.json()) });
   }
 
   if (resource === "projects" && id && action === "journey" && request.method === "GET") {
@@ -76,13 +100,39 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
     return json(await saveProjectAsTemplate(env, id, body.name, body.createdBy ?? null, body.templateId ?? null, body.presentationDefaults ?? {}), 201);
   }
 
+  if (resource === "journey-templates" && !id && request.method === "POST") {
+    return json({ data: await createEmptyProjectTemplate(env.DB, await request.json()) }, 201);
+  }
+
+  if (resource === "journey-templates" && id && action === "editor") {
+    if (nested === "files" && request.method === "POST" && !nestedId) {
+      const form = await request.formData();
+      const file = form.get("file");
+      if (!(file instanceof File)) return error("Envie um arquivo.");
+      return json({ data: await uploadTemplateDraftFile(env.DB, env.FILES, id, String(form.get("stepId") ?? ""), String(form.get("blockId") ?? ""), file) }, 201);
+    }
+    if (nested === "files" && request.method === "DELETE" && nestedId) return json({ data: await removeTemplateDraftFile(env.DB, env.FILES, id, nestedId) });
+    if (request.method === "GET" && !nested) return json({ data: await getTemplateEditor(env.DB, id) });
+    if (request.method === "PUT" && !nested) {
+      const body = await request.json<{ snapshot: Parameters<typeof saveTemplateDraft>[2]; expectedRevision: number | null }>();
+      return json({ data: await saveTemplateDraft(env.DB, id, body.snapshot, body.expectedRevision) });
+    }
+  }
+  if (resource === "journey-templates" && id && action === "publish" && request.method === "POST") {
+    const body = await request.json<{ expectedRevision: number }>();
+    return json({ data: await publishTemplateDraft(env.DB, id, body.expectedRevision) });
+  }
+  if (resource === "journey-templates" && id && action === "duplicate" && request.method === "POST") {
+    return json({ data: await duplicateProjectTemplate(env.DB, env.FILES, id) }, 201);
+  }
+
   if (resource === "projects" && id && action === "summary-template" && request.method === "POST") {
     const body = await request.json<{ stepId?: string; blockId?: string; summaryId?: string; createdBy?: string }>();
     return json({ data: await saveProjectSummaryAsTemplate(env.DB, id, body) });
   }
 
   if (resource === "journey-templates" && id && request.method === "PATCH") {
-    const body = await request.json<{ name?: string; description?: string | null; status?: string }>();
+    const body = await request.json<{ name?: string; description?: string | null; status?: string; project_type_id?: string | null }>();
     return json(await updateJourneyTemplate(env.DB, id, body));
   }
 
@@ -153,7 +203,7 @@ async function handleGenericStepRequest(request: Request, env: Env, ownerType: O
     const step = await getStepRow(db, ownerType, stepId);
     if (!step) return error("Etapa nao encontrada.", 404);
     const templateRow = body.templateStepId
-      ? await db.prepare("select * from journey_step_documents where owner_type = 'template' and step_id = ? and state in ('draft', 'published') order by case state when 'published' then 0 else 1 end, version_number desc limit 1").bind(body.templateStepId).first<Record<string, unknown>>()
+      ? await db.prepare("select * from journey_step_documents where owner_type = 'template' and step_id = ? and state = 'published' order by version_number desc limit 1").bind(body.templateStepId).first<Record<string, unknown>>()
       : null;
     const templateDocument = templateRow ? normalizeDocumentRow(templateRow).document : null;
     let document = templateDocument
@@ -247,9 +297,18 @@ async function handleGenericStepRequest(request: Request, env: Env, ownerType: O
     const document = normalizeDocumentRow(documentRow).document;
     const block = document.blocks.find((candidate) => candidate.id === nested);
     if (!block) return error("Bloco nao encontrado.", 404);
-    const value = clearForcedCompletion(body.value);
+    let value = clearForcedCompletion(body.value);
     const completionState = isEmpty(value) ? "empty" : "partial";
-    await saveRuntimeValue(db, ownerType, stepId, documentRow.id, nested, value, completionState, body.updatedBy ?? null, "block_value_saved");
+    if (ownerType === "project" && block.type === "context") {
+      const previous = await getRuntimeValue(db, ownerType, stepId, nested);
+      const previousContexts = Array.isArray(asRecord(previous?.value).contexts) ? asRecord(previous?.value).contexts as Array<Record<string, unknown>> : [];
+      const nextContexts = Array.isArray(asRecord(value).contexts) ? asRecord(value).contexts as Array<Record<string, unknown>> : [];
+      const prepared = await prepareProjectContextSave(db, stepId, nested, previousContexts as never[], nextContexts as never[]);
+      value = { ...asRecord(value), contexts: prepared.contexts };
+      await saveContextValueAtomically(db, ownerType, stepId, String(documentRow.id), nested, value, completionState, body.updatedBy ?? null, prepared.statements);
+    } else {
+      await saveRuntimeValue(db, ownerType, stepId, documentRow.id, nested, value, completionState, body.updatedBy ?? null, "block_value_saved");
+    }
     const payload = await genericPayload(db, ownerType, stepId, documentRow);
     await syncStepStatus(db, ownerType, stepId, payload.completion.status);
     return json({ data: payload });
@@ -475,11 +534,97 @@ async function createRuntimeContext(
   };
   if (!context.content) throw new Error("Escreva o conteudo do contexto.");
   const contexts = Array.isArray(current.contexts) ? current.contexts : [];
-  const next = { ...current, contexts: [...contexts, context] };
-  await saveRuntimeValue(db, ownerType, stepId, documentRow.id, blockId, next, "complete", createdBy, "context_created");
+  let next = { ...current, contexts: [...contexts, context] };
+  if (ownerType === "project") {
+    const prepared = await prepareProjectContextSave(db, stepId, blockId, contexts, next.contexts);
+    next = { ...next, contexts: prepared.contexts };
+    await saveContextValueAtomically(db, ownerType, stepId, String(documentRow.id), blockId, next, "complete", createdBy, prepared.statements);
+  } else {
+    await saveRuntimeValue(db, ownerType, stepId, documentRow.id, blockId, next, "complete", createdBy, "context_created");
+  }
   const completion = await calculateRuntimeCompletion(db, ownerType, stepId, documentRow);
   await syncStepStatus(db, ownerType, stepId, completion.status);
   return { context, completion };
+}
+
+async function saveContextValueAtomically(db: D1Database, ownerType: OwnerType, stepId: string, documentId: string, blockId: string, value: unknown, completionState: string, updatedBy: string | null, extra: D1PreparedStatement[] = []) {
+  const existing = await getRuntimeValue(db, ownerType, stepId, blockId);
+  const timestamp = new Date().toISOString();
+  const write = existing
+    ? db.prepare("update journey_step_values set document_id = ?, value_json = ?, completion_state = ?, updated_by = ?, updated_at = ? where id = ?")
+      .bind(documentId, JSON.stringify(value), completionState, updatedBy, timestamp, existing.id)
+    : db.prepare("insert into journey_step_values (id, owner_type, owner_step_id, document_id, block_id, value_json, completion_state, updated_by, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(crypto.randomUUID(), ownerType, stepId, documentId, blockId, JSON.stringify(value), completionState, updatedBy, timestamp, timestamp);
+  const event = db.prepare("insert into journey_step_events (id, owner_type, owner_step_id, document_id, block_id, event_type, event_payload_json, created_by, created_at) values (?, ?, ?, ?, ?, 'context_value_saved', ?, ?, ?)")
+    .bind(crypto.randomUUID(), ownerType, stepId, documentId, blockId, JSON.stringify({ contextCount: Array.isArray(asRecord(value).contexts) ? (asRecord(value).contexts as unknown[]).length : 0 }), updatedBy, timestamp);
+  await db.batch([...extra, write, event]);
+}
+
+async function contextUseOwner(db: D1Database, ownerType: OwnerType, stepId: string) {
+  if (ownerType === "project") {
+    const row = await db.prepare("select p.client_id from project_steps s join projects p on p.id = s.project_id where s.id = ?").bind(stepId).first<{ client_id: string | null }>();
+    return row?.client_id ?? null;
+  }
+  if (ownerType === "client") {
+    const row = await db.prepare("select client_id from client_steps where id = ?").bind(stepId).first<{ client_id: string }>();
+    return row?.client_id ?? null;
+  }
+  return null;
+}
+
+async function importClientContextsIntoStep(db: D1Database, ownerType: OwnerType, stepId: string, body: { blockId?: string; contextIds?: string[]; updatedBy?: string }) {
+  if (ownerType === "template") throw new Error("Importe contextos no rascunho do template.");
+  const blockId = String(body.blockId ?? "");
+  const clientId = await contextUseOwner(db, ownerType, stepId);
+  if (!clientId) throw new Error("Vincule um cliente antes de importar contextos.");
+  const documentRow = await getCurrentDocument(db, ownerType, stepId);
+  const document = normalizeDocumentRow(documentRow).document;
+  if (!document.blocks.some((block) => block.id === blockId && block.type === "context")) throw new Error("Bloco de contexto nao encontrado.");
+  const current = await getRuntimeValue(db, ownerType, stepId, blockId);
+  const value = asRecord(current?.value);
+  const contexts = Array.isArray(value.contexts) ? value.contexts : [];
+  const imported = await contextSnapshots(db, clientId, body.contextIds ?? []);
+  await saveContextValueAtomically(db, ownerType, stepId, String(documentRow.id), blockId, { ...value, contexts: [...contexts, ...imported] }, "partial", body.updatedBy ?? null);
+  const payload = await genericPayload(db, ownerType, stepId, documentRow);
+  await syncStepStatus(db, ownerType, stepId, payload.completion.status);
+  return payload;
+}
+
+async function refreshClientContextInStep(db: D1Database, ownerType: OwnerType, stepId: string, body: { blockId?: string; contextId?: string; updatedBy?: string }) {
+  if (ownerType === "template") throw new Error("Atualize o rascunho do template.");
+  const clientId = await contextUseOwner(db, ownerType, stepId);
+  if (!clientId) throw new Error("Cliente nao vinculado.");
+  const blockId = String(body.blockId ?? "");
+  const documentRow = await getCurrentDocument(db, ownerType, stepId);
+  const document = normalizeDocumentRow(documentRow).document;
+  if (!document.blocks.some((block) => block.id === blockId && block.type === "context")) throw new Error("Bloco de contexto nao encontrado.");
+  const current = await getRuntimeValue(db, ownerType, stepId, blockId);
+  const value = asRecord(current?.value);
+  const contexts = Array.isArray(value.contexts) ? value.contexts as Array<Record<string, unknown>> : [];
+  const selected = contexts.find((item) => item.id === body.contextId);
+  if (!selected?.sourceContextId) throw new Error("Contexto vinculado nao encontrado neste bloco.");
+  const source = await currentContextVersion(db, clientId, String(selected.sourceContextId));
+  if (source.status !== "active") throw new Error("A fonte esta arquivada. O texto em uso foi preservado.");
+  const next = contexts.map((item) => item.id === body.contextId ? { ...item, title: source.title, content: source.content, sourceVersion: source.version } : item);
+  await saveContextValueAtomically(db, ownerType, stepId, String(documentRow.id), blockId, { ...value, contexts: next }, "partial", body.updatedBy ?? null);
+  return genericPayload(db, ownerType, stepId, documentRow);
+}
+
+async function associateExistingProjectContexts(db: D1Database, ownerType: OwnerType, stepId: string, body: { blockId?: string; contextIds?: string[]; updatedBy?: string }) {
+  if (ownerType !== "project") throw new Error("A revisao de contextos locais pertence ao projeto.");
+  const blockId = String(body.blockId ?? "");
+  const documentRow = await getCurrentDocument(db, ownerType, stepId);
+  const document = normalizeDocumentRow(documentRow).document;
+  if (!document.blocks.some((block) => block.id === blockId && block.type === "context")) throw new Error("Bloco de contexto nao encontrado.");
+  const current = await getRuntimeValue(db, ownerType, stepId, blockId);
+  const value = asRecord(current?.value);
+  const contexts = Array.isArray(value.contexts) ? value.contexts as Array<Record<string, unknown>> : [];
+  const selected = new Set(body.contextIds ?? []);
+  if (!selected.size || contexts.filter((item) => selected.has(String(item.id)) && !item.sourceContextId).length !== selected.size) throw new Error("Selecione contextos locais existentes para associar.");
+  const prepared = await prepareProjectContextSave(db, stepId, blockId, contexts.filter((item) => !selected.has(String(item.id))) as never[], contexts as never[]);
+  if (!prepared.statements.length) throw new Error("Vincule um cliente antes de associar contextos.");
+  await saveContextValueAtomically(db, ownerType, stepId, String(documentRow.id), blockId, { ...value, contexts: prepared.contexts }, "partial", body.updatedBy ?? null, prepared.statements);
+  return genericPayload(db, ownerType, stepId, documentRow);
 }
 
 async function saveProjectAsTemplate(
@@ -510,15 +655,26 @@ async function saveProjectAsTemplate(
   const name = String(requestedName ?? currentTemplate?.name ?? `${project.name} - template`).trim() || "Template de jornada";
 
   if (mode === "updated") {
-    await db.batch([
-      db.prepare("delete from journey_step_values where owner_type = 'template' and owner_step_id in (select id from journey_steps where journey_template_id = ?)").bind(templateId),
-      db.prepare("delete from journey_step_files where owner_type = 'template' and owner_step_id in (select id from journey_steps where journey_template_id = ?)").bind(templateId),
-      db.prepare("delete from journey_step_events where owner_type = 'template' and owner_step_id in (select id from journey_steps where journey_template_id = ?)").bind(templateId),
-      db.prepare("delete from journey_step_documents where owner_type = 'template' and owner_id = ?").bind(templateId),
-      db.prepare("delete from journey_steps where journey_template_id = ?").bind(templateId),
-      db.prepare("update journey_templates set name = ?, description = ?, project_type_id = ?, context = 'projeto', status = 'ativo' where id = ?")
-        .bind(name, `Atualizado a partir do projeto ${project.name ?? ""}.`, project.project_type_id ?? null, templateId),
-    ]);
+    const editor = await getTemplateEditor(db, templateId!);
+    const sourceSteps = await db.prepare("select * from project_steps where project_id = ? order by step_order asc").bind(projectId).all<Record<string, unknown>>();
+    const existingStepIds = new Set(editor.published.steps.map((step) => step.id));
+    const steps: TemplateSnapshot["steps"] = [];
+    const fileMapping: Array<{ projectStepId: string; templateStepId: string; blockIds: string[] }> = [];
+    for (const projectStep of sourceSteps.results ?? []) {
+      const linkedId = String(projectStep.source_journey_step_id ?? "");
+      const stepId = existingStepIds.has(linkedId) ? linkedId : crypto.randomUUID();
+      const sourceRow = await getCurrentDocument(db, "project", String(projectStep.id), false);
+      const source = sourceRow ? normalizeDocumentRow(sourceRow).document : await buildProjectLegacyDocument(db, projectStep, crypto.randomUUID());
+      const hasDefault = Object.prototype.hasOwnProperty.call(presentationDefaults, String(projectStep.id));
+      const withPresentation = hasDefault ? { ...source, blocks: source.blocks.map((block) => ({ ...block, collapsedByDefault: (presentationDefaults[String(projectStep.id)] ?? []).includes(block.id) })) } : source;
+      const document = await createProjectTemplateDocument(withPresentation, templateId!, stepId, String(projectStep.name ?? source.title));
+      fileMapping.push({ projectStepId: String(projectStep.id), templateStepId: stepId, blockIds: document.blocks.filter((block) => block.type === "prompt" || block.type === "file_upload" && block.config?.fileMode === "resource_pack").map((block) => block.id) });
+      steps.push({ id: stepId, name: String(projectStep.name ?? source.title), description: String(projectStep.description ?? ""), stepOrder: steps.length + 1, document: document as TemplateSnapshot["steps"][number]["document"] });
+    }
+    const snapshot: TemplateSnapshot = { ...editor.published, name, description: `Atualizado a partir do projeto ${project.name ?? ""}.`, projectTypeId: project.project_type_id == null ? null : String(project.project_type_id), steps };
+    await saveTemplateDraft(db, templateId!, snapshot, editor.draftRevision);
+    await stageProjectModelFiles(db, env.FILES, templateId!, fileMapping);
+    return { id: templateId, name, mode, draft: true };
   } else {
     await db.prepare("insert into journey_templates (id, name, description, project_type_id, context, status, created_at) values (?, ?, ?, ?, 'projeto', 'ativo', ?)")
       .bind(templateId, name, `Criado a partir do projeto ${project.name ?? ""}.`, project.project_type_id ?? null, now).run();
@@ -715,27 +871,28 @@ async function createProjectTemplateDocument(
     state: "published",
     versionNumber: 1,
     revision: 1,
-    // Execution contexts remain with the project. Only contexts deliberately pinned in edit mode are reusable.
-    blocks: sourceDocument.blocks.map((block) => {
-      if (block.type === "project_summary") return { ...block, config: { ...(block.config ?? {}), summaryId: null } };
-      if (block.type !== "context") return block;
-      const configured = Array.isArray(block.config?.contexts) ? (block.config?.contexts as Array<Record<string, unknown>>) : [];
-      const contexts = configured.filter((context) => Boolean(context.pinned) && String(context.content ?? "").trim());
-      return { ...block, config: { ...(block.config ?? {}), contexts } };
-    }),
+    blocks: sourceDocument.blocks.map((block) => ({
+      ...block,
+      config: sanitizeModelConfig(block.type, (block.config ?? {}) as Record<string, unknown>),
+    })),
   };
 }
 
-async function updateJourneyTemplate(db: D1Database, templateId: string, patch: { name?: string; description?: string | null; status?: string }) {
+async function updateJourneyTemplate(db: D1Database, templateId: string, patch: { name?: string; description?: string | null; status?: string; project_type_id?: string | null }) {
   const template = await db.prepare("select * from journey_templates where id = ?").bind(templateId).first<Record<string, unknown>>();
   if (!template) throw new Error("Template nao encontrado.");
   const name = String(patch.name ?? template.name ?? "").trim();
   if (!name) throw new Error("Informe o nome do template.");
   const description = patch.description === undefined ? template.description ?? null : patch.description;
   const status = ["ativo", "inativo", "arquivado"].includes(String(patch.status)) ? patch.status : template.status ?? "ativo";
-  await db.prepare("update journey_templates set name = ?, description = ?, status = ? where id = ?")
-    .bind(name, description, status, templateId).run();
-  return { ...template, id: templateId, name, description, status };
+  const projectTypeId = patch.project_type_id === undefined ? template.project_type_id ?? null : String(patch.project_type_id ?? "").trim() || null;
+  if (projectTypeId) {
+    const projectType = await db.prepare("select id from project_types where id = ?").bind(projectTypeId).first();
+    if (!projectType) throw new Error("Tipo de projeto nao encontrado.");
+  }
+  await db.prepare("update journey_templates set name = ?, description = ?, status = ?, project_type_id = ? where id = ?")
+    .bind(name, description, status, projectTypeId, templateId).run();
+  return { ...template, id: templateId, name, description, status, project_type_id: projectTypeId };
 }
 
 async function deleteJourneyTemplate(db: D1Database, templateId: string) {
