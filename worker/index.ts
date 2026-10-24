@@ -66,15 +66,17 @@ export default {
       }
 
       if (url.pathname === "/api/overview" && request.method === "GET") {
-        const [promptCount, summaryProjects, workspaces] = await Promise.all([
+        const [promptCount, summaryProjects, workspaces, clientContexts] = await Promise.all([
           env.DB.prepare("select count(*) as total from prompts").first<{ total: number }>(),
           env.DB.prepare("select distinct project_id from project_summaries where status != 'archived'").all<{ project_id: string }>(),
           readWorkspaceOverview(env.DB),
+          env.DB.prepare("select client_id, count(*) as total from client_contexts where status = 'active' group by client_id").all<{ client_id: string; total: number }>(),
         ]);
         return json({ data: {
           promptCount: promptCount?.total ?? 0,
           summaryProjectIds: (summaryProjects.results ?? []).map((row) => row.project_id),
           workspaces,
+          clientContextCounts: (clientContexts.results ?? []).map((row) => ({ clientId: row.client_id, count: row.total })),
         } });
       }
 
@@ -138,6 +140,10 @@ async function handleTableRequest(request: Request, env: Env, tableName = "", id
 
     for (const row of rows) {
       const normalized = normalizeRecord(row as DataRecord, columns, true);
+      if (tableName === "clients" && typeof normalized.name === "string") {
+        const duplicate = await findDuplicateClient(env.DB, normalized.name);
+        if (duplicate) return jsonError(`Ja existe um cliente chamado ${duplicate.name}. Abra o cadastro existente.`, 409);
+      }
       await insertRecord(env.DB, tableName, normalized);
       inserted.push(await getById(env.DB, tableName, String(normalized.id)));
     }
@@ -148,6 +154,10 @@ async function handleTableRequest(request: Request, env: Env, tableName = "", id
   if (request.method === "PATCH" && id) {
     const body = (await request.json()) as DataRecord;
     const normalized = normalizeRecord(body, columns, false);
+    if (tableName === "clients" && typeof normalized.name === "string") {
+      const duplicate = await findDuplicateClient(env.DB, normalized.name, id);
+      if (duplicate) return jsonError(`Ja existe um cliente chamado ${duplicate.name}. Unifique os cadastros antes de renomear.`, 409);
+    }
     if (tableName === "projects" && normalized.status === "concluido" && !(await isProjectWorkspaceOrganized(env.DB, id))) {
       return jsonError("Organize a Etapa 0 antes de concluir o projeto.", 409);
     }
@@ -272,6 +282,13 @@ async function updateRecord(db: D1Database, tableName: string, id: string, recor
 
 async function getById(db: D1Database, tableName: string, id: string) {
   return db.prepare(`select * from ${tableName} where id = ?`).bind(id).first();
+}
+
+async function findDuplicateClient(db: D1Database, name: string, excludedId = "") {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  return db.prepare("select id, name from clients where lower(trim(name)) = lower(trim(?)) and id != ? limit 1")
+    .bind(trimmed, excludedId).first<{ id: string; name: string }>();
 }
 
 function sanitizeFileName(value: string) {

@@ -46,6 +46,7 @@ import { replaceSummaryState, shouldApplySummaryState, type SummaryState } from 
 import { promptToneHue } from "../features/summary/promptTone";
 import { clientKindOptions, validateClientLogo, type ClientKind } from "../features/clients/clientIdentity";
 import { ClientContextLibrary } from "../features/clients/ClientContextLibrary";
+import { ClientPortfolio } from "../features/clients/ClientPortfolio";
 import { collapseAllBlockIds, toggleCollapsedBlockIds } from "../features/journey/blockPresentation";
 import { interpolateJourneyPrompt, journeyPromptVariableSuggestions } from "../features/journey/promptInterpolation";
 import {
@@ -602,7 +603,7 @@ function activeSecondaryTables(view: ViewMode, activeConfig: ConfigModuleKey, se
 
 const projectFormTables: Array<keyof Tables> = ["journey_steps", "step_prompts"];
 
-type Overview = { promptCount: number; summaryProjectIds: string[]; workspaces: WorkspaceOverview[] };
+type Overview = { promptCount: number; summaryProjectIds: string[]; workspaces: WorkspaceOverview[]; clientContextCounts: Array<{ clientId: string; count: number }> };
 
 const configModules: Array<{ key: ConfigModuleKey; label: string; icon: typeof Bot; description: string }> = [
   {
@@ -693,7 +694,7 @@ export default function App() {
   const [loadedProjectDetails, setLoadedProjectDetails] = useState<Set<string>>(() => new Set());
   const [loadingProjectDetails, setLoadingProjectDetails] = useState<Set<string>>(() => new Set());
   const [projectDetailErrors, setProjectDetailErrors] = useState<Record<string, string>>({});
-  const [overview, setOverview] = useState<Overview>({ promptCount: 0, summaryProjectIds: [], workspaces: [] });
+  const [overview, setOverview] = useState<Overview>({ promptCount: 0, summaryProjectIds: [], workspaces: [], clientContextCounts: [] });
   const onWorkspaceChanged = useCallback((workspace: WorkspaceOverview) => {
     setOverview((current) => {
       const previous = current.workspaces.find((item) => item.projectId === workspace.projectId);
@@ -918,7 +919,7 @@ export default function App() {
           }
           return next;
         });
-        if (overviewResult.data) setOverview((current) => ({ ...overviewResult.data!, workspaces: overviewResult.data!.workspaces.map((workspace) => {
+        if (overviewResult.data) setOverview((current) => ({ ...overviewResult.data!, clientContextCounts: overviewResult.data!.clientContextCounts ?? [], workspaces: overviewResult.data!.workspaces.map((workspace) => {
           const local = current.workspaces.find((item) => item.projectId === workspace.projectId);
           return local && local.revision > workspace.revision ? local : workspace;
         }) }));
@@ -2848,7 +2849,7 @@ export default function App() {
 
         {view === "projectTemplates" && (currentSecondaryReady ? <ProjectTemplatesView tables={tables} query={query} setQuery={setQuery} onUpdate={updateJourneyTemplate} onDelete={deleteJourneyTemplate} onRefresh={loadAll} initialTemplateId={templateEditorTargetId} onEditorClosed={() => setTemplateEditorTargetId(null)} onEditorDirtyChange={setTemplateEditorDirty} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
-        {view === "clients" && (currentSecondaryReady ? <ClientsView tables={tables} currentUser={currentUser} query={query} setQuery={setQuery} onCreate={createClientJourney} onSaveIdentity={saveClientIdentity} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} onOpenProject={(id) => { setSelectedProjectId(id); setSelectedStepId(WORKSPACE_STEP_ID); setView("journey"); }} baseUrl={cloudflareApiUrl} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
+        {view === "clients" && (currentSecondaryReady ? <ClientsView tables={tables} workspaces={overview.workspaces} clientContextCounts={overview.clientContextCounts} currentUser={currentUser} query={query} setQuery={setQuery} onCreate={createClientJourney} onSaveIdentity={saveClientIdentity} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} onOpenProject={(id) => { setSelectedProjectId(id); setSelectedStepId(WORKSPACE_STEP_ID); setView("journey"); }} baseUrl={cloudflareApiUrl} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
         {view === "management" && (
           <ManagementView
@@ -3787,6 +3788,8 @@ function ManagementView({
 
 function ClientsView({
   tables,
+  workspaces,
+  clientContextCounts,
   baseUrl,
   currentUser,
   query,
@@ -3797,6 +3800,8 @@ function ClientsView({
   onOpenProject,
 }: {
   tables: Tables;
+  workspaces: WorkspaceOverview[];
+  clientContextCounts: Array<{ clientId: string; count: number }>;
   baseUrl: string;
   currentUser: AppUser | null;
   query: string;
@@ -3807,14 +3812,9 @@ function ClientsView({
   onOpenProject: (id: string) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
-  const [showInactive, setShowInactive] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [workspaceClient, setWorkspaceClient] = useState<Client | null>(null);
   const [contextClient, setContextClient] = useState<Client | null>(null);
-  const normalizedQuery = normalizeSearchText(query);
-  const filteredClients = tables.clients
-    .filter((client) => (client.is_active || showInactive || normalizedQuery) && normalizeSearchText(normalizeSearch(client.name, client.company, client.client_kind, getResponsibleName(client, tables.app_users))).includes(normalizedQuery))
-    .sort((a, b) => new Date(b.updated_at ?? b.created_at).getTime() - new Date(a.updated_at ?? a.created_at).getTime());
 
   const activeClients = tables.clients.filter((client) => client.is_active && client.status !== "arquivado");
   const doneSteps = tables.client_steps.filter((step) => step.status === "concluido").length;
@@ -3868,60 +3868,26 @@ function ClientsView({
       <section className="list-panel">
         <div className="panel-heading">
           <div>
-            <h2>Jornadas de clientes</h2>
-            <p>Abra um cliente para marcar checklist, anexar evidencias e concluir etapas.</p>
-          </div>
-          <div className="clients-search-tools">
-            <label className="search-field clients-search-field"><Search size={16} /><input aria-label="Buscar clientes pelo nome, empresa, categoria ou responsavel" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar cliente, empresa ou AC/AV" /></label>
-            <button className="secondary-button" type="button" aria-pressed={showInactive} onClick={() => setShowInactive((value) => !value)}>{showInactive ? "Somente ativos" : "Ver inativos"}</button>
+            <h2>Carteira de clientes</h2>
+            <p>Compare clientes, contextos, locais de projetos e links em uma unica lista.</p>
           </div>
         </div>
-
-        <div className="project-grid">
-          {filteredClients.map((client) => {
-            const steps = tables.client_steps.filter((step) => step.client_id === client.id);
-            const done = steps.filter((step) => step.status === "concluido").length;
-            const progress = steps.length ? Math.round((done / steps.length) * 100) : 0;
-            const responsibleName = getResponsibleName(client, tables.app_users);
-
-            return (
-              <article className="project-card client-card" key={client.id}>
-                <button className="client-card-open" type="button" onClick={() => onOpen(client.id)} aria-label={`Abrir cliente ${client.name}`}>
-                <div className="client-card-head">
-                  <div className="client-avatar-stack">
-                    <ClientLogo client={client} />
-                    <span className="progress-ring small" style={{ "--progress": `${progress * 3.6}deg` } as CSSProperties}>
-                      <strong>{progress}%</strong>
-                    </span>
-                  </div>
-                  <StatusPill status={client.status} />
-                </div>
-                <span className="client-name-line"><strong>{client.name}</strong>{client.client_kind && <span className="client-kind-badge">{client.client_kind}</span>}{!client.is_active && <span className="client-inactive-indicator">Inativo</span>}</span>
-                <span>{client.company || client.entry_month || "Cliente sem detalhe definido"}</span>
-                <div className="progress-bar">
-                  <span style={{ width: `${progress}%` }} />
-                </div>
-                <small>
-                  {progress}% concluido - {steps.length} etapas
-                </small>
-                {responsibleName && <small>Responsavel: {responsibleName}</small>}
-                </button>
-                <button className="icon-button client-edit-button" type="button" title={`Editar cadastro de ${client.name}`} aria-label={`Editar cadastro de ${client.name}`} onClick={() => setEditingClient(client)}><Pencil size={16} /></button>
-                <button className="secondary-button client-workspaces-button" type="button" onClick={() => setWorkspaceClient(client)}><FolderOpen size={15} /> Locais de projetos</button>
-                <button className="secondary-button client-workspaces-button" type="button" onClick={() => setContextClient(client)}><Layers3 size={15} /> Contextos</button>
-                {!client.is_active && <button className="secondary-button client-activate-button" type="button" onClick={() => void onSaveIdentity(client.id, { is_active: true }, null)}>Ativar</button>}
-              </article>
-            );
-          })}
-        </div>
-
-        {filteredClients.length === 0 && (
-          <div className="empty-state">
-            <Users size={34} />
-            <strong>Nenhum cliente encontrado</strong>
-            <span>Refine a busca ou inclua um novo cliente.</span>
-          </div>
-        )}
+        <ClientPortfolio
+          baseUrl={baseUrl}
+          clients={tables.clients}
+          projects={tables.projects}
+          users={tables.app_users}
+          workspaces={workspaces}
+          contextCounts={clientContextCounts}
+          query={query}
+          setQuery={setQuery}
+          onOpenClient={onOpen}
+          onOpenProject={onOpenProject}
+          onEditClient={(id) => setEditingClient(tables.clients.find((client) => client.id === id) ?? null)}
+          onActivateClient={(id) => void onSaveIdentity(id, { is_active: true }, null)}
+          onOpenContexts={(id) => setContextClient(tables.clients.find((client) => client.id === id) ?? null)}
+          onOpenWorkspaces={(id) => setWorkspaceClient(tables.clients.find((client) => client.id === id) ?? null)}
+        />
       </section>
       {editingClient && <ClientProfileDialog key={editingClient.id} client={editingClient} users={tables.app_users} onClose={() => setEditingClient(null)} onSave={onSaveIdentity} />}
       {workspaceClient && <ClientWorkspacesDialog baseUrl={baseUrl} clientId={workspaceClient.id} clientName={workspaceClient.name} onClose={() => setWorkspaceClient(null)} onOpenProject={onOpenProject} />}
