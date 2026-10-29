@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpRight, CheckCircle2, ChevronDown, ClipboardCheck, Copy, ExternalLink, Layers3, Link2, Pencil, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
 import { copyText } from "../../components/ui/clipboard";
 import { buildJourneyLink } from "../projects/journeyLink";
-import { browserAccessibleUrl, serverDirectoryPath, workspaceMissing, workspaceProvider, workspaceStatusLabel, type ProjectWorkspace, type WorkspaceKind, type WorkspaceOverview, type WorkspaceReference } from "./workspaceModel";
+import { browserAccessibleUrl, contextTitleFromContent, serverDirectoryPath, workspaceMissing, workspaceProvider, workspaceStatusLabel, type ProjectWorkspace, type WorkspaceKind, type WorkspaceOverview, type WorkspaceReference } from "./workspaceModel";
 import { WorkspaceProviderBadge } from "./WorkspaceProviderBadge";
 
 type Draft = { id: string; kind: WorkspaceKind; title: string; target: string; notes: string };
@@ -25,9 +25,11 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, onCh
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [checklistOpen, setChecklistOpen] = useState(false);
+  const [checklistAdding, setChecklistAdding] = useState(false);
   const [contextsOpen, setContextsOpen] = useState(false);
   const [checklistLabel, setChecklistLabel] = useState("");
-  const [contextDraft, setContextDraft] = useState({ title: "", content: "", category: "" });
+  const [contextDraft, setContextDraft] = useState({ title: "", content: "" });
+  const [contextTitleEdited, setContextTitleEdited] = useState(false);
   const sequence = useRef(0);
   const lastRefresh = useRef(0);
 
@@ -47,7 +49,17 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, onCh
     }
   }, [baseUrl, projectId, onChanged]);
 
-  useEffect(() => { setWorkspace(null); setDraft(null); void refresh(); }, [refresh]);
+  useEffect(() => {
+    setWorkspace(null);
+    setDraft(null);
+    setChecklistOpen(false);
+    setChecklistAdding(false);
+    setChecklistLabel("");
+    setContextsOpen(false);
+    setContextDraft({ title: "", content: "" });
+    setContextTitleEdited(false);
+    void refresh();
+  }, [refresh]);
   useEffect(() => {
     const revalidate = (event: Event) => {
       if (document.visibilityState !== "visible" || (event.type !== "online" && Date.now() - lastRefresh.current < 1000)) return;
@@ -137,13 +149,19 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, onCh
   async function addChecklistItem() {
     const label = checklistLabel.trim();
     if (!label) return;
-    if (await mutateWorkspace("checklist", "POST", { label })) setChecklistLabel("");
+    if (await mutateWorkspace("checklist", "POST", { label })) {
+      setChecklistLabel("");
+      setChecklistAdding(false);
+    }
     setChecklistOpen(true);
   }
 
   async function addContext() {
     if (!contextDraft.title.trim() || !contextDraft.content.trim()) { setError("Informe titulo e conteudo do contexto."); return; }
-    if (await mutateWorkspace("contexts", "POST", contextDraft)) setContextDraft({ title: "", content: "", category: "" });
+    if (await mutateWorkspace("contexts", "POST", { ...contextDraft, category: null })) {
+      setContextDraft({ title: "", content: "" });
+      setContextTitleEdited(false);
+    }
     setContextsOpen(true);
   }
 
@@ -197,11 +215,11 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, onCh
     })}
     <section className="workspace-tool-section" aria-label="Checklist do projeto">
       <header>
-        <button className="workspace-tool-toggle" type="button" aria-expanded={checklistOpen} onClick={() => setChecklistOpen((value) => !value)}><ClipboardCheck size={17} /><span>Checklist</span><small>{workspace.checklistItems.filter((item) => item.is_done).length}/{workspace.checklistItems.length}</small><ChevronDown size={16} className={checklistOpen ? "open" : ""} /></button>
-        <button className="icon-button" type="button" title="Adicionar item" onClick={() => setChecklistOpen(true)}><Plus size={16} /></button>
+        <button className="workspace-tool-toggle" type="button" aria-expanded={checklistOpen} onClick={() => setChecklistOpen((value) => { if (value) setChecklistAdding(false); return !value; })}><ClipboardCheck size={17} /><span>Checklist</span><small>{workspace.checklistItems.filter((item) => item.is_done).length}/{workspace.checklistItems.length}</small><ChevronDown size={16} className={checklistOpen ? "open" : ""} /></button>
+        <button className="icon-button" type="button" title="Adicionar item" onClick={() => { setChecklistOpen(true); setChecklistAdding(true); }}><Plus size={16} /></button>
       </header>
       {checklistOpen && <div className="workspace-tool-body">
-        <div className="workspace-quick-add"><input value={checklistLabel} maxLength={300} placeholder="Novo requisito" onChange={(event) => setChecklistLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void addChecklistItem(); }} /><button className="primary-button compact" type="button" disabled={saving || !checklistLabel.trim()} onClick={() => void addChecklistItem()}><Plus size={15} /> Adicionar</button></div>
+        {checklistAdding && <div className="workspace-quick-add"><input autoFocus value={checklistLabel} maxLength={300} placeholder="Novo requisito" onChange={(event) => setChecklistLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void addChecklistItem(); if (event.key === "Escape") { setChecklistAdding(false); setChecklistLabel(""); } }} /><button className="primary-button compact" type="button" disabled={saving || !checklistLabel.trim()} onClick={() => void addChecklistItem()}><Plus size={15} /> Adicionar</button></div>}
         <div className="workspace-checklist">{workspace.checklistItems.map((item) => <label key={item.id}><input type="checkbox" checked={item.is_done} disabled={saving} onChange={() => void mutateWorkspace(`checklist/${encodeURIComponent(item.id)}`, "PATCH", { isDone: !item.is_done })} /><span>{item.label}</span><button className="icon-button danger" type="button" title="Excluir item" onClick={(event) => { event.preventDefault(); void mutateWorkspace(`checklist/${encodeURIComponent(item.id)}`, "DELETE"); }}><Trash2 size={15} /></button></label>)}</div>
         {!workspace.checklistItems.length && <p className="workspace-empty">Adicione os pre-requisitos e orientacoes deste projeto.</p>}
       </div>}
@@ -213,7 +231,7 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, onCh
       </header>
       {contextsOpen && <div className="workspace-tool-body">
         {contextPrompts.length > 0 && <div className="workspace-prompt-shortcuts" aria-label="Prompts de contexto">{contextPrompts.slice(0, 3).map((prompt) => <button type="button" key={prompt.id} title={prompt.name} onClick={() => void copyText(prompt.content, prompt.name)}><Copy size={14} /><span>{prompt.name}</span></button>)}</div>}
-        <div className="workspace-context-form"><input value={contextDraft.title} maxLength={160} placeholder="Titulo do contexto" onChange={(event) => setContextDraft({ ...contextDraft, title: event.target.value })} /><input value={contextDraft.category} maxLength={100} placeholder="Categoria (opcional)" onChange={(event) => setContextDraft({ ...contextDraft, category: event.target.value })} /><textarea value={contextDraft.content} maxLength={20000} placeholder="Cole ou escreva o contexto" onChange={(event) => setContextDraft({ ...contextDraft, content: event.target.value })} /><button className="primary-button compact" type="button" disabled={saving || !contextDraft.title.trim() || !contextDraft.content.trim()} onClick={() => void addContext()}><Save size={15} /> Salvar contexto</button></div>
+        <div className="workspace-context-form"><input value={contextDraft.title} maxLength={160} placeholder="Titulo do contexto" onChange={(event) => { setContextTitleEdited(true); setContextDraft({ ...contextDraft, title: event.target.value }); }} /><textarea value={contextDraft.content} maxLength={20000} placeholder="Cole ou escreva o contexto" onChange={(event) => { const content = event.target.value; setContextDraft((current) => ({ ...current, content, title: contextTitleEdited ? current.title : contextTitleFromContent(content) })); }} /><button className="primary-button compact" type="button" disabled={saving || !contextDraft.title.trim() || !contextDraft.content.trim()} onClick={() => void addContext()}><Save size={15} /> Salvar contexto</button></div>
         <div className="workspace-context-list">{workspace.contexts.map((context) => <article key={context.id}><div><strong>{context.title}</strong>{context.category && <small>{context.category}</small>}<p>{context.content}</p>{context.source_client_context_id && <small>Disponivel na biblioteca do cliente · versao {context.source_version}</small>}</div><button className="icon-button danger" type="button" title="Retirar contexto deste projeto" onClick={() => void mutateWorkspace(`contexts/${encodeURIComponent(context.id)}`, "DELETE")}><Trash2 size={15} /></button></article>)}</div>
         {!workspace.contexts.length && <p className="workspace-empty">Nenhum contexto cadastrado nesta Etapa 0.</p>}
       </div>}

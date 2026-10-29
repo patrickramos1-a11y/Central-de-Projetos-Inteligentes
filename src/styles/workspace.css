@@ -80,8 +80,8 @@
 .workspace-prompt-shortcuts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .workspace-prompt-shortcuts button { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 8px 9px; border: 1px solid #bbd7cd; border-radius: 5px; color: #146b59; background: #f4fbf8; font: inherit; font-size: .78rem; cursor: pointer; }
 .workspace-prompt-shortcuts button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workspace-context-form { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, .8fr); gap: 7px; padding: 10px; border: 1px solid #d4e2dd; border-radius: 6px; background: #f8fbfa; }
-.workspace-context-form textarea { grid-column: 1 / -1; min-height: 86px; resize: vertical; }
+.workspace-context-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 7px; padding: 10px; border: 1px solid #d4e2dd; border-radius: 6px; background: #f8fbfa; }
+.workspace-context-form textarea { min-height: 86px; resize: vertical; }
 .workspace-context-form .primary-button { justify-self: start; }
 .workspace-context-list { display: grid; gap: 6px; }
 .workspace-context-list article { display: flex; align-items: flex-start; gap: 10px; padding: 10px; border-left: 3px solid #6f68b5; border-radius: 4px; background: #f6f5ff; }
@@ -103,7 +103,6 @@
   .workspace-reference-actions { margin-top: 7px; flex-wrap: wrap; }
   .workspace-tool-body { padding-left: 0; }
   .workspace-prompt-shortcuts, .workspace-context-form { grid-template-columns: minmax(0, 1fr); }
-  .workspace-context-form textarea { grid-column: auto; }
   .modal-backdrop:has(.client-workspaces-dialog) { padding: 8px; }
   .client-workspaces-dialog { width: 100%; }
 }

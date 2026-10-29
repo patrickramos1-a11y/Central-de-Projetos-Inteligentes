@@ -87,7 +87,7 @@ import { StatusBadge, type StatusTone } from "../components/ui/StatusBadge";
 import { AppShell, CommandBar, JourneyContextBar, WorkCanvas } from "../components/ui/LayoutPrimitives";
 import { ProjectWorkspacePanel } from "../features/workspace/ProjectWorkspacePanel";
 import { ClientWorkspacesDialog } from "../features/workspace/ClientWorkspacesDialog";
-import { WORKSPACE_STEP_ID, type ProjectWorkspace, type WorkspaceOverview } from "../features/workspace/workspaceModel";
+import { selectWorkspaceContextPrompts, WORKSPACE_STEP_ID, type ProjectWorkspace, type WorkspaceOverview } from "../features/workspace/workspaceModel";
 
 type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
 type ProjectStatus = "planejado" | "em_andamento" | "concluido" | "bloqueado" | "arquivado";
@@ -2870,7 +2870,7 @@ export default function App() {
           <section className="journey-hero journey-context-bar"><button className="ghost-button" type="button" onClick={() => setView("projects")}><PanelLeft size={17} /> Projetos</button><div className="journey-context-copy"><span className="eyebrow">Ramos Jornadas</span><h1>{selectedProject.name}</h1><p>{selectedProject.company || "Projeto sem empresa definida"}</p></div></section>
           <section className="journey-layout block-journey-layout">
             <JourneyStepRail ownerType="project" ownerId={selectedProject.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "concluido" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "em_andamento" : "pendente", status_label: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "Organizado" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "Parcial" : "Nao iniciado" }, ...projectSteps]} selectedStepId={WORKSPACE_STEP_ID} onSelectStep={setSelectedStepId} />
-            <section className="work-surface block-work-surface"><ProjectWorkspacePanel key={selectedProject.id} baseUrl={cloudflareApiUrl} projectId={selectedProject.id} contextPrompts={tables.prompts.filter((prompt) => normalizeSearch(prompt.title, prompt.short_description, prompt.content).includes("context")).slice(0, 3).map((prompt) => ({ id: prompt.id, name: prompt.title, content: prompt.content }))} onChanged={onWorkspaceChanged} onOpenStep={setSelectedStepId} /></section>
+            <section className="work-surface block-work-surface"><ProjectWorkspacePanel key={selectedProject.id} baseUrl={cloudflareApiUrl} projectId={selectedProject.id} contextPrompts={selectWorkspaceContextPrompts(tables.prompts)} onChanged={onWorkspaceChanged} onOpenStep={setSelectedStepId} /></section>
           </section>
         </>}
 
@@ -3317,6 +3317,9 @@ function ProjectsView({
 }
 
 function projectOwnerTone(name: string) {
+  const knownOwnerTones: Record<string, number> = { DARLEY: 5, GABI: 1, JR: 3, PATRICK: 2, VANESSA: 4 };
+  const knownTone = knownOwnerTones[name.trim().toUpperCase()];
+  if (knownTone) return knownTone;
   let hash = 0;
   for (const character of name) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
   return (hash % 5) + 1;
@@ -3350,16 +3353,20 @@ function ProjectPortfolioRow({ row, client, workspace, onOpen, onShare, onEdit, 
   const primaryActionLabel = primaryAction === "workspace"
     ? `Completar local de trabalho de ${row.name}${workspaceGapLabel ? `: ${workspaceGapLabel.toLowerCase()}` : ""}`
     : primaryAction === "reopen" ? `Reabrir ${row.name}` : primaryAction === "disabled" ? "Projeto ja concluido ou arquivado" : `Concluir ${row.name}`;
+  const clientNameParts = row.clientName.trim().split(/\s+/);
+  const clientFirstLine = clientNameParts.shift() ?? row.clientName;
+  const clientSecondLine = clientNameParts.join(" ");
+  const projectDisplayName = row.clientName && row.clientName !== "Sem cliente vinculado" ? `${row.name} - ${row.clientName}` : row.name;
 
   return (
     <article className="projects-row" role="listitem" data-status={row.displayStatus}>
       <span className="projects-cell projects-client" title={row.clientName}>
         {client?.logo_url
           ? <ClientLogo client={client} small />
-          : <span className="projects-client-name">{row.clientName}</span>}
+          : <span className="projects-client-name"><span>{clientFirstLine}</span>{clientSecondLine && <span>{clientSecondLine}</span>}</span>}
       </span>
       <div className="projects-cell projects-project">
-        <button type="button" onClick={onOpen} title={row.name}>{row.name}</button>
+        <button type="button" onClick={onOpen} title={projectDisplayName}>{projectDisplayName}</button>
       </div>
       <span className="projects-cell projects-type" title={row.templateName}>{row.templateName}</span>
       <span className="projects-cell projects-owner">

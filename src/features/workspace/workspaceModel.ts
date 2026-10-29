@@ -58,6 +58,36 @@ export type ProjectWorkspace = WorkspaceOverview & {
   guidance: string;
 };
 
+export type WorkspaceContextPrompt = { id: string; name: string; content: string };
+
+const canonicalContextPrompts = [
+  { id: "fe70d1e9-c897-46a3-b724-66a74ac242c5", tokens: ["criacao", "contexto", "conversa"] },
+  { id: "4f391d66-1de0-4213-8683-1e28f505e482", tokens: ["extracao", "dados", "arquivos"] },
+  { id: "e57aae02-0dcb-47ad-890f-9b7745aae850", tokens: ["consolidacao", "contextos", "comentarios", "diretrizes"] },
+] as const;
+
+function normalizedPromptTitle(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+export function selectWorkspaceContextPrompts(prompts: Array<{ id: string; title: string; content: string }>): WorkspaceContextPrompt[] {
+  const selected = new Set<string>();
+  return canonicalContextPrompts.flatMap((definition) => {
+    const prompt = prompts.find((item) => item.id === definition.id)
+      ?? prompts.find((item) => {
+        const title = normalizedPromptTitle(item.title);
+        return definition.tokens.every((token) => title.includes(token));
+      });
+    if (!prompt || selected.has(prompt.id)) return [];
+    selected.add(prompt.id);
+    return [{ id: prompt.id, name: prompt.title, content: prompt.content }];
+  });
+}
+
+export function contextTitleFromContent(content: string): string {
+  return content.split(/\r?\n/).map((line) => line.trim()).find(Boolean)?.slice(0, 160) ?? "";
+}
+
 export function workspaceStatus(directoryCount: number, conversationCount: number, conversationNotApplicable: boolean): WorkspaceStatus {
   if (directoryCount > 0 && (conversationCount > 0 || conversationNotApplicable)) return "organizado";
   if (directoryCount > 0 || conversationCount > 0 || conversationNotApplicable) return "parcial";

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { browserAccessibleUrl, workspaceMissing, workspaceProvider, workspaceStatus } from "./workspaceModel";
+import { browserAccessibleUrl, contextTitleFromContent, selectWorkspaceContextPrompts, workspaceMissing, workspaceProvider, workspaceStatus } from "./workspaceModel";
 import { buildManagementAttentionRows, buildManagementClientRows, buildManagementProjectRows } from "../management/managementModel";
 import { buildProjectListRows, filterProjectListRows } from "../projects/projectListModel";
 
@@ -31,6 +31,25 @@ describe("local de trabalho", () => {
     expect(workspaceProvider("support", "https://notebooklm.google.com/notebook/123")).toBe("notebooklm");
     expect(workspaceProvider("support", "https://drive.google.com/drive/folders/123")).toBe("google-drive");
     expect(workspaceProvider("support", "https://example.com/file")).toBe("link");
+  });
+
+  test("selects the three canonical context prompts in journey order", () => {
+    const prompts = [
+      { id: "generic", title: "INICIO DE CONVERSA PARA ELABORACAO DE PROJETOS AMBIENTAIS", content: "ignore" },
+      { id: "e57aae02-0dcb-47ad-890f-9b7745aae850", title: "CONSOLIDACAO DE CONTEXTOS, COMENTARIOS E DIRETRIZES", content: "third" },
+      { id: "4f391d66-1de0-4213-8683-1e28f505e482", title: "EXTRACAO DE DADOS DE ARQUIVOS", content: "second" },
+      { id: "fe70d1e9-c897-46a3-b724-66a74ac242c5", title: "CRIACAO DE CONTEXTO A PARTIR DA CONVERSA", content: "first" },
+    ];
+    expect(selectWorkspaceContextPrompts(prompts).map((prompt) => prompt.id)).toEqual([
+      "fe70d1e9-c897-46a3-b724-66a74ac242c5",
+      "4f391d66-1de0-4213-8683-1e28f505e482",
+      "e57aae02-0dcb-47ad-890f-9b7745aae850",
+    ]);
+  });
+
+  test("uses the first non-empty line as a suggested context title", () => {
+    expect(contextTitleFromContent("\n  Diagnostico consolidado  \nDemais informacoes")).toBe("Diagnostico consolidado");
+    expect(contextTitleFromContent("   ")).toBe("");
   });
 
   test("historically completed project needs regularization without changing its saved status", () => {
