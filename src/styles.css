@@ -9534,3 +9534,15 @@ body {
   .client-detail-target { grid-column: 1 / -1; grid-row: 2; padding-left: 4px; }
   .client-detail-actions { grid-column: 3; grid-row: 1; }
 }
+
+/* Compact journey controls and stage organization */
+.rail-heading .rail-heading-actions { display: flex; align-items: center; gap: 4px; }
+.rail-heading .rail-add-button { color: #08735b; border-color: #b7d8cc; background: #edf9f4; }
+.step-rail-navigation.is-compact .rail-heading .rail-heading-actions { display: flex; }
+.step-rail-navigation.is-compact .rail-heading { justify-content: center; }
+.step-manager-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; margin: 3px 0 12px; }
+.step-manager-add input { min-width: 0; height: 38px; padding: 0 10px; border: 1px solid #bfd2cb; border-radius: 5px; background: #fff; }
+
+@media (max-width: 760px) {
+  .step-manager-add { grid-template-columns: 1fr; }
+}

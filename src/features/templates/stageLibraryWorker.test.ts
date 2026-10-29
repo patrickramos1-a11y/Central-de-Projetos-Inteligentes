@@ -6,7 +6,8 @@ function database() {
   const sqlite = new Database(":memory:");
   sqlite.exec(`
     pragma foreign_keys = on;
-    create table journey_templates (id text primary key);
+    create table clients (id text primary key, name text);
+    create table journey_templates (id text primary key, name text);
     create table journey_steps (id text primary key, journey_template_id text, name text, description text);
     create table journey_step_documents (id text primary key, owner_type text, owner_id text, step_id text, schema_version integer, version_number integer, revision integer, state text, title text, document_json text, created_at text, updated_at text, published_at text);
     create table journey_template_versions (id text primary key, template_id text, snapshot_json text, updated_at text);
@@ -15,10 +16,12 @@ function database() {
     create table journey_stage_library (id text primary key, name text, description text, status text, current_version integer, document_json text, created_at text, updated_at text);
     create table journey_stage_versions (stage_id text, version integer, name text, description text, document_json text, created_at text, primary key(stage_id, version));
     create table template_stage_links (template_id text, template_step_id text, stage_id text, linked_version integer, auto_update integer, created_at text, updated_at text, primary key(template_id, template_step_id));
+    create table journey_template_client_scopes (template_id text primary key, client_id text, created_at text, updated_at text);
+    create table journey_stage_client_scopes (stage_id text primary key, client_id text, created_at text, updated_at text);
   `);
   const oldDocument = { schemaVersion: 1, ownerType: "template", templateId: "t", stepId: "ts", structureId: "doc", title: "Antiga", status: "ativo", state: "published", versionNumber: 1, revision: 1, blocks: [], completionRules: [] };
   const snapshot = { schemaVersion: 1, templateId: "t", name: "Modelo", description: "", projectTypeId: null, clientId: null, workspaceGuidance: "", steps: [{ id: "ts", name: "Antiga", description: "", stepOrder: 1, document: oldDocument }] };
-  sqlite.exec(`insert into journey_templates values ('t'); insert into journey_steps values ('ts','t','Antiga',null); insert into projects values ('p'); insert into project_steps values ('ps','p','Antiga');`);
+  sqlite.exec(`insert into journey_templates values ('t','Modelo'); insert into journey_steps values ('ts','t','Antiga',null); insert into projects values ('p'); insert into project_steps values ('ps','p','Antiga');`);
   sqlite.query("insert into journey_step_documents values (?,?,?,?,1,1,1,'published',?,?,?,?,?)").run("doc", "template", "t", "ts", "Antiga", JSON.stringify(oldDocument), "2026-01-01", "2026-01-01", "2026-01-01");
   sqlite.query("insert into journey_template_versions values ('tv','t',?,'2026-01-01')").run(JSON.stringify(snapshot));
   sqlite.query("insert into journey_stage_library values ('s','Antiga',null,'active',1,?,'2026-01-01','2026-01-01')").run(JSON.stringify({ schemaVersion: 1, blocks: [], completionRules: [] }));
@@ -48,5 +51,22 @@ test("shared stage updates linked templates while preserving existing projects",
     const saved = JSON.parse((sqlite.query("select snapshot_json from journey_template_versions where id = 'tv'").get() as { snapshot_json: string }).snapshot_json);
     expect(saved.steps[0]).toMatchObject({ name: "Levantamento", sourceStageId: "s", sourceStageVersion: 2 });
     expect(saved.steps[0].document.blocks[0]).toMatchObject({ title: "Pre-requisitos", type: "checklist" });
+  } finally { sqlite.close(); }
+});
+
+test("stage catalog exposes template origin and keeps client stages scoped", async () => {
+  const { sqlite, db } = database();
+  try {
+    sqlite.exec("insert into clients values ('c','ADVANCE'); insert into journey_template_client_scopes values ('t','c','2026-01-01','2026-01-01'); insert into journey_stage_client_scopes values ('s','c','2026-01-01','2026-01-01')");
+    const clientResponse = await handleStageLibraryRequest(new Request("https://example.test/api/stage-library?scope=client"), { DB: db }, ["api", "stage-library"]);
+    expect(clientResponse?.status).toBe(200);
+    const clientBody = await clientResponse?.json() as { data: Array<Record<string, unknown>> };
+    expect(clientBody.data).toHaveLength(1);
+    expect(clientBody.data[0]).toMatchObject({ clientId: "c", clientName: "ADVANCE", usageCount: 1 });
+    expect(clientBody.data[0].templateUses).toEqual([{ templateId: "t", templateName: "Modelo", templateStepId: "ts", clientId: "c", clientName: "ADVANCE" }]);
+
+    const globalResponse = await handleStageLibraryRequest(new Request("https://example.test/api/stage-library?scope=global"), { DB: db }, ["api", "stage-library"]);
+    const globalBody = await globalResponse?.json() as { data: unknown[] };
+    expect(globalBody.data).toHaveLength(0);
   } finally { sqlite.close(); }
 });

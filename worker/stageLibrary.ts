@@ -2,7 +2,8 @@ import type { TemplateBlock, TemplateSnapshot } from "../src/features/templates/
 
 type Env = { DB: D1Database };
 type StageDocument = { schemaVersion: 1; blocks: TemplateBlock[]; completionRules: Array<{ id: string; type: string; enabled: boolean; message?: string }> };
-type StageRow = { id: string; name: string; description: string | null; status: string; current_version: number; document_json: string; created_at: string; updated_at: string; usage_count?: number };
+type StageRow = { id: string; name: string; description: string | null; status: string; current_version: number; document_json: string; created_at: string; updated_at: string; usage_count?: number; client_id?: string | null; client_name?: string | null };
+type StageUseRow = { stage_id: string; template_id: string; template_name: string; template_step_id: string; client_id: string | null; client_name: string | null };
 const headers = { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*" };
 const reply = (data: unknown, status = 200) => new Response(JSON.stringify({ data }), { status, headers });
 const fail = (message: string, status = 400) => new Response(JSON.stringify({ error: message }), { status, headers });
@@ -20,13 +21,48 @@ function stageDocument(raw: unknown): StageDocument {
   return { schemaVersion: 1, blocks, completionRules: Array.isArray(value.completionRules) ? value.completionRules as StageDocument["completionRules"] : [] };
 }
 
-function expose(row: StageRow) {
-  return { ...row, currentVersion: Number(row.current_version), usageCount: Number(row.usage_count ?? 0), document: stageDocument(row.document_json) };
+function expose(row: StageRow, uses: StageUseRow[] = []) {
+  return {
+    ...row,
+    currentVersion: Number(row.current_version),
+    usageCount: Number(row.usage_count ?? 0),
+    clientId: row.client_id ?? null,
+    clientName: row.client_name ?? null,
+    templateUses: uses.map((use) => ({ templateId: use.template_id, templateName: use.template_name, templateStepId: use.template_step_id, clientId: use.client_id, clientName: use.client_name })),
+    document: stageDocument(row.document_json),
+  };
 }
 
 async function stageById(db: D1Database, id: string) {
-  return db.prepare(`select s.*, (select count(*) from template_stage_links l where l.stage_id = s.id and l.auto_update = 1) as usage_count
-    from journey_stage_library s where s.id = ?`).bind(id).first<StageRow>();
+  return db.prepare(`select s.*, scope.client_id, client.name as client_name,
+      (select count(*) from template_stage_links l where l.stage_id = s.id and l.auto_update = 1) as usage_count
+    from journey_stage_library s
+    left join journey_stage_client_scopes scope on scope.stage_id = s.id
+    left join clients client on client.id = scope.client_id
+    where s.id = ?`).bind(id).first<StageRow>();
+}
+
+async function stageUses(db: D1Database, stageIds?: string[]) {
+  if (stageIds && !stageIds.length) return new Map<string, StageUseRow[]>();
+  const placeholders = stageIds?.map(() => "?").join(", ");
+  const where = placeholders ? `where links.stage_id in (${placeholders})` : "";
+  const query = db.prepare(`select links.stage_id, links.template_id, template.name as template_name, links.template_step_id,
+      scope.client_id, client.name as client_name
+    from template_stage_links links
+    join journey_templates template on template.id = links.template_id
+    left join journey_template_client_scopes scope on scope.template_id = links.template_id
+    left join clients client on client.id = scope.client_id
+    ${where}
+    order by lower(template.name), template.id`);
+  const rows = stageIds ? await query.bind(...stageIds).all<StageUseRow>() : await query.all<StageUseRow>();
+  const grouped = new Map<string, StageUseRow[]>();
+  for (const row of rows.results ?? []) grouped.set(row.stage_id, [...(grouped.get(row.stage_id) ?? []), row]);
+  return grouped;
+}
+
+async function exposeOne(db: D1Database, row: StageRow) {
+  const uses = await stageUses(db, [row.id]);
+  return expose(row, uses.get(row.id) ?? []);
 }
 
 function remapDocument(document: StageDocument, templateId: string, stepId: string, structureId: string, name: string, version: number) {
@@ -65,44 +101,67 @@ export async function handleStageLibraryRequest(request: Request, env: Env, part
   const id = parts[2];
   try {
     if (!id && request.method === "GET") {
-      const rows = await env.DB.prepare(`select s.*, (select count(*) from template_stage_links l where l.stage_id = s.id and l.auto_update = 1) as usage_count
-        from journey_stage_library s order by case s.status when 'active' then 0 else 1 end, lower(s.name), s.id`).all<StageRow>();
-      return reply((rows.results ?? []).map(expose));
+      const url = new URL(request.url);
+      const scope = url.searchParams.get("scope") ?? "all";
+      const clientId = url.searchParams.get("clientId");
+      const rows = await env.DB.prepare(`select s.*, client_scope.client_id, client.name as client_name,
+          (select count(*) from template_stage_links l where l.stage_id = s.id and l.auto_update = 1) as usage_count
+        from journey_stage_library s
+        left join journey_stage_client_scopes client_scope on client_scope.stage_id = s.id
+        left join clients client on client.id = client_scope.client_id
+        where (? = 'all')
+           or (? = 'global' and client_scope.client_id is null)
+           or (? = 'client' and client_scope.client_id is not null)
+           or (? = 'available' and (client_scope.client_id is null or client_scope.client_id = ?))
+        order by case s.status when 'active' then 0 else 1 end, lower(s.name), s.id`)
+        .bind(scope, scope, scope, scope, clientId).all<StageRow>();
+      const list = rows.results ?? [];
+      const uses = await stageUses(env.DB, list.map((row) => row.id));
+      return reply(list.map((row) => expose(row, uses.get(row.id) ?? [])));
     }
     if (!id && request.method === "POST") {
       const body = await request.json() as Record<string, unknown>;
       const name = String(body.name ?? "Nova etapa").trim() || "Nova etapa";
       const description = String(body.description ?? "").trim() || null;
+      const clientId = String(body.clientId ?? "").trim() || null;
       const stageId = crypto.randomUUID(); const timestamp = new Date().toISOString(); const document = stageDocument(body.document);
-      await env.DB.batch([
+      if (clientId && !(await env.DB.prepare("select id from clients where id = ?").bind(clientId).first())) return fail("Cliente da etapa nao encontrado.", 404);
+      const statements = [
         env.DB.prepare("insert into journey_stage_library (id, name, description, status, current_version, document_json, created_at, updated_at) values (?, ?, ?, 'active', 1, ?, ?, ?)").bind(stageId, name, description, JSON.stringify(document), timestamp, timestamp),
         env.DB.prepare("insert into journey_stage_versions (stage_id, version, name, description, document_json, created_at) values (?, 1, ?, ?, ?, ?)").bind(stageId, name, description, JSON.stringify(document), timestamp),
-      ]);
-      return reply(expose((await stageById(env.DB, stageId))!), 201);
+      ];
+      if (clientId) statements.push(env.DB.prepare("insert into journey_stage_client_scopes (stage_id, client_id, created_at, updated_at) values (?, ?, ?, ?)").bind(stageId, clientId, timestamp, timestamp));
+      await env.DB.batch(statements);
+      return reply(await exposeOne(env.DB, (await stageById(env.DB, stageId))!), 201);
     }
     const current = id ? await stageById(env.DB, id) : null;
     if (!current) return fail("Etapa da biblioteca nao encontrada.", 404);
-    if (request.method === "GET") return reply(expose(current));
+    if (request.method === "GET") return reply(await exposeOne(env.DB, current));
     if (request.method === "DELETE") {
       const timestamp = new Date().toISOString();
       await env.DB.prepare("update journey_stage_library set status = 'archived', updated_at = ? where id = ?").bind(timestamp, id).run();
-      return reply(expose((await stageById(env.DB, id))!));
+      return reply(await exposeOne(env.DB, (await stageById(env.DB, id))!));
     }
     if (request.method === "PUT") {
       const body = await request.json() as Record<string, unknown>;
       if (Number(body.expectedVersion) !== Number(current.current_version)) return fail("Esta etapa foi alterada em outra sessao. Atualize antes de salvar.", 409);
       const name = String(body.name ?? current.name).trim();
       const description = String(body.description ?? current.description ?? "").trim() || null;
+      const clientId = body.clientId === undefined ? current.client_id ?? null : String(body.clientId ?? "").trim() || null;
       if (!name || name.length > 180) return fail("Informe um nome de ate 180 caracteres.");
+      if (clientId && !(await env.DB.prepare("select id from clients where id = ?").bind(clientId).first())) return fail("Cliente da etapa nao encontrado.", 404);
       const document = stageDocument(body.document ?? current.document_json);
       const version = Number(current.current_version) + 1; const timestamp = new Date().toISOString();
       const next = { ...current, name, description };
-      await env.DB.batch([
+      const statements = [
         env.DB.prepare("update journey_stage_library set name = ?, description = ?, current_version = ?, document_json = ?, updated_at = ? where id = ? and current_version = ?").bind(name, description, version, JSON.stringify(document), timestamp, id, current.current_version),
         env.DB.prepare("insert into journey_stage_versions (stage_id, version, name, description, document_json, created_at) values (?, ?, ?, ?, ?, ?)").bind(id, version, name, description, JSON.stringify(document), timestamp),
-      ]);
+        env.DB.prepare("delete from journey_stage_client_scopes where stage_id = ?").bind(id),
+      ];
+      if (clientId) statements.push(env.DB.prepare("insert into journey_stage_client_scopes (stage_id, client_id, created_at, updated_at) values (?, ?, ?, ?)").bind(id, clientId, timestamp, timestamp));
+      await env.DB.batch(statements);
       const updatedTemplates = await updateLinkedTemplates(env.DB, next, document, version, timestamp);
-      return reply({ ...expose((await stageById(env.DB, id))!), updatedTemplates });
+      return reply({ ...await exposeOne(env.DB, (await stageById(env.DB, id))!), updatedTemplates });
     }
     return fail("Metodo nao permitido.", 405);
   } catch (error) { return fail(error instanceof Error ? error.message : "Falha na biblioteca de etapas.", 500); }

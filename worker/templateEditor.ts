@@ -321,6 +321,11 @@ export async function publishTemplateDraft(db: D1Database, id: string, expectedR
   statements.push(db.prepare("delete from template_draft_files where template_id = ?").bind(id));
   statements.push(db.prepare("update journey_templates set name = ?, description = ?, project_type_id = ?, status = 'ativo' where id = ?")
     .bind(snapshot.name, snapshot.description || null, snapshot.projectTypeId, id));
+  statements.push(db.prepare("delete from journey_template_client_scopes where template_id = ?").bind(id));
+  if (snapshot.clientId) {
+    statements.push(db.prepare("insert into journey_template_client_scopes (template_id, client_id, created_at, updated_at) values (?, ?, ?, ?)")
+      .bind(id, snapshot.clientId, timestamp, timestamp));
+  }
   statements.push(db.prepare("insert into template_workspace_guidance (template_id, guidance, updated_at) values (?, ?, ?) on conflict(template_id) do update set guidance = excluded.guidance, updated_at = excluded.updated_at")
     .bind(id, snapshot.workspaceGuidance, timestamp));
   statements.push(db.prepare("update journey_template_versions set state = 'published', snapshot_json = ?, updated_at = ?, published_at = ? where id = ? and revision = ? and state = 'draft'")

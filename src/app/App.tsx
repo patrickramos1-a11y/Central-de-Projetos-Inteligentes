@@ -102,7 +102,7 @@ function compactStepLabel(name: string) {
 
 type RailStep = { id: string; name: string; step_order: number; status: StepStatus; is_not_applicable?: boolean; compact_label?: string; status_label?: string };
 
-function JourneyStepRail({ ownerType, ownerId, currentUser, steps, selectedStepId, onSelectStep, onOrganize }: { ownerType: "project" | "client"; ownerId: string; currentUser: AppUser | null; steps: RailStep[]; selectedStepId: string; onSelectStep: (id: string) => void; onOrganize?: () => void }) {
+function JourneyStepRail({ ownerType, ownerId, currentUser, steps, selectedStepId, onSelectStep, onAdd, onOrganize }: { ownerType: "project" | "client"; ownerId: string; currentUser: AppUser | null; steps: RailStep[]; selectedStepId: string; onSelectStep: (id: string) => void; onAdd?: () => void; onOrganize?: () => void }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [loadedKey, setLoadedKey] = useState("");
   const preferenceKey = `${ownerType}:${ownerId}:${currentUser?.id ?? ""}`;
@@ -139,7 +139,7 @@ function JourneyStepRail({ ownerType, ownerId, currentUser, steps, selectedStepI
   }
 
   return <aside className={`step-rail step-rail-navigation ${isExpanded ? "is-expanded" : "is-compact"}`} aria-label="Navegacao de etapas" data-loaded={loadedKey === preferenceKey}>
-    <div className="rail-heading"><div><strong>Etapas</strong>{isExpanded && <span>{steps.filter((step) => step.status === "concluido").length} concluidas</span>}</div><button className="icon-button rail-toggle-button" type="button" title={compactLabel} aria-label={compactLabel} onClick={toggleRail}><PanelLeft size={16} /></button>{isExpanded && onOrganize && <button className="rail-edit-button" type="button" title="Organizar etapas" onClick={onOrganize}><Pencil size={14} /> Editar</button>}</div>
+    <div className="rail-heading"><div><strong>Etapas</strong>{isExpanded && <span>{steps.filter((step) => step.status === "concluido").length} concluidas</span>}</div><div className="rail-heading-actions"><button className="icon-button rail-toggle-button" type="button" title={compactLabel} aria-label={compactLabel} onClick={toggleRail}><PanelLeft size={16} /></button>{onAdd && <button className="icon-button rail-add-button" type="button" title="Adicionar etapa" aria-label="Adicionar etapa" onClick={onAdd}><Plus size={16} /></button>}</div>{isExpanded && onOrganize && <button className="rail-edit-button" type="button" title="Organizar etapas" onClick={onOrganize}><Pencil size={14} /> Editar</button>}</div>
     <nav className="step-rail-list">{steps.map((step) => {
       const status = step.is_not_applicable ? "nao-aplicavel" : step.status;
       const statusLabel = step.status_label ?? (step.is_not_applicable ? "Nao se aplica" : formatStepStatus(step.status));
@@ -2869,7 +2869,7 @@ export default function App() {
         {view === "journey" && selectedStepId === WORKSPACE_STEP_ID && selectedProject && <>
           <section className="journey-hero journey-context-bar"><button className="ghost-button" type="button" onClick={() => setView("projects")}><PanelLeft size={17} /> Projetos</button><div className="journey-context-copy"><span className="eyebrow">Ramos Jornadas</span><h1>{selectedProject.name}</h1><p>{selectedProject.company || "Projeto sem empresa definida"}</p></div></section>
           <section className="journey-layout block-journey-layout">
-            <JourneyStepRail ownerType="project" ownerId={selectedProject.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "concluido" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "em_andamento" : "pendente", status_label: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "Organizado" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "Parcial" : "Nao iniciado" }, ...projectSteps]} selectedStepId={WORKSPACE_STEP_ID} onSelectStep={setSelectedStepId} />
+            <JourneyStepRail ownerType="project" ownerId={selectedProject.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "concluido" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "em_andamento" : "pendente", status_label: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "Organizado" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "Parcial" : "Nao iniciado" }, ...projectSteps]} selectedStepId={WORKSPACE_STEP_ID} onSelectStep={setSelectedStepId} onAdd={() => void addNextStep(selectedProject.id, "Nova etapa")} />
             <section className="work-surface block-work-surface"><ProjectWorkspacePanel key={selectedProject.id} baseUrl={cloudflareApiUrl} projectId={selectedProject.id} contextPrompts={selectWorkspaceContextPrompts(tables.prompts)} onChanged={onWorkspaceChanged} onOpenStep={setSelectedStepId} /></section>
           </section>
         </>}
@@ -3436,7 +3436,7 @@ function ProjectTemplatesView({
   onEditorDirtyChange: (dirty: boolean) => void;
 }) {
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(initialTemplateId);
-  const [templateSection, setTemplateSection] = useState<"templates" | "stages">("templates");
+  const [templateSection, setTemplateSection] = useState<"templates" | "stages" | "clientStages">("templates");
   const [createError, setCreateError] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const allTemplates = tables.journey_templates
@@ -3477,9 +3477,9 @@ function ProjectTemplatesView({
       </section>
       {createError && <p role="alert" className="form-error">{createError}</p>}
 
-      <div className="template-section-tabs" role="tablist" aria-label="Organizacao dos modelos"><button type="button" role="tab" aria-selected={templateSection === "templates"} onClick={() => setTemplateSection("templates")}><Route size={16} /> Templates</button><button type="button" role="tab" aria-selected={templateSection === "stages"} onClick={() => setTemplateSection("stages")}><Layers3 size={16} /> Etapas salvas</button></div>
+      <div className="template-section-tabs" role="tablist" aria-label="Organizacao dos modelos"><button type="button" role="tab" aria-selected={templateSection === "templates"} onClick={() => setTemplateSection("templates")}><Route size={16} /> Templates</button><button type="button" role="tab" aria-selected={templateSection === "stages"} onClick={() => setTemplateSection("stages")}><Layers3 size={16} /> Etapas salvas</button><button type="button" role="tab" aria-selected={templateSection === "clientStages"} onClick={() => setTemplateSection("clientStages")}><Users size={16} /> Etapas dos clientes</button></div>
 
-      {templateSection === "stages" ? <StageLibraryPanel baseUrl={cloudflareApiUrl} onChanged={onRefresh} /> : <>
+      {templateSection === "stages" ? <StageLibraryPanel baseUrl={cloudflareApiUrl} scope="global" onChanged={onRefresh} /> : templateSection === "clientStages" ? <StageLibraryPanel baseUrl={cloudflareApiUrl} scope="client" clients={tables.clients.map((client) => ({ id: client.id, name: client.name }))} onChanged={onRefresh} /> : <>
 
       <section className="list-panel">
         <div className="panel-heading template-panel-heading">
@@ -3529,8 +3529,13 @@ function ProjectTemplatesView({
                   <span>{prompts.length} prompts</span>
                   {pendingPrompts > 0 && <span className="warning-chip">{pendingPrompts} pendentes</span>}
                 </div>
+                <div className="template-card-stage-list" aria-label={`Etapas de ${template.name}`}>
+                  {steps.map((step, index) => <div key={step.id}><span>{index + 1}</span><strong>{step.name}</strong><small>{step.description || "Sem descricao"}</small></div>)}
+                  {!steps.length && <p>Nenhuma etapa. Abra o editor para montar este template.</p>}
+                </div>
                 <div className="template-card-actions">
-                  <button className="secondary-button compact" type="button" onClick={(event) => { event.stopPropagation(); setEditingTemplateId(template.id); }}><Route size={16} /> Abrir jornada</button>
+                  <button className="secondary-button compact" type="button" onClick={(event) => { event.stopPropagation(); setEditingTemplateId(template.id); }}><Route size={16} /> Organizar etapas</button>
+                  <button className="secondary-button compact" type="button" onClick={(event) => { event.stopPropagation(); setEditingTemplateId(template.id); }}><Plus size={16} /> Adicionar etapa</button>
                   <button className="icon-button danger" type="button" title="Excluir template" onClick={(event) => { event.stopPropagation(); void onDelete(template); }}><Trash2 size={18} /></button>
                 </div>
               </article>
@@ -4797,7 +4802,7 @@ function JourneyView({
       </section>
 
       <section className="journey-layout block-journey-layout">
-        <JourneyStepRail ownerType="project" ownerId={project.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: workspace?.status === "organizado" ? "concluido" : workspace?.status === "parcial" ? "em_andamento" : "pendente", status_label: workspace?.status === "organizado" ? "Organizado" : workspace?.status === "parcial" ? "Parcial" : "Nao iniciado" }, ...steps]} selectedStepId={selectedStepId} onSelectStep={onSelectStep} onOrganize={() => setIsStepManagerOpen(true)} />
+        <JourneyStepRail ownerType="project" ownerId={project.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: workspace?.status === "organizado" ? "concluido" : workspace?.status === "parcial" ? "em_andamento" : "pendente", status_label: workspace?.status === "organizado" ? "Organizado" : workspace?.status === "parcial" ? "Parcial" : "Nao iniciado" }, ...steps]} selectedStepId={selectedStepId} onSelectStep={onSelectStep} onAdd={() => setIsStepManagerOpen(true)} onOrganize={() => setIsStepManagerOpen(true)} />
 
         <section className="work-surface block-work-surface">
           <CommandBar mode={journeyMode}>
@@ -4957,6 +4962,10 @@ function JourneyView({
               <div><span className="eyebrow">Organizacao da jornada</span><h2>Etapas do projeto</h2></div>
               <button className="icon-button" type="button" title="Fechar" onClick={() => setIsStepManagerOpen(false)}><X size={17} /></button>
             </div>
+            <form className="step-manager-add" onSubmit={(event) => { event.preventDefault(); onAddNextStep(project.id, newStepName || "Nova etapa"); setNewStepName(""); }}>
+              <input value={newStepName} onChange={(event) => setNewStepName(event.target.value)} placeholder="Nome da nova etapa" aria-label="Nome da nova etapa" />
+              <button className="primary-button compact" type="submit"><Plus size={15} /> Adicionar etapa</button>
+            </form>
             <div className="step-manager-list">
               {[...steps].sort(byOrder).map((step, index) => (
                 <article className={`step-manager-row ${step.is_not_applicable ? "nao-aplicavel" : ""} ${step.id === selectedStepId ? "active" : ""}`} key={step.id}>
