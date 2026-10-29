@@ -3003,10 +3003,10 @@ type NewClientFormState = {
 
 const projectColumns: { key: ProjectSortColumn; label: string }[] = [
   { key: "client", label: "Cliente" },
-  { key: "age", label: "Tempo" },
   { key: "name", label: "Projeto" },
   { key: "template", label: "Template" },
   { key: "responsible", label: "Responsavel" },
+  { key: "age", label: "Tempo" },
   { key: "progress", label: "Execucao" },
   { key: "status", label: "Status" },
 ];
@@ -3356,10 +3356,7 @@ function ProjectPortfolioRow({ row, client, workspace, onOpen, onShare, onEdit, 
       <span className="projects-cell projects-client" title={row.clientName}>
         {client?.logo_url
           ? <ClientLogo client={client} small />
-          : <>{client && <ClientLogo client={client} small />}<span>{row.clientName}</span></>}
-      </span>
-      <span className={`projects-cell projects-age ${age.available ? "" : "unavailable"}`} title={age.title} aria-label={age.title}>
-        <strong>{age.label}</strong><small>{age.detail}</small>
+          : <span className="projects-client-name">{row.clientName}</span>}
       </span>
       <div className="projects-cell projects-project">
         <button type="button" onClick={onOpen} title={row.name}>{row.name}</button>
@@ -3369,6 +3366,9 @@ function ProjectPortfolioRow({ row, client, workspace, onOpen, onShare, onEdit, 
         <span className="projects-owner-tag" data-tone={projectOwnerTone(ownerName)} title={`Responsavel: ${ownerName}`}>
           <span className="projects-owner-initials" aria-hidden="true">{ownerInitials}</span>{ownerName}
         </span>
+      </span>
+      <span className={`projects-cell projects-age ${age.available ? "" : "unavailable"}`} title={age.title} aria-label={age.title}>
+        <strong>{age.label}</strong><small>{age.detail}</small>
       </span>
       <span className="projects-cell projects-execution" aria-label={`${row.completedSteps} de ${row.totalSteps} etapas concluidas; ${row.progress}% do projeto`}>
         <strong>{row.totalSteps ? `${row.completedSteps}/${row.totalSteps}` : "Sem etapas"}</strong>

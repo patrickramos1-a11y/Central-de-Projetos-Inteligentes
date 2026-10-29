@@ -239,7 +239,7 @@
 .projects-column-head,
 .projects-row {
   display: grid;
-  grid-template-columns: minmax(82px, .72fr) minmax(72px, .64fr) minmax(170px, 2fr) minmax(110px, 1fr) minmax(100px, .92fr) minmax(125px, 1.1fr) minmax(115px, 1fr) 142px;
+  grid-template-columns: minmax(82px, .72fr) minmax(170px, 2fr) minmax(110px, 1fr) minmax(100px, .92fr) minmax(72px, .64fr) minmax(125px, 1.1fr) minmax(115px, 1fr) 142px;
   align-items: center;
   gap: 10px;
 }
@@ -394,7 +394,15 @@
   gap: 8px;
 }
 
-.projects-client > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.projects-client-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #2d6c63;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.15;
+  white-space: normal;
+}
 .projects-client .client-logo.small {
   width: 46px;
   height: 34px;
