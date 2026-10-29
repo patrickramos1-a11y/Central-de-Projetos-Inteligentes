@@ -5,10 +5,11 @@ import { buildProjectListRows, filterProjectListRows, getProjectAge, groupProjec
 const baseRows = buildManagementProjectRows({
   clients: [{ id: "client-1", name: "Bento Sushi" }, { id: "client-2", name: "Advance" }],
   projectTypes: [{ id: "type-pca", name: "PCA" }, { id: "type-ria", name: "RIA" }],
+  templates: [{ id: "template-pca", name: "Template PCA" }, { id: "template-ria", name: "Template RIA" }],
   users: [{ id: "user-1", name: "Patrick" }],
   projects: [
-    { id: "pca", name: "PCA Bento Sushi", company: "Bento Sushi", client_id: null, project_type_id: null, responsible: "Patrick", responsible_user_id: null, status: "em_andamento", updated_at: "2026-01-02" },
-    { id: "ria", name: "RIA Advance", company: "Outro nome", client_id: "client-2", project_type_id: null, responsible: null, responsible_user_id: "user-1", status: "em_andamento", updated_at: "2026-01-03" },
+    { id: "pca", name: "PCA Bento Sushi", company: "Bento Sushi", client_id: null, project_type_id: null, journey_template_id: "template-pca", responsible: "Patrick", responsible_user_id: null, status: "em_andamento", updated_at: "2026-01-02" },
+    { id: "ria", name: "RIA Advance", company: "Outro nome", client_id: "client-2", project_type_id: null, journey_template_id: "template-ria", responsible: null, responsible_user_id: "user-1", status: "em_andamento", updated_at: "2026-01-03" },
   ],
   steps: [],
 });
@@ -36,18 +37,19 @@ describe("projectListModel", () => {
     expect(withSummary.find((row) => row.id === "ria")?.displayStatus).toBe("concluido");
   });
 
-  test("groups by linked or legacy client, type, or no group", () => {
+  test("groups by linked or legacy client, template, operational status, or no group", () => {
     const rows = buildProjectListRows(baseRows, [], []);
     expect(groupProjectListRows(rows, "client").map((group) => group.label)).toEqual(["Advance", "Bento Sushi"]);
-    expect(groupProjectListRows(rows, "type").map((group) => group.label)).toEqual(["RIA", "PCA"]);
+    expect(groupProjectListRows(rows, "template").map((group) => group.label)).toEqual(["Template RIA", "Template PCA"]);
+    expect(groupProjectListRows(rows, "status").map((group) => group.label)).toEqual(["Em andamento · Local nao verificado"]);
     expect(groupProjectListRows(rows, "none")).toHaveLength(1);
   });
 
-  test("filters by effective status, client, type and responsible name", () => {
+  test("filters by effective status, client, template and responsible name", () => {
     const rows = buildProjectListRows(baseRows, [{ project_id: "ria", name: "Iniciar", status: "concluido" }], []);
-    const defaults = { search: "", status: "todos" as const, responsible: "todos", type: "todos" };
+const defaults = { search: "", status: "todos" as const, responsible: "todos", template: "todos" };
     expect(filterProjectListRows(rows, { ...defaults, status: "concluido" }).map((row) => row.id)).toEqual(["ria"]);
-    expect(filterProjectListRows(rows, { ...defaults, search: "bento", type: "PCA", responsible: "Patrick" }).map((row) => row.id)).toEqual(["pca"]);
+    expect(filterProjectListRows(rows, { ...defaults, search: "bento", template: "Template PCA", responsible: "Patrick" }).map((row) => row.id)).toEqual(["pca"]);
     expect(filterProjectListRows(rows, { ...defaults, search: "advance" }).map((row) => row.id)).toEqual(["ria"]);
   });
 
@@ -57,7 +59,7 @@ describe("projectListModel", () => {
     expect(sortProjectListRows(rows, "progress", "asc").map((row) => row.id)).toEqual(["pca", "ria"]);
     expect(sortProjectListRows(rows, "client", "desc").map((row) => row.id)).toEqual(["pca", "ria"]);
     expect(rows.map((row) => row.id)).toEqual(original);
-    const defaults = { search: "", status: "todos" as const, responsible: "todos", type: "todos" };
+    const defaults = { search: "", status: "todos" as const, responsible: "todos", template: "todos" };
     expect(filterProjectListRows(rows, { ...defaults, project: "Bento", client: "Bento Sushi", progressBand: "0" }).map((row) => row.id)).toEqual(["pca"]);
     expect(filterProjectListRows(rows, { ...defaults, progressBand: "100" }).map((row) => row.id)).toEqual(["ria"]);
     expect(filterProjectListRows(rows, { ...defaults, ageBand: "unknown" }).map((row) => row.id)).toEqual(original);
@@ -76,7 +78,13 @@ describe("projectListModel", () => {
     ]);
     expect(rows.find((row) => row.id === "pca")).toMatchObject({ displayStatus: "em_andamento", workspaceGap: "directory" });
     expect(rows.find((row) => row.id === "ria")?.workspaceGap).toBe("organized");
-    const defaults = { search: "", status: "em_andamento" as const, responsible: "todos", type: "todos" };
+    expect(groupProjectListRows(rows, "status").map((group) => group.label)).toEqual([
+      "Em andamento · Diretorio pendente",
+      "Em andamento · Local organizado",
+    ]);
+    expect(sortProjectListRows(rows, "status", "asc").map((row) => row.id)).toEqual(["pca", "ria"]);
+    expect(sortProjectListRows(rows, "status", "desc").map((row) => row.id)).toEqual(["ria", "pca"]);
+    const defaults = { search: "", status: "em_andamento" as const, responsible: "todos", template: "todos" };
     expect(filterProjectListRows(rows, { ...defaults, workspaceGap: "directory" }).map((row) => row.id)).toEqual(["pca"]);
     expect(filterProjectListRows(rows, { ...defaults, workspaceGap: "organized" }).map((row) => row.id)).toEqual(["ria"]);
     expect(filterProjectListRows(rows, { ...defaults, workspaceGap: "both" })).toEqual([]);
@@ -89,8 +97,8 @@ describe("projectListModel", () => {
     });
     const rows = buildProjectListRows(completed, [{ project_id: "manual", name: "Entrega", status: "pendente" }], []);
     expect(rows[0]).toMatchObject({ displayStatus: "concluido", progress: 0, completedSteps: 0, totalSteps: 1 });
-    expect(filterProjectListRows(rows, { search: "", status: "concluido", responsible: "todos", type: "todos" })).toHaveLength(1);
-    expect(filterProjectListRows(rows, { search: "", status: "em_andamento", responsible: "todos", type: "todos" })).toHaveLength(0);
+    expect(filterProjectListRows(rows, { search: "", status: "concluido", responsible: "todos", template: "todos" })).toHaveLength(1);
+    expect(filterProjectListRows(rows, { search: "", status: "em_andamento", responsible: "todos", template: "todos" })).toHaveLength(0);
   });
 
   test("open filter includes planned and blocked projects but not archived", () => {
@@ -102,7 +110,7 @@ describe("projectListModel", () => {
       ],
       clients: [], projectTypes: [], users: [], steps: [],
     }), [], []);
-    const filters = { search: "", status: "em_andamento" as const, responsible: "todos", type: "todos" };
+    const filters = { search: "", status: "em_andamento" as const, responsible: "todos", template: "todos" };
     expect(filterProjectListRows(rows, filters).map((row) => row.id)).toEqual(["planned", "blocked"]);
   });
 

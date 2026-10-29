@@ -42,12 +42,12 @@ describe("local de trabalho", () => {
     expect(buildManagementClientRows([], before)).toEqual([]);
     const list = buildProjectListRows(before, [{ project_id: "p", name: "Entrega", status: "concluido" }], [], [pending]);
     expect(list[0].displayStatus).toBe("em_andamento");
-    expect(filterProjectListRows(list, { search: "", status: "concluido", responsible: "todos", type: "todos" })).toHaveLength(0);
+    expect(filterProjectListRows(list, { search: "", status: "concluido", responsible: "todos", template: "todos" })).toHaveLength(0);
 
     const after = buildManagementProjectRows({ ...input, workspaces: [organized] });
     expect(after[0]).toMatchObject({ historicalStatus: "concluido", status: "concluido", regularizationPending: false, completedSteps: 2, totalSteps: 2, progress: 100 });
     const completedList = buildProjectListRows(after, [{ project_id: "p", name: "Entrega", status: "concluido" }], [], [organized]);
-    expect(filterProjectListRows(completedList, { search: "", status: "concluido", responsible: "todos", type: "todos" })).toHaveLength(1);
+    expect(filterProjectListRows(completedList, { search: "", status: "concluido", responsible: "todos", template: "todos" })).toHaveLength(1);
   });
 
   test("new project gets one fixed step without inflating progress from extra links", () => {

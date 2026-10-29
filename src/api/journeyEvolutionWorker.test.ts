@@ -31,6 +31,9 @@ function fixture() {
   const migration = readFileSync(new URL("../../cloudflare/migrations/0019_template_versions_client_contexts.sql", import.meta.url), "utf8");
   sqlite.exec(migration);
   sqlite.exec(migration);
+  const stageMigration = readFileSync(new URL("../../cloudflare/migrations/0021_workspace_tools_stage_library.sql", import.meta.url), "utf8");
+  sqlite.exec(stageMigration);
+  sqlite.exec(stageMigration);
   const templateDocument = { schemaVersion: 1, ownerType: "template", templateId: "template-a", stepId: "template-step", structureId: "template-document", title: "Inicio", status: "ativo", state: "published", versionNumber: 1, revision: 1, blocks: [{ id: "prompt-block", type: "prompt", order: 1, title: "Prompt", required: false, config: { contentSnapshot: "modelo" } }], completionRules: [] };
   const projectDocument = { ...templateDocument, ownerType: "project", projectId: "project-a", templateId: undefined, stepId: "project-step", structureId: "project-document", state: "draft", blocks: [{ id: "context-block", type: "context", order: 1, title: "Contexto", required: false, config: { contexts: [] } }] };
   sqlite.prepare("insert into journey_step_documents (id,owner_type,owner_id,step_id,schema_version,version_number,revision,state,title,document_json,created_at) values (?,?,?,?,1,1,1,?,?,?,?)")

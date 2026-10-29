@@ -2,6 +2,7 @@ import { handleProjectStepRequest } from "./blockBuilder";
 import { handleJourneyDomainRequest } from "./journeyDomain";
 import { buildTableReadQuery } from "./tableRead";
 import { handleProjectWorkspaceRequest, isProjectWorkspaceOrganized, readWorkspaceOverview } from "./projectWorkspace";
+import { handleStageLibraryRequest } from "./stageLibrary";
 
 type Env = {
   DB: D1Database;
@@ -82,6 +83,9 @@ export default {
 
       const workspaceResponse = await handleProjectWorkspaceRequest(request, env, parts);
       if (workspaceResponse) return workspaceResponse;
+
+      const stageLibraryResponse = await handleStageLibraryRequest(request, env, parts);
+      if (stageLibraryResponse) return stageLibraryResponse;
 
       const domainResponse = await handleJourneyDomainRequest(request, env, parts, url);
       if (domainResponse) {

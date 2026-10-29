@@ -47,6 +47,7 @@ import { promptToneHue } from "../features/summary/promptTone";
 import { clientKindOptions, validateClientLogo, type ClientKind } from "../features/clients/clientIdentity";
 import { ClientContextLibrary } from "../features/clients/ClientContextLibrary";
 import { ClientPortfolio } from "../features/clients/ClientPortfolio";
+import { buildJourneyLink, readJourneyLink, replaceJourneyLink } from "../features/projects/journeyLink";
 import { collapseAllBlockIds, toggleCollapsedBlockIds } from "../features/journey/blockPresentation";
 import { interpolateJourneyPrompt, journeyPromptVariableSuggestions } from "../features/journey/promptInterpolation";
 import {
@@ -77,6 +78,7 @@ import {
 } from "../features/projects/projectListModel";
 import { availableProjectTemplates, templateAfterTypeChange, templateTypeName } from "../features/projects/templateCatalog";
 import { TemplateEditor } from "../features/templates/TemplateEditor";
+import { StageLibraryPanel } from "../features/templates/StageLibraryPanel";
 import { resolvePromptContent } from "../../shared/stepBuilder";
 import { mergeSuccessfulTables, replaceProjectRows, shouldApplyRefresh, type TableResult } from "../features/data/refreshState";
 import { Toast } from "../components/ui/Toast";
@@ -597,7 +599,7 @@ function activeSecondaryTables(view: ViewMode, activeConfig: ConfigModuleKey, se
   if (view === "clients") return ["client_steps", "journey_steps"];
   if (view === "clientJourney") return ["client_steps", "client_step_checklist_items", "client_step_links", "prompts", "ai_tools", "prompt_blocks"];
   if (view === "settings") return [...new Set<keyof Tables>([activeConfig, "ai_tools", "prompt_categories", "project_types", "journey_steps"])];
-  if (view === "journey") return selectedStepId === WORKSPACE_STEP_ID ? [] : ["prompts", "ai_tools", "prompt_blocks", "project_step_prompts", "project_step_checklist_items", "project_step_links", "project_step_phases", "project_step_contexts", "journey_steps", "step_prompts"];
+  if (view === "journey") return selectedStepId === WORKSPACE_STEP_ID ? ["prompts"] : ["prompts", "ai_tools", "prompt_blocks", "project_step_prompts", "project_step_checklist_items", "project_step_links", "project_step_phases", "project_step_contexts", "journey_steps", "step_prompts"];
   return [];
 }
 
@@ -663,7 +665,8 @@ const configModules: Array<{ key: ConfigModuleKey; label: string; icon: typeof B
 ];
 
 export default function App() {
-  const [view, setView] = useState<ViewMode>("projects");
+  const initialJourneyTarget = useMemo(() => readJourneyLink(), []);
+  const [view, setView] = useState<ViewMode>(() => initialJourneyTarget ? "journey" : "projects");
   const [templateEditorTargetId, setTemplateEditorTargetId] = useState<string | null>(null);
   const [templateEditorDirty, setTemplateEditorDirty] = useState(false);
   const navigateFromTemplate = useCallback((next: ViewMode) => {
@@ -680,8 +683,8 @@ export default function App() {
     setTablesState(update);
   }, []);
   const [currentUserId, setCurrentUserId] = useState(() => localStorage.getItem("central_ia_user_id") ?? "");
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => initialJourneyTarget?.projectId ?? null);
+  const [selectedStepId, setSelectedStepId] = useState<string | null>(() => initialJourneyTarget?.stepId ?? null);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [selectedClientStepId, setSelectedClientStepId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -736,6 +739,12 @@ export default function App() {
   const lastReadFailedRef = useRef(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [tableErrors, setTableErrors] = useState<string[]>([]);
+
+  useEffect(() => {
+    replaceJourneyLink(view === "journey" && selectedProjectId
+      ? { projectId: selectedProjectId, stepId: selectedStepId || WORKSPACE_STEP_ID }
+      : null);
+  }, [view, selectedProjectId, selectedStepId]);
 
   const selectedProject = tables.projects.find((project) => project.id === selectedProjectId) ?? null;
   const projectSteps = useMemo(
@@ -806,10 +815,12 @@ export default function App() {
   }, [selectedProjectId, tables.projects]);
 
   useEffect(() => {
-    if (projectSteps.length > 0 && selectedStepId !== WORKSPACE_STEP_ID && !projectSteps.some((step) => step.id === selectedStepId)) {
+    if (selectedProjectId && loadedProjectDetails.has(selectedProjectId) &&
+        projectSteps.length > 0 && selectedStepId !== WORKSPACE_STEP_ID &&
+        !projectSteps.some((step) => step.id === selectedStepId)) {
       setSelectedStepId(projectSteps[0].id);
     }
-  }, [projectSteps, selectedStepId]);
+  }, [loadedProjectDetails, projectSteps, selectedProjectId, selectedStepId]);
 
   useEffect(() => {
     if (!selectedClientId && tables.clients.length > 0) {
@@ -1192,18 +1203,11 @@ export default function App() {
       return;
     }
 
-    if (form.journey_template_id) {
-      await instantiateTemplate(project as Project, form.journey_template_id);
-    } else {
-      await createProjectStep(project.id, {
-        name: "Primeira etapa",
-        objective: "Defina o objetivo desta etapa e adicione os primeiros prompts.",
-        status: "em_andamento",
-      });
-    }
+    if (form.journey_template_id) await instantiateTemplate(project as Project, form.journey_template_id);
 
     await loadAll();
     setSelectedProjectId(project.id);
+    setSelectedStepId(WORKSPACE_STEP_ID);
     setView("journey");
     setNotice("Projeto criado. Agora a jornada pode ser executada e ajustada.");
     setIsLoading(false);
@@ -1216,14 +1220,7 @@ export default function App() {
 
     const templateSteps = tables.journey_steps.filter((step) => step.journey_template_id === templateId && step.status === "ativo").sort(byOrder);
 
-    if (templateSteps.length === 0) {
-      await createProjectStep(project.id, {
-        name: "Primeira etapa",
-        objective: "Template sem etapas. Comece configurando a execucao real.",
-        status: "em_andamento",
-      });
-      return;
-    }
+    if (templateSteps.length === 0) return;
 
     for (const templateStep of templateSteps) {
       const { data: step } = await supabase
@@ -2873,7 +2870,7 @@ export default function App() {
           <section className="journey-hero journey-context-bar"><button className="ghost-button" type="button" onClick={() => setView("projects")}><PanelLeft size={17} /> Projetos</button><div className="journey-context-copy"><span className="eyebrow">Ramos Jornadas</span><h1>{selectedProject.name}</h1><p>{selectedProject.company || "Projeto sem empresa definida"}</p></div></section>
           <section className="journey-layout block-journey-layout">
             <JourneyStepRail ownerType="project" ownerId={selectedProject.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "concluido" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "em_andamento" : "pendente", status_label: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "Organizado" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "Parcial" : "Nao iniciado" }, ...projectSteps]} selectedStepId={WORKSPACE_STEP_ID} onSelectStep={setSelectedStepId} />
-            <section className="work-surface block-work-surface"><ProjectWorkspacePanel key={selectedProject.id} baseUrl={cloudflareApiUrl} projectId={selectedProject.id} onChanged={onWorkspaceChanged} onOpenStep={setSelectedStepId} /></section>
+            <section className="work-surface block-work-surface"><ProjectWorkspacePanel key={selectedProject.id} baseUrl={cloudflareApiUrl} projectId={selectedProject.id} contextPrompts={tables.prompts.filter((prompt) => normalizeSearch(prompt.title, prompt.short_description, prompt.content).includes("context")).slice(0, 3).map((prompt) => ({ id: prompt.id, name: prompt.title, content: prompt.content }))} onChanged={onWorkspaceChanged} onOpenStep={setSelectedStepId} /></section>
           </section>
         </>}
 
@@ -3005,12 +3002,12 @@ type NewClientFormState = {
 };
 
 const projectColumns: { key: ProjectSortColumn; label: string }[] = [
-  { key: "name", label: "Projeto" },
   { key: "client", label: "Cliente" },
-  { key: "type", label: "Tipo" },
+  { key: "age", label: "Tempo" },
+  { key: "name", label: "Projeto" },
+  { key: "template", label: "Template" },
   { key: "responsible", label: "Responsavel" },
   { key: "progress", label: "Execucao" },
-  { key: "age", label: "Tempo" },
   { key: "status", label: "Status" },
 ];
 
@@ -3046,7 +3043,7 @@ function ProjectsView({
   const [showForm, setShowForm] = useState(false);
   const [statusFilter, setStatusFilter] = useState<ProjectListStatusFilter>("em_andamento");
   const [responsibleFilter, setResponsibleFilter] = useState("todos");
-  const [typeFilter, setTypeFilter] = useState("todos");
+  const [templateFilter, setTemplateFilter] = useState("todos");
   const [projectFilter, setProjectFilter] = useState("");
   const [clientFilter, setClientFilter] = useState("todos");
   const [progressBand, setProgressBand] = useState<ProjectProgressBand>("todos");
@@ -3067,10 +3064,11 @@ function ProjectsView({
     projects: tables.projects,
     clients: tables.clients,
     projectTypes: tables.project_types,
+    templates: tables.journey_templates,
     users: tables.app_users,
     steps: tables.project_steps,
     workspaces,
-  }), [tables.projects, tables.clients, tables.project_types, tables.app_users, tables.project_steps, workspaces]);
+  }), [tables.projects, tables.clients, tables.project_types, tables.journey_templates, tables.app_users, tables.project_steps, workspaces]);
   const activeSummaryProjectIds = useMemo(() => [
     ...summaryProjectIds,
     ...tables.project_summaries.filter((summary) => summary.status !== "archived").map((summary) => summary.project_id),
@@ -3085,17 +3083,17 @@ function ProjectsView({
     search: query,
     status: statusFilter,
     responsible: responsibleFilter,
-    type: typeFilter,
+    template: templateFilter,
     project: projectFilter,
     client: clientFilter,
     progressBand,
     ageBand,
     workspaceGap: workspaceGapFilter,
-  }), [projectRows, query, statusFilter, responsibleFilter, typeFilter, projectFilter, clientFilter, progressBand, ageBand, workspaceGapFilter]);
+  }), [projectRows, query, statusFilter, responsibleFilter, templateFilter, projectFilter, clientFilter, progressBand, ageBand, workspaceGapFilter]);
   const sortedRows = useMemo(() => sortColumn ? sortProjectListRows(filteredRows, sortColumn, sortDirection) : filteredRows, [filteredRows, sortColumn, sortDirection]);
   const groupedRows = useMemo(() => groupProjectListRows(sortedRows, groupBy), [sortedRows, groupBy]);
   const responsibleOptions = useMemo(() => [...new Set(projectRows.map((row) => row.responsibleName).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [projectRows]);
-  const typeOptions = useMemo(() => [...new Set(projectRows.map((row) => row.projectTypeName))].sort((a, b) => a.localeCompare(b)), [projectRows]);
+  const templateOptions = useMemo(() => [...new Set(projectRows.map((row) => row.templateName))].sort((a, b) => a.localeCompare(b)), [projectRows]);
   const clientOptions = useMemo(() => [...new Set(projectRows.map((row) => row.clientName))].sort((a, b) => a.localeCompare(b)), [projectRows]);
 
   function toggleSort(column: ProjectSortColumn) {
@@ -3106,7 +3104,7 @@ function ProjectsView({
   function columnFilterControl(column: ProjectSortColumn) {
     if (column === "name") return <input aria-label="Filtrar por projeto" placeholder="Nome do projeto" value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)} />;
     if (column === "client") return <select aria-label="Filtrar por cliente" value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}><option value="todos">Todos os clientes</option>{clientOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>;
-    if (column === "type") return <select aria-label="Filtrar por tipo" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}><option value="todos">Todos os tipos</option>{typeOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>;
+    if (column === "template") return <select aria-label="Filtrar por template" value={templateFilter} onChange={(event) => setTemplateFilter(event.target.value)}><option value="todos">Todos os templates</option>{templateOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>;
     if (column === "responsible") return <select aria-label="Filtrar por responsavel" value={responsibleFilter} onChange={(event) => setResponsibleFilter(event.target.value)}><option value="todos">Todos os responsaveis</option>{responsibleOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>;
     if (column === "progress") return <select aria-label="Filtrar por execucao" value={progressBand} onChange={(event) => setProgressBand(event.target.value as ProjectProgressBand)}><option value="todos">Qualquer progresso</option><option value="0">0%</option><option value="1-49">1-49%</option><option value="50-99">50-99%</option><option value="100">100%</option></select>;
     if (column === "age") return <select aria-label="Filtrar por tempo" value={ageBand} onChange={(event) => setAgeBand(event.target.value as ProjectAgeBand)}><option value="todos">Qualquer tempo</option><option value="0-7">Ate 7 dias</option><option value="8-30">8 a 30 dias</option><option value="31+">Mais de 30 dias</option><option value="unknown">Sem tempo registrado</option></select>;
@@ -3117,7 +3115,7 @@ function ProjectsView({
   }
 
   function columnFilterActive(column: ProjectSortColumn) {
-    return column === "name" ? Boolean(projectFilter) : column === "client" ? clientFilter !== "todos" : column === "type" ? typeFilter !== "todos" : column === "responsible" ? responsibleFilter !== "todos" : column === "progress" ? progressBand !== "todos" : column === "age" ? ageBand !== "todos" : statusFilter !== "todos" || workspaceGapFilter !== "todos";
+    return column === "name" ? Boolean(projectFilter) : column === "client" ? clientFilter !== "todos" : column === "template" ? templateFilter !== "todos" : column === "responsible" ? responsibleFilter !== "todos" : column === "progress" ? progressBand !== "todos" : column === "age" ? ageBand !== "todos" : statusFilter !== "todos" || workspaceGapFilter !== "todos";
   }
 
   function toggleGroup(key: string) {
@@ -3190,7 +3188,7 @@ function ProjectsView({
         <div className="projects-toolbar">
           <label className="projects-search">
             <Search size={17} aria-hidden="true" />
-            <input aria-label="Buscar projetos por nome, cliente, tipo ou responsavel" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar projeto, cliente ou tipo" />
+            <input aria-label="Buscar projetos por nome, cliente, template ou responsavel" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar projeto, cliente ou template" />
           </label>
           <div className="projects-segment-field">
             <span>Status</span>
@@ -3200,18 +3198,24 @@ function ProjectsView({
               <button type="button" aria-pressed={statusFilter === "concluido"} aria-label="Projetos concluidos" title="Projetos concluidos" onClick={() => setStatusFilter("concluido")}><CheckCircle2 size={15} aria-hidden="true" /><span>Concluidos</span></button>
             </div>
           </div>
-          <label className="projects-filter">
+          <div className="projects-segment-field projects-owner-filter">
             <span>Responsavel</span>
-            <select value={responsibleFilter} onChange={(event) => setResponsibleFilter(event.target.value)}>
-              <option value="todos">Todos</option>
-              {responsibleOptions.map((name) => <option key={name} value={name}>{name}</option>)}
-            </select>
-          </label>
+            <div className="projects-owner-segment" role="group" aria-label="Filtrar por responsavel">
+              <button className="projects-owner-filter-button all" type="button" aria-label="Todos os responsaveis" title="Todos os responsaveis" aria-pressed={responsibleFilter === "todos"} onClick={() => setResponsibleFilter("todos")}>
+                <Users size={14} aria-hidden="true" />
+              </button>
+              {responsibleOptions.map((name) => (
+                <button className="projects-owner-filter-button" data-tone={projectOwnerTone(name)} type="button" key={name} aria-label={`Filtrar por ${name}`} title={name} aria-pressed={responsibleFilter === name} onClick={() => setResponsibleFilter(name)}>
+                  {getInitials(name) || "?"}
+                </button>
+              ))}
+            </div>
+          </div>
           <label className="projects-filter">
-            <span>Tipo</span>
-            <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
+            <span>Template</span>
+            <select value={templateFilter} onChange={(event) => setTemplateFilter(event.target.value)}>
               <option value="todos">Todos</option>
-              {typeOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+              {templateOptions.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
           </label>
           <div className="projects-segment-field projects-group-filter">
@@ -3219,7 +3223,8 @@ function ProjectsView({
             <div className="projects-segment projects-group-segment" role="group" aria-label="Agrupar projetos">
               <button type="button" aria-pressed={groupBy === "none"} title="Mostrar lista sem agrupamento" onClick={() => selectGrouping("none")}><PanelTop size={15} aria-hidden="true" /><span>Lista</span></button>
               <button type="button" aria-pressed={groupBy === "client"} title="Agrupar por cliente, inicialmente recolhido" onClick={() => selectGrouping("client")}><Users size={15} aria-hidden="true" /><span>Cliente</span></button>
-              <button type="button" aria-pressed={groupBy === "type"} title="Agrupar por tipo, inicialmente recolhido" onClick={() => selectGrouping("type")}><Layers3 size={15} aria-hidden="true" /><span>Tipo</span></button>
+              <button type="button" aria-pressed={groupBy === "template"} title="Agrupar por template, inicialmente recolhido" onClick={() => selectGrouping("template")}><Layers3 size={15} aria-hidden="true" /><span>Template</span></button>
+              <button type="button" aria-pressed={groupBy === "status"} title="Agrupar por status e pendencias do local, inicialmente recolhido" onClick={() => selectGrouping("status")}><ListChecks size={15} aria-hidden="true" /><span>Status</span></button>
             </div>
           </div>
           <div className="projects-mobile-controls">
@@ -3259,6 +3264,7 @@ function ProjectsView({
                     client={tables.clients.find((client) => client.id === row.clientId) ?? null}
                     workspace={workspaces.find((item) => item.projectId === row.id)}
                     onOpen={() => onOpen(row.id)}
+                    onShare={() => void copyToClipboard(buildJourneyLink(row.id), "Link da jornada")}
                     onEdit={() => { const project = tables.projects.find((item) => item.id === row.id); if (project) openProjectEditor(project); }}
                     onComplete={() => completeProject(row)}
                     onReopen={() => onUpdate(row.id, { status: "em_andamento" })}
@@ -3316,11 +3322,12 @@ function projectOwnerTone(name: string) {
   return (hash % 5) + 1;
 }
 
-function ProjectPortfolioRow({ row, client, workspace, onOpen, onEdit, onComplete, onReopen, onDelete }: {
+function ProjectPortfolioRow({ row, client, workspace, onOpen, onShare, onEdit, onComplete, onReopen, onDelete }: {
   row: ProjectListRow;
   client: Client | null;
   workspace?: WorkspaceOverview;
   onOpen: () => void;
+  onShare: () => void;
   onEdit: () => void;
   onComplete: () => void;
   onReopen: () => void;
@@ -3346,11 +3353,18 @@ function ProjectPortfolioRow({ row, client, workspace, onOpen, onEdit, onComplet
 
   return (
     <article className="projects-row" role="listitem" data-status={row.displayStatus}>
+      <span className="projects-cell projects-client" title={row.clientName}>
+        {client?.logo_url
+          ? <ClientLogo client={client} small />
+          : <>{client && <ClientLogo client={client} small />}<span>{row.clientName}</span></>}
+      </span>
+      <span className={`projects-cell projects-age ${age.available ? "" : "unavailable"}`} title={age.title} aria-label={age.title}>
+        <strong>{age.label}</strong><small>{age.detail}</small>
+      </span>
       <div className="projects-cell projects-project">
         <button type="button" onClick={onOpen} title={row.name}>{row.name}</button>
       </div>
-      <span className="projects-cell projects-client" title={row.clientName}>{client && <ClientLogo client={client} small />}<span>{row.clientName}</span></span>
-      <span className="projects-cell projects-type" title={row.projectTypeName}>{row.projectTypeName}</span>
+      <span className="projects-cell projects-type" title={row.templateName}>{row.templateName}</span>
       <span className="projects-cell projects-owner">
         <span className="projects-owner-tag" data-tone={projectOwnerTone(ownerName)} title={`Responsavel: ${ownerName}`}>
           <span className="projects-owner-initials" aria-hidden="true">{ownerInitials}</span>{ownerName}
@@ -3361,12 +3375,10 @@ function ProjectPortfolioRow({ row, client, workspace, onOpen, onEdit, onComplet
         <progress value={row.progress} max={100} aria-label={`Progresso de ${row.name}`} />
         <span>{row.progress}%</span>
       </span>
-      <span className={`projects-cell projects-age ${age.available ? "" : "unavailable"}`} title={age.title} aria-label={age.title}>
-        <strong>{age.label}</strong><small>{age.detail}</small>
-      </span>
       <span className="projects-cell projects-status">{row.regularizationPending ? <StatusPill status="regularizacao_pendente" /> : <StatusPill status={row.displayStatus} />}{showWorkspaceGap && <small className={`projects-workspace-gap ${row.workspaceGap}`} title={`Local de trabalho: ${workspaceGapLabel}`}>{workspaceGapLabel}</small>}</span>
       <div className="projects-cell projects-actions">
         <button className="projects-action-button complete" type="button" title={primaryActionLabel} aria-label={primaryActionLabel} disabled={primaryAction === "disabled"} onClick={primaryAction === "workspace" ? onOpen : primaryAction === "reopen" ? onReopen : onComplete}>{primaryAction === "workspace" ? <FolderOpen size={16} aria-hidden="true" /> : primaryAction === "reopen" ? <RefreshCw size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />}</button>
+        <button className="projects-action-button share" type="button" title={`Copiar link da jornada ${row.name}`} aria-label={`Copiar link da jornada ${row.name}`} onClick={onShare}><Link2 size={16} aria-hidden="true" /></button>
         <button className="projects-action-button edit" type="button" title={`Editar ${row.name}`} aria-label={`Editar ${row.name}`} onClick={onEdit}><Pencil size={16} aria-hidden="true" /></button>
         <button className="projects-action-button danger" type="button" title={`Excluir ${row.name}`} aria-label={`Excluir ${row.name}`} onClick={onDelete}><Trash2 size={16} aria-hidden="true" /></button>
       </div>
@@ -3417,6 +3429,7 @@ function ProjectTemplatesView({
   onEditorDirtyChange: (dirty: boolean) => void;
 }) {
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(initialTemplateId);
+  const [templateSection, setTemplateSection] = useState<"templates" | "stages">("templates");
   const [createError, setCreateError] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const allTemplates = tables.journey_templates
@@ -3456,6 +3469,10 @@ function ProjectTemplatesView({
         <button className="primary-button" type="button" onClick={() => void createEmptyTemplate()}><Plus size={17} /> Novo template</button>
       </section>
       {createError && <p role="alert" className="form-error">{createError}</p>}
+
+      <div className="template-section-tabs" role="tablist" aria-label="Organizacao dos modelos"><button type="button" role="tab" aria-selected={templateSection === "templates"} onClick={() => setTemplateSection("templates")}><Route size={16} /> Templates</button><button type="button" role="tab" aria-selected={templateSection === "stages"} onClick={() => setTemplateSection("stages")}><Layers3 size={16} /> Etapas salvas</button></div>
+
+      {templateSection === "stages" ? <StageLibraryPanel baseUrl={cloudflareApiUrl} onChanged={onRefresh} /> : <>
 
       <section className="list-panel">
         <div className="panel-heading template-panel-heading">
@@ -3523,6 +3540,8 @@ function ProjectTemplatesView({
           </div>
         )}
       </section>
+
+      </>}
 
     </>
   );

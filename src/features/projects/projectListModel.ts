@@ -19,9 +19,9 @@ export type ProjectListRow = ManagementProjectRow & {
   workspaceGap: Exclude<ProjectWorkspaceGap, "todos">;
 };
 
-export type ProjectGroupBy = "client" | "type" | "none";
+export type ProjectGroupBy = "client" | "template" | "status" | "none";
 export type ProjectListStatusFilter = "todos" | "em_andamento" | "concluido";
-export type ProjectSortColumn = "name" | "client" | "type" | "responsible" | "progress" | "age" | "status";
+export type ProjectSortColumn = "name" | "client" | "template" | "responsible" | "progress" | "age" | "status";
 export type ProjectSortDirection = "asc" | "desc";
 export type ProjectProgressBand = "todos" | "0" | "1-49" | "50-99" | "100";
 export type ProjectAgeBand = "todos" | "0-7" | "8-30" | "31+" | "unknown";
@@ -31,7 +31,7 @@ export type ProjectListFilters = {
   search: string;
   status: ProjectListStatusFilter;
   responsible: string;
-  type: string;
+  template: string;
   project?: string;
   client?: string;
   progressBand?: ProjectProgressBand;
@@ -51,6 +51,45 @@ export type ProjectAge = {
   title: string;
   available: boolean;
 };
+
+const workspaceGapLabels: Record<Exclude<ProjectWorkspaceGap, "todos">, string> = {
+  both: "Diretorio e conversa pendentes",
+  directory: "Diretorio pendente",
+  conversation: "Conversa pendente",
+  unknown: "Local nao verificado",
+  organized: "Local organizado",
+};
+
+const workspaceGapOrder: Record<Exclude<ProjectWorkspaceGap, "todos">, number> = {
+  both: 0,
+  directory: 1,
+  conversation: 2,
+  unknown: 3,
+  organized: 4,
+};
+
+const projectStatusOrder: Record<ManagementStatus, number> = {
+  bloqueado: 0,
+  planejado: 1,
+  em_andamento: 2,
+  concluido: 3,
+  arquivado: 4,
+};
+
+function projectStatusGroup(row: ProjectListRow) {
+  const baseLabel = row.regularizationPending
+    ? "Regularizacao pendente"
+    : row.displayStatus === "em_andamento" ? "Em andamento"
+    : row.displayStatus === "planejado" ? "Planejado"
+    : row.displayStatus === "bloqueado" ? "Bloqueado"
+    : row.displayStatus === "concluido" ? "Concluido"
+    : "Arquivado";
+  const showWorkspaceState = row.displayStatus !== "concluido" && row.displayStatus !== "arquivado";
+  const label = showWorkspaceState ? `${baseLabel} · ${workspaceGapLabels[row.workspaceGap]}` : baseLabel;
+  const regularizationOrder = row.regularizationPending ? 1 : 0;
+  const order = projectStatusOrder[row.displayStatus] * 100 + regularizationOrder * 10 + (showWorkspaceState ? workspaceGapOrder[row.workspaceGap] : 0);
+  return { key: `status:${String(order).padStart(3, "0")}:${normalizeManagementText(label)}`, label, order };
+}
 
 export function projectPrimaryAction(
   row: Pick<ProjectListRow, "historicalStatus" | "displayStatus" | "status" | "progress">,
@@ -103,7 +142,7 @@ function elapsedProjectDays(row: Pick<ProjectListRow, "createdAt" | "displayStat
 }
 
 export function sortProjectListRows(rows: ProjectListRow[], column: ProjectSortColumn, direction: ProjectSortDirection, now = new Date()): ProjectListRow[] {
-  const textFor = (row: ProjectListRow) => column === "name" ? row.name : column === "client" ? row.clientName : column === "type" ? row.projectTypeName : column === "responsible" ? row.responsibleName : row.displayStatus;
+  const textFor = (row: ProjectListRow) => column === "name" ? row.name : column === "client" ? row.clientName : column === "template" ? row.templateName : row.responsibleName;
   const numberFor = (row: ProjectListRow) => column === "progress" ? row.progress : elapsedProjectDays(row, now);
   return [...rows].sort((a, b) => {
     if (column === "progress" || column === "age") {
@@ -111,6 +150,11 @@ export function sortProjectListRows(rows: ProjectListRow[], column: ProjectSortC
       const right = numberFor(b);
       if (left == null || right == null) return left == null && right == null ? a.name.localeCompare(b.name, "pt-BR") : left == null ? 1 : -1;
       if (left !== right) return (left - right) * (direction === "asc" ? 1 : -1);
+    } else if (column === "status") {
+      const left = projectStatusGroup(a);
+      const right = projectStatusGroup(b);
+      const difference = left.order - right.order || left.label.localeCompare(right.label, "pt-BR", { sensitivity: "base" });
+      if (difference) return difference * (direction === "asc" ? 1 : -1);
     } else {
       const difference = textFor(a).localeCompare(textFor(b), "pt-BR", { sensitivity: "base", numeric: true });
       if (difference) return difference * (direction === "asc" ? 1 : -1);
@@ -162,7 +206,7 @@ export function filterProjectListRows(rows: ProjectListRow[], filters: ProjectLi
     if (filters.status === "concluido" && row.displayStatus !== "concluido") return false;
     if (filters.status === "em_andamento" && (row.displayStatus === "concluido" || row.displayStatus === "arquivado")) return false;
     if (filters.responsible !== "todos" && row.responsibleName !== filters.responsible) return false;
-    if (filters.type !== "todos" && row.projectTypeName !== filters.type) return false;
+    if (filters.template !== "todos" && row.templateName !== filters.template) return false;
     if (filters.workspaceGap && filters.workspaceGap !== "todos" && row.workspaceGap !== filters.workspaceGap) return false;
     if (project && !normalizeManagementText(row.name).includes(project)) return false;
     if (filters.client && filters.client !== "todos" && row.clientName !== filters.client) return false;
@@ -187,6 +231,7 @@ export function filterProjectListRows(rows: ProjectListRow[], filters: ProjectLi
       row.clientName,
       row.legacyCompany,
       row.projectTypeName,
+      row.templateName,
       row.responsibleName,
     ].join(" ")).includes(search);
   });
@@ -197,13 +242,15 @@ export function groupProjectListRows(rows: ProjectListRow[], groupBy: ProjectGro
 
   const groups = new Map<string, ProjectListGroup>();
   for (const row of rows) {
-    const label = groupBy === "client" ? row.clientName : row.projectTypeName;
-    const identifier = groupBy === "client" ? row.clientId : row.projectTypeId;
-    const key = `${groupBy}:${identifier || normalizeManagementText(label)}`;
+    const statusGroup = groupBy === "status" ? projectStatusGroup(row) : null;
+    const label = statusGroup?.label ?? (groupBy === "client" ? row.clientName : row.templateName);
+    const identifier = groupBy === "client" ? row.clientId : groupBy === "template" ? row.templateId : null;
+    const key = statusGroup?.key ?? `${groupBy}:${identifier || normalizeManagementText(label)}`;
     const group = groups.get(key) ?? { key, label, rows: [] };
     group.rows.push(row);
     groups.set(key, group);
   }
 
-  return [...groups.values()];
+  const result = [...groups.values()];
+  return groupBy === "status" ? result.sort((left, right) => left.key.localeCompare(right.key)) : result;
 }

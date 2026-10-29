@@ -27,9 +27,34 @@ export type WorkspaceOverview = {
   status: WorkspaceStatus;
 };
 
+export type WorkspaceChecklistItem = {
+  id: string;
+  project_id: string;
+  label: string;
+  is_done: boolean;
+  item_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WorkspaceContext = {
+  id: string;
+  project_id: string;
+  title: string;
+  content: string;
+  category: string | null;
+  source_client_context_id: string | null;
+  source_version: number | null;
+  context_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ProjectWorkspace = WorkspaceOverview & {
   references: WorkspaceReference[];
   manualReferences: WorkspaceReference[];
+  checklistItems: WorkspaceChecklistItem[];
+  contexts: WorkspaceContext[];
   guidance: string;
 };
 

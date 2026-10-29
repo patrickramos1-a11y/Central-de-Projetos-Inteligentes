@@ -3,6 +3,7 @@
 .workspace-stage-intro h2 { margin: 0 0 4px; font-family: Outfit, sans-serif; font-size: 1.35rem; }
 .workspace-stage-intro p { margin: 0; color: var(--text-soft, #647873); }
 .workspace-stage-intro .workspace-template-guidance { margin-top: 9px; color: #31594e; white-space: pre-wrap; }
+.workspace-stage-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .workspace-state { flex: 0 0 auto; padding: 5px 9px; border: 1px solid #aebfba; border-radius: 5px; color: #4c625b; font-size: .75rem; font-weight: 700; }
 .workspace-state.parcial { border-color: #ddbe6a; background: #fff6da; color: #805800; }
 .workspace-state.organizado { border-color: #78c9ab; background: #e3f7ed; color: #00684e; }
@@ -63,6 +64,30 @@
 .template-workspace-guidance h3 { margin: 0 0 5px; font-family: Outfit, sans-serif; font-size: 1rem; }
 .template-workspace-guidance p { margin: 0 0 10px; font-size: .82rem; }
 .template-workspace-guidance .inline-actions { margin-top: 9px; }
+.workspace-tool-section { padding: 11px 0; border-top: 1px solid #d8e4df; }
+.workspace-tool-section > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.workspace-tool-toggle { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 7px 2px; color: #183a34; background: none; border: 0; font: inherit; cursor: pointer; }
+.workspace-tool-toggle span { font-family: Outfit, sans-serif; font-weight: 700; }
+.workspace-tool-toggle small { padding: 2px 6px; border-radius: 4px; color: #226458; background: #e5f3ee; font-size: .72rem; }
+.workspace-tool-toggle svg:last-child { transition: transform .16s ease; }
+.workspace-tool-toggle svg:last-child.open { transform: rotate(180deg); }
+.workspace-tool-body { display: grid; gap: 10px; padding: 10px 0 2px 24px; }
+.workspace-quick-add { display: flex; gap: 7px; }
+.workspace-quick-add input, .workspace-context-form input, .workspace-context-form textarea { box-sizing: border-box; width: 100%; padding: 9px 10px; border: 1px solid #bfd2cb; border-radius: 5px; color: #183a34; background: #fff; font: inherit; }
+.workspace-checklist { display: grid; gap: 4px; }
+.workspace-checklist label { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 3px 6px; border-bottom: 1px solid #e5ece9; }
+.workspace-checklist label span { flex: 1; }
+.workspace-prompt-shortcuts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.workspace-prompt-shortcuts button { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 8px 9px; border: 1px solid #bbd7cd; border-radius: 5px; color: #146b59; background: #f4fbf8; font: inherit; font-size: .78rem; cursor: pointer; }
+.workspace-prompt-shortcuts button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-context-form { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, .8fr); gap: 7px; padding: 10px; border: 1px solid #d4e2dd; border-radius: 6px; background: #f8fbfa; }
+.workspace-context-form textarea { grid-column: 1 / -1; min-height: 86px; resize: vertical; }
+.workspace-context-form .primary-button { justify-self: start; }
+.workspace-context-list { display: grid; gap: 6px; }
+.workspace-context-list article { display: flex; align-items: flex-start; gap: 10px; padding: 10px; border-left: 3px solid #6f68b5; border-radius: 4px; background: #f6f5ff; }
+.workspace-context-list article > div { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.workspace-context-list p { margin: 4px 0; color: #455d56; white-space: pre-wrap; }
+.workspace-context-list small { color: #667a74; }
 .status-pill.regularizacao_pendente { background: #fff0cb; color: #805800; border-color: #d8ad48; }
 @media (max-width: 700px) {
   .modal-backdrop:has(.template-preview-modal) { padding: 8px; }
@@ -76,6 +101,9 @@
   .client-workspace-project li { flex-wrap: wrap; }
   .client-workspace-project .workspace-ref-text { flex-basis: calc(100% - 125px); }
   .workspace-reference-actions { margin-top: 7px; flex-wrap: wrap; }
+  .workspace-tool-body { padding-left: 0; }
+  .workspace-prompt-shortcuts, .workspace-context-form { grid-template-columns: minmax(0, 1fr); }
+  .workspace-context-form textarea { grid-column: auto; }
   .modal-backdrop:has(.client-workspaces-dialog) { padding: 8px; }
   .client-workspaces-dialog { width: 100%; }
 }

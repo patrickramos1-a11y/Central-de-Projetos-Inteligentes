@@ -1,4 +1,4 @@
-import { serverDirectoryPath, workspaceStatus, type WorkspaceKind, type WorkspaceReference } from "../src/features/workspace/workspaceModel";
+import { WORKSPACE_STEP_ID, serverDirectoryPath, workspaceStatus, type WorkspaceChecklistItem, type WorkspaceContext, type WorkspaceKind, type WorkspaceReference } from "../src/features/workspace/workspaceModel";
 import { mergeWorkspaceReferences, normalizeManualReference, readLinkedWorkspaceReferences } from "./workspaceLinks";
 
 type Env = { DB: D1Database };
@@ -50,11 +50,13 @@ export async function readWorkspaceOverview(db: D1Database) {
 }
 
 async function readWorkspace(db: D1Database, projectId: string) {
-  const [row, manual, linked, project] = await Promise.all([
+  const [row, manual, linked, project, checklist, contexts] = await Promise.all([
     db.prepare("select project_id, conversation_not_applicable, revision from project_workspaces where project_id = ?").bind(projectId).first<WorkspaceRow>(),
     db.prepare("select id, project_id, kind, title, target, notes, sort_order, created_at, updated_at from project_workspace_references where project_id = ? order by kind, sort_order, created_at").bind(projectId).all<WorkspaceReference>(),
     readLinkedWorkspaceReferences(db, projectId),
     db.prepare("select id, journey_template_id from projects where id = ?").bind(projectId).first<{ id: string; journey_template_id: string | null }>(),
+    db.prepare("select id, project_id, label, is_done, item_order, created_at, updated_at from project_workspace_checklist_items where project_id = ? order by item_order, created_at").bind(projectId).all<WorkspaceChecklistItem>(),
+    db.prepare("select id, project_id, title, content, category, source_client_context_id, source_version, context_order, created_at, updated_at from project_workspace_contexts where project_id = ? order by context_order, created_at").bind(projectId).all<WorkspaceContext>(),
   ]);
   if (!row || !project) return null;
   const guidance = project.journey_template_id
@@ -62,7 +64,44 @@ async function readWorkspace(db: D1Database, projectId: string) {
     : null;
   const manualReferences = (manual.results ?? []).map(normalizeManualReference);
   const references = mergeWorkspaceReferences(manualReferences, linked);
-  return { ...overviewWithReferences(row, references), references, manualReferences, guidance: guidance?.guidance ?? "" };
+  return {
+    ...overviewWithReferences(row, references), references, manualReferences,
+    checklistItems: (checklist.results ?? []).map((item) => ({ ...item, is_done: Boolean(item.is_done) })),
+    contexts: contexts.results ?? [], guidance: guidance?.guidance ?? "",
+  };
+}
+
+function shortText(value: unknown, max: number) {
+  const text = String(value ?? "").trim();
+  return text && text.length <= max ? text : "";
+}
+
+async function createWorkspaceContext(db: D1Database, projectId: string, body: Record<string, unknown>) {
+  const title = shortText(body.title, 160);
+  const content = shortText(body.content, 20000);
+  const category = shortText(body.category, 100) || null;
+  if (!title || !content) throw new Error("Informe titulo e conteudo do contexto.");
+  const project = await db.prepare("select id, client_id from projects where id = ?").bind(projectId).first<{ id: string; client_id: string | null }>();
+  if (!project) throw new Error("Projeto nao encontrado.");
+  const timestamp = new Date().toISOString();
+  const id = crypto.randomUUID();
+  let sourceId: string | null = null;
+  const statements: D1PreparedStatement[] = [];
+  if (project.client_id) {
+    sourceId = crypto.randomUUID();
+    statements.push(
+      db.prepare("insert into client_contexts (id, client_id, title, content, category, status, version, origin_type, origin_project_id, origin_step_id, origin_block_id, origin_context_id, created_at, updated_at) values (?, ?, ?, ?, ?, 'active', 1, 'project', ?, ?, 'workspace-contexts', ?, ?, ?)")
+        .bind(sourceId, project.client_id, title, content, category, projectId, WORKSPACE_STEP_ID, id, timestamp, timestamp),
+      db.prepare("insert into client_context_versions (context_id, version, title, content, category, created_at) values (?, 1, ?, ?, ?, ?)")
+        .bind(sourceId, title, content, category, timestamp),
+    );
+  }
+  statements.push(
+    db.prepare("insert into project_workspace_contexts (id, project_id, title, content, category, source_client_context_id, source_version, context_order, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, (select count(*) from project_workspace_contexts where project_id = ?), ?, ?)")
+      .bind(id, projectId, title, content, category, sourceId, sourceId ? 1 : null, projectId, timestamp, timestamp),
+    db.prepare("update project_workspaces set revision = revision + 1, updated_at = ? where project_id = ?").bind(timestamp, projectId),
+  );
+  await db.batch(statements);
 }
 
 type SubmittedReference = Pick<WorkspaceReference, "id" | "kind" | "title" | "target" | "notes">;
@@ -109,6 +148,49 @@ export async function handleProjectWorkspaceRequest(request: Request, env: Env, 
 
   if (parts[1] === "projects" && parts[2] && parts[3] === "workspace") {
     const projectId = parts[2];
+    if (parts[4] === "checklist") {
+      const itemId = parts[5];
+      const now = new Date().toISOString();
+      if (request.method === "POST" && !itemId) {
+        const body = await request.json() as Record<string, unknown>;
+        const label = shortText(body.label, 300);
+        if (!label) return fail("Informe o item do checklist.", 400);
+        await env.DB.batch([
+          env.DB.prepare("insert into project_workspace_checklist_items (id, project_id, label, is_done, item_order, created_at, updated_at) values (?, ?, ?, 0, (select count(*) from project_workspace_checklist_items where project_id = ?), ?, ?)").bind(crypto.randomUUID(), projectId, label, projectId, now, now),
+          env.DB.prepare("update project_workspaces set revision = revision + 1, updated_at = ? where project_id = ?").bind(now, projectId),
+        ]);
+      } else if (request.method === "PATCH" && itemId) {
+        const body = await request.json() as Record<string, unknown>;
+        const current = await env.DB.prepare("select label, is_done from project_workspace_checklist_items where id = ? and project_id = ?").bind(itemId, projectId).first<{ label: string; is_done: number }>();
+        if (!current) return fail("Item nao encontrado.", 404);
+        const label = body.label === undefined ? current.label : shortText(body.label, 300);
+        if (!label) return fail("Informe o item do checklist.", 400);
+        await env.DB.batch([
+          env.DB.prepare("update project_workspace_checklist_items set label = ?, is_done = ?, updated_at = ? where id = ? and project_id = ?").bind(label, body.isDone === undefined ? current.is_done : body.isDone ? 1 : 0, now, itemId, projectId),
+          env.DB.prepare("update project_workspaces set revision = revision + 1, updated_at = ? where project_id = ?").bind(now, projectId),
+        ]);
+      } else if (request.method === "DELETE" && itemId) {
+        await env.DB.batch([
+          env.DB.prepare("delete from project_workspace_checklist_items where id = ? and project_id = ?").bind(itemId, projectId),
+          env.DB.prepare("update project_workspaces set revision = revision + 1, updated_at = ? where project_id = ?").bind(now, projectId),
+        ]);
+      } else return fail("Metodo nao permitido.", 405);
+      return reply(await readWorkspace(env.DB, projectId));
+    }
+    if (parts[4] === "contexts") {
+      const contextId = parts[5];
+      const now = new Date().toISOString();
+      try {
+        if (request.method === "POST" && !contextId) await createWorkspaceContext(env.DB, projectId, await request.json() as Record<string, unknown>);
+        else if (request.method === "DELETE" && contextId) {
+          await env.DB.batch([
+            env.DB.prepare("delete from project_workspace_contexts where id = ? and project_id = ?").bind(contextId, projectId),
+            env.DB.prepare("update project_workspaces set revision = revision + 1, updated_at = ? where project_id = ?").bind(now, projectId),
+          ]);
+        } else return fail("Metodo nao permitido.", 405);
+      } catch (error) { return fail(error instanceof Error ? error.message : "Falha ao salvar contexto.", 400); }
+      return reply(await readWorkspace(env.DB, projectId));
+    }
     if (request.method === "GET") {
       const data = await readWorkspace(env.DB, projectId);
       return data ? reply(data) : fail("Projeto nao encontrado.", 404);

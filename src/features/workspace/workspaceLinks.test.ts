@@ -11,6 +11,8 @@ function database() {
     create table projects (id text, journey_template_id text);
     create table template_workspace_guidance (template_id text, guidance text);
     create table project_workspace_references (id text, project_id text, kind text, title text, target text, notes text, sort_order integer, created_at text, updated_at text);
+    create table project_workspace_checklist_items (id text, project_id text, label text, is_done integer, item_order integer, created_at text, updated_at text);
+    create table project_workspace_contexts (id text, project_id text, title text, content text, category text, source_client_context_id text, source_version integer, context_order integer, created_at text, updated_at text);
     create table project_steps (id text, project_id text, name text);
     create table project_step_links (id text, project_step_id text, title text, url text, link_order integer, created_at text);
     create table journey_step_documents (id text, owner_type text, owner_id text, step_id text, state text, document_json text, created_at text, updated_at text);

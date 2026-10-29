@@ -12,6 +12,8 @@ export type TemplateBlock = {
 
 export type TemplateStep = {
   id: string;
+  sourceStageId?: string | null;
+  sourceStageVersion?: number | null;
   name: string;
   description: string;
   stepOrder: number;

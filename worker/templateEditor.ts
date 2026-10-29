@@ -27,6 +27,16 @@ function parseSnapshot(raw: unknown): TemplateSnapshot {
   return raw as TemplateSnapshot;
 }
 
+async function hydrateStageSources(db: D1Database, snapshot: TemplateSnapshot) {
+  const links = await db.prepare("select template_step_id, stage_id, linked_version from template_stage_links where template_id = ?")
+    .bind(snapshot.templateId).all<{ template_step_id: string; stage_id: string; linked_version: number }>();
+  const byStep = new Map((links.results ?? []).map((link) => [link.template_step_id, link]));
+  return { ...snapshot, steps: snapshot.steps.map((step) => {
+    const link = byStep.get(step.id);
+    return link ? { ...step, sourceStageId: link.stage_id, sourceStageVersion: Number(link.linked_version) } : step;
+  }) };
+}
+
 function normalizeSnapshot(raw: TemplateSnapshot, templateId: string): TemplateSnapshot {
   if (!raw || !Array.isArray(raw.steps)) throw new Error("Estrutura do template invalida.");
   const name = String(raw.name ?? "").trim();
@@ -47,6 +57,8 @@ function normalizeSnapshot(raw: TemplateSnapshot, templateId: string): TemplateS
     });
     return {
       id,
+      sourceStageId: step.sourceStageId || null,
+      sourceStageVersion: Number(step.sourceStageVersion) || null,
       name: stepName,
       description: String(step.description ?? ""),
       stepOrder: index + 1,
@@ -119,8 +131,8 @@ async function legacyPublishedSnapshot(db: D1Database, id: string): Promise<Temp
 export async function getTemplateEditor(db: D1Database, id: string) {
   const publishedRow = await db.prepare("select * from journey_template_versions where template_id = ? and state = 'published' order by version_number desc limit 1").bind(id).first<Row>();
   const draftRow = await db.prepare("select * from journey_template_versions where template_id = ? and state = 'draft' limit 1").bind(id).first<Row>();
-  const published = publishedRow ? parseSnapshot(publishedRow.snapshot_json) : await legacyPublishedSnapshot(db, id);
-  const snapshot = draftRow ? parseSnapshot(draftRow.snapshot_json) : published;
+  const published = await hydrateStageSources(db, publishedRow ? parseSnapshot(publishedRow.snapshot_json) : await legacyPublishedSnapshot(db, id));
+  const snapshot = await hydrateStageSources(db, draftRow ? parseSnapshot(draftRow.snapshot_json) : published);
   const files = draftRow ? await draftFileRows(db, id) : await publishedFileRows(db, id);
   const allowed = modelBlockIds(snapshot);
   return {
@@ -263,6 +275,11 @@ export async function publishTemplateDraft(db: D1Database, id: string, expectedR
     }
   }
   for (const step of snapshot.steps) {
+    if (step.sourceStageId) {
+      const source = await db.prepare("select current_version from journey_stage_library where id = ? and status = 'active'").bind(step.sourceStageId).first<{ current_version: number }>();
+      if (!source) throw new Error(`A etapa compartilhada ${step.name} nao esta mais disponivel.`);
+      step.sourceStageVersion = Number(source.current_version);
+    }
     if (knownSteps.has(step.id)) {
       statements.push(db.prepare("update journey_steps set name = ?, description = ?, step_order = ?, status = 'ativo' where id = ? and journey_template_id = ?")
         .bind(step.name, step.description || null, step.stepOrder, step.id, id));
@@ -288,6 +305,11 @@ export async function publishTemplateDraft(db: D1Database, id: string, expectedR
   }
   for (const old of knownSteps) {
     if (!included.has(old)) statements.push(db.prepare("update journey_steps set status = 'arquivado' where id = ? and journey_template_id = ?").bind(old, id));
+  }
+  statements.push(db.prepare("delete from template_stage_links where template_id = ?").bind(id));
+  for (const step of snapshot.steps.filter((item) => item.sourceStageId)) {
+    statements.push(db.prepare("insert into template_stage_links (template_id, template_step_id, stage_id, linked_version, auto_update, created_at, updated_at) values (?, ?, ?, ?, 1, ?, ?)")
+      .bind(id, step.id, step.sourceStageId, step.sourceStageVersion ?? 1, timestamp, timestamp));
   }
   statements.push(db.prepare("delete from journey_step_files where owner_type = 'template' and owner_step_id in (select id from journey_steps where journey_template_id = ?)").bind(id));
   for (const file of activeFiles) {

@@ -10,6 +10,7 @@ export type ManagementProject = {
   responsible?: string | null;
   responsible_user_id?: string | null;
   project_type_id?: string | null;
+  journey_template_id?: string | null;
   status: ManagementStatus;
   created_at?: string | null;
   updated_at?: string | null;
@@ -25,6 +26,11 @@ export type ManagementClient = {
 };
 
 export type ManagementProjectType = {
+  id: string;
+  name: string;
+};
+
+export type ManagementTemplate = {
   id: string;
   name: string;
 };
@@ -55,6 +61,8 @@ export type ManagementProjectRow = {
   projectTypeId: string;
   hasProjectTypeLink: boolean;
   projectTypeName: string;
+  templateId: string;
+  templateName: string;
   status: ManagementStatus;
   historicalStatus: ManagementStatus;
   regularizationPending: boolean;
@@ -217,6 +225,7 @@ export function buildManagementProjectRows(input: {
   projects: ManagementProject[];
   clients: ManagementClient[];
   projectTypes: ManagementProjectType[];
+  templates?: ManagementTemplate[];
   users: ManagementUser[];
   steps: ManagementStep[];
   workspaces?: WorkspaceOverview[];
@@ -237,6 +246,7 @@ export function buildManagementProjectRows(input: {
       .sort((a, b) => (a.step_order ?? 0) - (b.step_order ?? 0))[0];
     const inferredType = inferProjectTypeName(project.name);
     const typeName = input.projectTypes.find((type) => type.id === projectTypeId)?.name ?? inferredType;
+    const template = input.templates?.find((item) => item.id === project.journey_template_id) ?? null;
 
     return {
       id: project.id,
@@ -250,6 +260,8 @@ export function buildManagementProjectRows(input: {
       projectTypeId,
       hasProjectTypeLink: Boolean(project.project_type_id && input.projectTypes.some((type) => type.id === project.project_type_id)),
       projectTypeName: typeName || "Sem tipo definido",
+      templateId: template?.id ?? "",
+      templateName: template?.name ?? "Sem template",
       status: regularizationPending ? "em_andamento" : project.status,
       historicalStatus: project.status,
       regularizationPending,
