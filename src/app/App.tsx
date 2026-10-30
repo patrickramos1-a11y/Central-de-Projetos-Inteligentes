@@ -41,6 +41,7 @@ import { createJourneyApi, type JourneyFile } from "../api/journey";
 import { createSummaryApi } from "../api/summary";
 import { parseProjectSummary } from "../lib/summaryParser";
 import { copyText as copyToClipboard } from "../components/ui/clipboard";
+import { connectCentralLive, isCentralLiveViewer, publishCentralLiveContext } from "./centralLiveBridge";
 import { resolveBoundSummary } from "../features/summary/summaryBinding";
 import { replaceSummaryState, shouldApplySummaryState, type SummaryState } from "../features/summary/summaryState";
 import { promptToneHue } from "../features/summary/promptTone";
@@ -693,6 +694,7 @@ export default function App() {
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [selectedClientStepId, setSelectedClientStepId] = useState<string | null>(null);
   const [stagePickerProjectId, setStagePickerProjectId] = useState<string | null>(null);
+  const [liveJourneyPanel, setLiveJourneyPanel] = useState<JourneyMode>("execute");
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -745,6 +747,19 @@ export default function App() {
   const lastReadFailedRef = useRef(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [tableErrors, setTableErrors] = useState<string[]>([]);
+
+  useEffect(() => connectCentralLive((context) => {
+    const allowedViews: ViewMode[] = ["projects", "journey", "projectTemplates", "clients", "clientJourney", "management", "settings"];
+    if (allowedViews.includes(context.view as ViewMode)) setView(context.view as ViewMode);
+    if (context.entityId) setSelectedProjectId(context.entityId);
+    if (context.stepId) setSelectedStepId(context.stepId);
+    if (context.panel === "execute" || context.panel === "edit") setLiveJourneyPanel(context.panel);
+  }), []);
+
+  useEffect(() => {
+    publishCentralLiveContext({ view, entityId: selectedProjectId ?? undefined,
+      stepId: selectedStepId ?? undefined, panel: liveJourneyPanel });
+  }, [view, selectedProjectId, selectedStepId, liveJourneyPanel]);
 
   useEffect(() => {
     replaceJourneyLink(view === "journey" && selectedProjectId
@@ -2955,6 +2970,8 @@ export default function App() {
         {view === "journey" && selectedStepId !== WORKSPACE_STEP_ID && currentSecondaryReady && selectedProjectId && loadedProjectDetails.has(selectedProjectId) && selectedProject && selectedStep && (
           <JourneyView
             project={selectedProject}
+            livePanel={liveJourneyPanel}
+            onLivePanelChange={setLiveJourneyPanel}
             workspace={overview.workspaces.find((item) => item.projectId === selectedProject.id)}
             steps={projectSteps}
             selectedStep={selectedStep}
@@ -4680,6 +4697,8 @@ const blockCatalog: BlockCatalogItem[] = [
 
 function JourneyView({
   project,
+  livePanel,
+  onLivePanelChange,
   workspace,
   steps,
   selectedStep,
@@ -4724,6 +4743,8 @@ function JourneyView({
   onRefreshWorkspace,
 }: {
   project: Project;
+  livePanel: JourneyMode;
+  onLivePanelChange: (mode: JourneyMode) => void;
   workspace?: WorkspaceOverview;
   steps: ProjectStep[];
   selectedStep: ProjectStep;
@@ -4784,7 +4805,8 @@ function JourneyView({
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [collapsedBlockIds, setCollapsedBlockIds] = useState<Set<string>>(() => new Set());
   const presentationSaveQueueRef = useRef(Promise.resolve());
-  const [journeyMode, setJourneyMode] = useState<JourneyMode>("execute");
+  const journeyMode = livePanel;
+  const setJourneyMode = onLivePanelChange;
   const summaries = tables.project_summaries.filter((summary) => summary.project_id === project.id);
   const summaryItems = tables.project_summary_items.filter((item) => item.project_id === project.id).sort(byOrder);
   const generatedPrompts = tables.generated_prompts.filter((prompt) => prompt.project_id === project.id);
@@ -4810,7 +4832,7 @@ function JourneyView({
       const next = await stepRequest(`/structure?userId=${encodeURIComponent(currentUser?.id ?? "")}`);
       setPayload(next);
       setCollapsedBlockIds(new Set(next.presentation?.collapsedBlockIds ?? []));
-      if (!selectedStep.is_not_applicable && next.completion.status !== selectedStep.status) {
+      if (!isCentralLiveViewer() && !selectedStep.is_not_applicable && next.completion.status !== selectedStep.status) {
         void onUpdateStep(selectedStep.id, { status: next.completion.status });
       }
     } finally {
@@ -7381,7 +7403,7 @@ function UserEntryScreen({
   const [name, setName] = useState("");
 
   return (
-    <main className="user-entry">
+    <main className="user-entry" data-central-live-local>
       <section className="user-entry-panel">
         <div className="brand">
           <span className="brand-mark">
