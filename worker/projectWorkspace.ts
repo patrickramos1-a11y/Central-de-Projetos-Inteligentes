@@ -4,39 +4,44 @@ import { mergeWorkspaceReferences, normalizeManualReference, readLinkedWorkspace
 type Env = { DB: D1Database };
 type WorkspaceRow = { project_id: string; conversation_not_applicable: number; revision: number };
 type CountRow = { project_id: string; directory_count: number; conversation_count: number; support_count: number };
+type ChecklistCountRow = { project_id: string; checklist_count: number; checklist_completed_count: number };
 type ClientRow = { id: string; name: string; company: string | null };
 
 const headers = { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*" };
 const reply = (data: unknown, status = 200) => new Response(JSON.stringify({ data }), { status, headers });
 const fail = (message: string, status: number) => new Response(JSON.stringify({ error: message }), { status, headers });
 
-export function toWorkspaceOverview(row: WorkspaceRow, counts?: CountRow) {
+export function toWorkspaceOverview(row: WorkspaceRow, counts?: CountRow, checklist?: ChecklistCountRow) {
   const directoryCount = counts?.directory_count ?? 0;
   const conversationCount = counts?.conversation_count ?? 0;
   const supportCount = counts?.support_count ?? 0;
   const conversationNotApplicable = Boolean(row.conversation_not_applicable);
+  const checklistCount = Number(checklist?.checklist_count ?? 0);
+  const checklistCompletedCount = Number(checklist?.checklist_completed_count ?? 0);
   return {
     projectId: row.project_id, directoryCount, conversationCount, supportCount,
+    checklistCount, checklistCompletedCount,
     conversationNotApplicable, revision: row.revision,
-    status: workspaceStatus(directoryCount, conversationCount, conversationNotApplicable),
+    status: workspaceStatus(directoryCount, conversationCount, conversationNotApplicable, checklistCount, checklistCompletedCount),
   };
 }
 
-function overviewWithReferences(row: WorkspaceRow, references: WorkspaceReference[]) {
+function overviewWithReferences(row: WorkspaceRow, references: WorkspaceReference[], checklist?: ChecklistCountRow) {
   const counts = {
     project_id: row.project_id,
     directory_count: references.filter((ref) => ref.kind === "directory").length,
     conversation_count: references.filter((ref) => ref.kind === "conversation").length,
     support_count: references.filter((ref) => ref.kind === "support").length,
   };
-  return toWorkspaceOverview({ ...row, conversation_not_applicable: counts.conversation_count ? 0 : row.conversation_not_applicable }, counts);
+  return toWorkspaceOverview({ ...row, conversation_not_applicable: counts.conversation_count ? 0 : row.conversation_not_applicable }, counts, checklist);
 }
 
 export async function readWorkspaceOverview(db: D1Database) {
-  const [rows, manual, linked] = await Promise.all([
+  const [rows, manual, linked, checklist] = await Promise.all([
     db.prepare("select project_id, conversation_not_applicable, revision from project_workspaces").all<WorkspaceRow>(),
     db.prepare("select id, project_id, kind, title, target, notes, sort_order, created_at, updated_at from project_workspace_references").all<WorkspaceReference>(),
     readLinkedWorkspaceReferences(db),
+    db.prepare("select project_id, count(*) as checklist_count, sum(case when is_done = 1 then 1 else 0 end) as checklist_completed_count from project_workspace_checklist_items group by project_id").all<ChecklistCountRow>(),
   ]);
   const group = (references: WorkspaceReference[]) => {
     const byProject = new Map<string, WorkspaceReference[]>();
@@ -45,8 +50,9 @@ export async function readWorkspaceOverview(db: D1Database) {
   };
   const manualByProject = group((manual.results ?? []).map(normalizeManualReference));
   const linkedByProject = group(linked);
+  const checklistByProject = new Map((checklist.results ?? []).map((item) => [item.project_id, item]));
   return (rows.results ?? []).map((row) => overviewWithReferences(row,
-    mergeWorkspaceReferences(manualByProject.get(row.project_id) ?? [], linkedByProject.get(row.project_id) ?? [])));
+    mergeWorkspaceReferences(manualByProject.get(row.project_id) ?? [], linkedByProject.get(row.project_id) ?? []), checklistByProject.get(row.project_id)));
 }
 
 async function readWorkspace(db: D1Database, projectId: string) {
@@ -64,9 +70,11 @@ async function readWorkspace(db: D1Database, projectId: string) {
     : null;
   const manualReferences = (manual.results ?? []).map(normalizeManualReference);
   const references = mergeWorkspaceReferences(manualReferences, linked);
+  const checklistItems = (checklist.results ?? []).map((item) => ({ ...item, is_done: Boolean(item.is_done) }));
+  const checklistCounts = { project_id: projectId, checklist_count: checklistItems.length, checklist_completed_count: checklistItems.filter((item) => item.is_done).length };
   return {
-    ...overviewWithReferences(row, references), references, manualReferences,
-    checklistItems: (checklist.results ?? []).map((item) => ({ ...item, is_done: Boolean(item.is_done) })),
+    ...overviewWithReferences(row, references, checklistCounts), references, manualReferences,
+    checklistItems,
     contexts: contexts.results ?? [], guidance: guidance?.guidance ?? "",
   };
 }

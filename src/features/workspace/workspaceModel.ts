@@ -1,7 +1,7 @@
 export const WORKSPACE_STEP_ID = "__project_workspace__";
 
 export type WorkspaceKind = "directory" | "conversation" | "support";
-export type WorkspaceProvider = "server" | "chatgpt" | "claude" | "notebooklm" | "google-drive" | "link";
+export type WorkspaceProvider = "server" | "chatgpt" | "claude" | "notebooklm" | "google-drive" | "google-photos" | "link";
 export type WorkspaceStatus = "nao_iniciado" | "parcial" | "organizado";
 
 export type WorkspaceReference = {
@@ -22,6 +22,8 @@ export type WorkspaceOverview = {
   directoryCount: number;
   conversationCount: number;
   supportCount: number;
+  checklistCount?: number;
+  checklistCompletedCount?: number;
   conversationNotApplicable: boolean;
   revision: number;
   status: WorkspaceStatus;
@@ -88,16 +90,20 @@ export function contextTitleFromContent(content: string): string {
   return content.split(/\r?\n/).map((line) => line.trim()).find(Boolean)?.slice(0, 160) ?? "";
 }
 
-export function workspaceStatus(directoryCount: number, conversationCount: number, conversationNotApplicable: boolean): WorkspaceStatus {
-  if (directoryCount > 0 && (conversationCount > 0 || conversationNotApplicable)) return "organizado";
-  if (directoryCount > 0 || conversationCount > 0 || conversationNotApplicable) return "parcial";
+export function workspaceStatus(directoryCount: number, conversationCount: number, conversationNotApplicable: boolean, checklistCount = 0, checklistCompletedCount = 0): WorkspaceStatus {
+  const referencesReady = directoryCount > 0 && (conversationCount > 0 || conversationNotApplicable);
+  const checklistReady = checklistCount === 0 || checklistCompletedCount >= checklistCount;
+  if (referencesReady && checklistReady) return "organizado";
+  if (directoryCount > 0 || conversationCount > 0 || conversationNotApplicable || checklistCount > 0) return "parcial";
   return "nao_iniciado";
 }
 
-export function workspaceMissing(value: Pick<WorkspaceOverview, "directoryCount" | "conversationCount" | "conversationNotApplicable">): string[] {
+export function workspaceMissing(value: Pick<WorkspaceOverview, "directoryCount" | "conversationCount" | "conversationNotApplicable"> & Partial<Pick<WorkspaceOverview, "checklistCount" | "checklistCompletedCount">>): string[] {
   const missing: string[] = [];
   if (!value.directoryCount) missing.push("um diretorio do servidor");
   if (!value.conversationCount && !value.conversationNotApplicable) missing.push("um link de conversa ou a marcacao Nao se aplica");
+  const checklistRemaining = Math.max(0, (value.checklistCount ?? 0) - (value.checklistCompletedCount ?? 0));
+  if (checklistRemaining) missing.push(`${checklistRemaining} ${checklistRemaining === 1 ? "item pendente" : "itens pendentes"} do checklist`);
   return missing;
 }
 
@@ -127,5 +133,6 @@ export function workspaceProvider(kind: WorkspaceKind, target: string): Workspac
   if (host === "claude.ai") return "claude";
   if (host === "notebooklm.google.com" || host === "notebook.google.com") return "notebooklm";
   if (host === "drive.google.com") return "google-drive";
+  if (host === "photos.google.com" || host === "photos.app.goo.gl") return "google-photos";
   return "link";
 }

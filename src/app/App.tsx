@@ -78,7 +78,7 @@ import {
 } from "../features/projects/projectListModel";
 import { availableProjectTemplates, templateAfterTypeChange, templateTypeName } from "../features/projects/templateCatalog";
 import { TemplateEditor } from "../features/templates/TemplateEditor";
-import { StageLibraryPanel } from "../features/templates/StageLibraryPanel";
+import { stagePresentation, StageLibraryPanel, type StageLibraryItem } from "../features/templates/StageLibraryPanel";
 import { resolvePromptContent } from "../../shared/stepBuilder";
 import { mergeSuccessfulTables, replaceProjectRows, shouldApplyRefresh, type TableResult } from "../features/data/refreshState";
 import { Toast } from "../components/ui/Toast";
@@ -101,12 +101,17 @@ function compactStepLabel(name: string) {
 }
 
 type RailStep = { id: string; name: string; step_order: number; status: StepStatus; is_not_applicable?: boolean; compact_label?: string; status_label?: string };
+type StageImportSelection = { stageId: string; templateStepId: string; name: string; description: string | null };
 
 function JourneyStepRail({ ownerType, ownerId, currentUser, steps, selectedStepId, onSelectStep, onAdd, onOrganize }: { ownerType: "project" | "client"; ownerId: string; currentUser: AppUser | null; steps: RailStep[]; selectedStepId: string; onSelectStep: (id: string) => void; onAdd?: () => void; onOrganize?: () => void }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showNotApplicable, setShowNotApplicable] = useState(false);
   const [loadedKey, setLoadedKey] = useState("");
   const preferenceKey = `${ownerType}:${ownerId}:${currentUser?.id ?? ""}`;
   const compactLabel = isExpanded ? "Recolher etapas" : "Expandir etapas";
+  const applicableSteps = steps.filter((step) => !step.is_not_applicable);
+  const notApplicableSteps = steps.filter((step) => step.is_not_applicable);
+  const visibleSteps = showNotApplicable ? [...applicableSteps, ...notApplicableSteps] : applicableSteps;
 
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -140,11 +145,11 @@ function JourneyStepRail({ ownerType, ownerId, currentUser, steps, selectedStepI
 
   return <aside className={`step-rail step-rail-navigation ${isExpanded ? "is-expanded" : "is-compact"}`} aria-label="Navegacao de etapas" data-loaded={loadedKey === preferenceKey}>
     <div className="rail-heading"><div><strong>Etapas</strong>{isExpanded && <span>{steps.filter((step) => step.status === "concluido").length} concluidas</span>}</div><div className="rail-heading-actions"><button className="icon-button rail-toggle-button" type="button" title={compactLabel} aria-label={compactLabel} onClick={toggleRail}><PanelLeft size={16} /></button>{onAdd && <button className="icon-button rail-add-button" type="button" title="Adicionar etapa" aria-label="Adicionar etapa" onClick={onAdd}><Plus size={16} /></button>}</div>{isExpanded && onOrganize && <button className="rail-edit-button" type="button" title="Organizar etapas" onClick={onOrganize}><Pencil size={14} /> Editar</button>}</div>
-    <nav className="step-rail-list">{steps.map((step) => {
+    <nav className="step-rail-list">{visibleSteps.map((step) => {
       const status = step.is_not_applicable ? "nao-aplicavel" : step.status;
       const statusLabel = step.status_label ?? (step.is_not_applicable ? "Nao se aplica" : formatStepStatus(step.status));
       return <button key={step.id} className={`step-item ${status} ${selectedStepId === step.id ? "active" : ""}`} type="button" title={`${step.name} - ${statusLabel}`} aria-label={`${step.name} - ${statusLabel}`} aria-current={selectedStepId === step.id ? "step" : undefined} onClick={() => onSelectStep(step.id)}><span className={`step-dot ${status}`}>{step.status === "concluido" && !step.is_not_applicable ? <Check size={13} /> : step.step_order}</span><span className="step-rail-short-label" aria-hidden="true">{step.compact_label ?? compactStepLabel(step.name)}</span><span className="step-rail-details"><strong>{step.name}</strong><small>{statusLabel}</small></span></button>;
-    })}</nav>
+    })}{notApplicableSteps.length > 0 && <button className={`step-na-summary ${showNotApplicable ? "expanded" : ""} ${notApplicableSteps.some((step) => step.id === selectedStepId) ? "active" : ""}`} type="button" aria-expanded={showNotApplicable} title={showNotApplicable ? "Recolher etapas que nao se aplicam" : `Mostrar ${notApplicableSteps.length} etapa(s) que nao se aplicam`} onClick={() => setShowNotApplicable((value) => !value)}><span>{notApplicableSteps.length}</span><small>{isExpanded ? (showNotApplicable ? "Recolher N/A" : "Nao se aplicam") : "N/A"}</small><ChevronDown size={14} /></button>}</nav>
   </aside>;
 }
 
@@ -687,6 +692,7 @@ export default function App() {
   const [selectedStepId, setSelectedStepId] = useState<string | null>(() => initialJourneyTarget?.stepId ?? null);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [selectedClientStepId, setSelectedClientStepId] = useState<string | null>(null);
+  const [stagePickerProjectId, setStagePickerProjectId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -1298,6 +1304,7 @@ export default function App() {
       .insert(
         normalizePayload({
           project_id: projectId,
+          source_journey_step_id: payload.source_journey_step_id ?? null,
           name: payload.name || "Nova etapa",
           description: payload.description ?? "",
           step_order: nextOrder,
@@ -1317,19 +1324,26 @@ export default function App() {
       return null;
     }
 
-    await initializeProjectStep(String(data.id));
+    const initialized = await initializeProjectStep(String(data.id), payload.source_journey_step_id ?? undefined);
+    if (payload.source_journey_step_id && !initialized) {
+      await supabase.from("project_steps").delete().eq("id", data.id);
+      setNotice("Nao foi possivel importar a estrutura da etapa. Nenhuma etapa incompleta foi mantida.");
+      return null;
+    }
     return data as ProjectStep;
   }
 
   async function initializeProjectStep(stepId: string, templateStepId?: string) {
     try {
-      await fetch(`${cloudflareApiUrl}/api/project-steps/${encodeURIComponent(stepId)}/initialize`, {
+      const response = await fetch(`${cloudflareApiUrl}/api/project-steps/${encodeURIComponent(stepId)}/initialize`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(templateStepId ? { templateStepId } : {}),
       });
+      return response.ok;
     } catch {
       // The canonical migration is additive. A later sync can retry initialization.
+      return false;
     }
   }
 
@@ -2253,6 +2267,32 @@ export default function App() {
     }
   }
 
+  async function importProjectStages(projectId: string, selections: StageImportSelection[]) {
+    if (!selections.length) return false;
+    const baseOrder = Math.max(0, ...tables.project_steps.filter((step) => step.project_id === projectId).map((step) => step.step_order));
+    const created: ProjectStep[] = [];
+    for (const [index, selection] of selections.entries()) {
+      const source = tables.journey_steps.find((step) => step.id === selection.templateStepId);
+      const step = await createProjectStep(projectId, {
+        source_journey_step_id: selection.templateStepId,
+        name: selection.name || source?.name || "Etapa importada",
+        description: selection.description ?? source?.description ?? "",
+        objective: source?.objective ?? "",
+        ai_tool_id: source?.ai_tool_id ?? "",
+        expected_output: source?.expected_output ?? "",
+        execution_instructions: source?.execution_instructions ?? "",
+        step_order: baseOrder + index + 1,
+      });
+      if (!step) break;
+      created.push(step);
+    }
+    if (!created.length) return false;
+    await loadAll();
+    setSelectedStepId(created[0].id);
+    setNotice(`${created.length} ${created.length === 1 ? "etapa importada" : "etapas importadas"} para a jornada.`);
+    return created.length === selections.length;
+  }
+
   async function deleteProjectStep(stepId: string) {
     const orderedSteps = tables.project_steps.filter((step) => step.project_id === selectedProjectId).sort(byOrder);
     const index = orderedSteps.findIndex((step) => step.id === stepId);
@@ -2316,6 +2356,40 @@ export default function App() {
       setNotice("Nao foi possivel editar o template agora.");
       return false;
     }
+  }
+
+  async function renameJourneyTemplateStep(stepId: string, name: string): Promise<boolean> {
+    const nextName = name.trim();
+    if (!nextName) {
+      setNotice("Informe um nome para a etapa.");
+      return false;
+    }
+    const { error } = await supabase.from("journey_steps").update({ name: nextName }).eq("id", stepId);
+    if (error) {
+      setNotice(`Erro ao renomear etapa: ${error.message}`);
+      return false;
+    }
+    setTables((current) => ({
+      ...current,
+      journey_steps: current.journey_steps.map((step) => step.id === stepId ? { ...step, name: nextName } : step),
+    }));
+    setNotice(`Etapa "${nextName}" atualizada.`);
+    return true;
+  }
+
+  async function archiveJourneyTemplateStep(step: JourneyStep): Promise<boolean> {
+    if (!window.confirm(`Retirar a etapa "${step.name}" deste template? Projetos existentes nao serao alterados.`)) return false;
+    const { error } = await supabase.from("journey_steps").update({ status: "arquivado" }).eq("id", step.id);
+    if (error) {
+      setNotice(`Erro ao retirar etapa: ${error.message}`);
+      return false;
+    }
+    setTables((current) => ({
+      ...current,
+      journey_steps: current.journey_steps.map((item) => item.id === step.id ? { ...item, status: "arquivado" } : item),
+    }));
+    setNotice(`Etapa "${step.name}" retirada do template.`);
+    return true;
   }
 
   async function deleteJourneyTemplate(template: JourneyTemplate) {
@@ -2844,7 +2918,7 @@ export default function App() {
           />
         )}
 
-        {view === "projectTemplates" && (currentSecondaryReady ? <ProjectTemplatesView tables={tables} query={query} setQuery={setQuery} onUpdate={updateJourneyTemplate} onDelete={deleteJourneyTemplate} onRefresh={loadAll} initialTemplateId={templateEditorTargetId} onEditorClosed={() => setTemplateEditorTargetId(null)} onEditorDirtyChange={setTemplateEditorDirty} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
+        {view === "projectTemplates" && (currentSecondaryReady ? <ProjectTemplatesView tables={tables} query={query} setQuery={setQuery} onUpdate={updateJourneyTemplate} onDelete={deleteJourneyTemplate} onRenameStep={renameJourneyTemplateStep} onRemoveStep={archiveJourneyTemplateStep} onRefresh={loadAll} initialTemplateId={templateEditorTargetId} onEditorClosed={() => setTemplateEditorTargetId(null)} onEditorDirtyChange={setTemplateEditorDirty} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
         {view === "clients" && (currentSecondaryReady ? <ClientsView tables={tables} workspaces={overview.workspaces} clientContextCounts={overview.clientContextCounts} currentUser={currentUser} query={query} setQuery={setQuery} onCreate={createClientJourney} onSaveIdentity={saveClientIdentity} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} onOpenProject={(id) => { setSelectedProjectId(id); setSelectedStepId(WORKSPACE_STEP_ID); setView("journey"); }} baseUrl={cloudflareApiUrl} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
@@ -2869,7 +2943,7 @@ export default function App() {
         {view === "journey" && selectedStepId === WORKSPACE_STEP_ID && selectedProject && <>
           <section className="journey-hero journey-context-bar"><button className="ghost-button" type="button" onClick={() => setView("projects")}><PanelLeft size={17} /> Projetos</button><div className="journey-context-copy"><span className="eyebrow">Ramos Jornadas</span><h1>{selectedProject.name}</h1><p>{selectedProject.company || "Projeto sem empresa definida"}</p></div></section>
           <section className="journey-layout block-journey-layout">
-            <JourneyStepRail ownerType="project" ownerId={selectedProject.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "concluido" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "em_andamento" : "pendente", status_label: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "Organizado" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "Parcial" : "Nao iniciado" }, ...projectSteps]} selectedStepId={WORKSPACE_STEP_ID} onSelectStep={setSelectedStepId} onAdd={() => void addNextStep(selectedProject.id, "Nova etapa")} />
+            <JourneyStepRail ownerType="project" ownerId={selectedProject.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "concluido" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "em_andamento" : "pendente", status_label: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "Organizado" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "Parcial" : "Nao iniciado" }, ...projectSteps]} selectedStepId={WORKSPACE_STEP_ID} onSelectStep={setSelectedStepId} onAdd={() => setStagePickerProjectId(selectedProject.id)} />
             <section className="work-surface block-work-surface"><ProjectWorkspacePanel key={selectedProject.id} baseUrl={cloudflareApiUrl} projectId={selectedProject.id} contextPrompts={selectWorkspaceContextPrompts(tables.prompts)} onChanged={onWorkspaceChanged} onOpenStep={setSelectedStepId} /></section>
           </section>
         </>}
@@ -2906,6 +2980,7 @@ export default function App() {
             onUpdateContext={updateProjectStepContext}
             onDeleteContext={deleteProjectStepContext}
             onAddNextStep={addNextStep}
+            onOpenStagePicker={() => setStagePickerProjectId(selectedProject.id)}
             onDeleteStep={deleteProjectStep}
             onSaveTemplate={saveProjectAsTemplate}
             currentUser={currentUser}
@@ -2966,9 +3041,76 @@ export default function App() {
             onTables={setTables}
           />
         )}
+        {stagePickerProjectId && <ProjectStagePicker baseUrl={cloudflareApiUrl} project={tables.projects.find((project) => project.id === stagePickerProjectId) ?? null} onClose={() => setStagePickerProjectId(null)} onCreateBlank={async () => { await addNextStep(stagePickerProjectId, "Nova etapa"); setStagePickerProjectId(null); }} onImport={async (selections) => { const completed = await importProjectStages(stagePickerProjectId, selections); if (completed) setStagePickerProjectId(null); return completed; }} />}
       </main>
     </AppShell>
   );
+}
+
+function ProjectStagePicker({ baseUrl, project, onClose, onCreateBlank, onImport }: {
+  baseUrl: string;
+  project: Project | null;
+  onClose: () => void;
+  onCreateBlank: () => Promise<void>;
+  onImport: (selections: StageImportSelection[]) => Promise<boolean>;
+}) {
+  const [items, setItems] = useState<StageLibraryItem[]>([]);
+  const [query, setQuery] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true); setError("");
+    void fetch(`${baseUrl.replace(/\/$/, "")}/api/stage-library?scope=available&clientId=${encodeURIComponent(project?.client_id ?? "")}`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        const body = await response.json() as { data?: StageLibraryItem[]; error?: string };
+        if (!response.ok || !body.data) throw new Error(body.error || "Nao foi possivel carregar as etapas.");
+        setItems(body.data.filter((item) => item.status === "active"));
+      })
+      .catch((failure) => { if (failure instanceof DOMException && failure.name === "AbortError") return; setError(failure instanceof Error ? failure.message : "Falha ao carregar etapas."); })
+      .finally(() => setLoading(false));
+    return () => controller.abort();
+  }, [baseUrl, project?.client_id]);
+
+  const visible = items.filter((item) => `${item.name} ${item.description ?? ""} ${item.clientName ?? ""} ${item.templateUses.map((use) => use.templateName).join(" ")}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  const sourceFor = (item: StageLibraryItem) => item.templateUses.find((use) => use.clientId === project?.client_id)
+    ?? item.templateUses.find((use) => use.templateId === project?.journey_template_id)
+    ?? item.templateUses[0];
+
+  async function importSelected() {
+    const selections = selectedIds.flatMap((id) => {
+      const item = items.find((candidate) => candidate.id === id);
+      const source = item ? sourceFor(item) : null;
+      return item && source ? [{ stageId: item.id, templateStepId: source.templateStepId, name: item.name, description: item.description }] : [];
+    });
+    if (!selections.length) return;
+    setBusy(true); setError("");
+    const completed = await onImport(selections);
+    if (!completed) setError("A importacao nao foi concluida por inteiro. As etapas confirmadas foram mantidas.");
+    setBusy(false);
+  }
+
+  return <div className="modal-backdrop project-stage-picker-backdrop" role="presentation" onMouseDown={onClose}>
+    <section className="project-stage-picker glass-panel" role="dialog" aria-modal="true" aria-label="Adicionar etapas ao projeto" onMouseDown={(event) => event.stopPropagation()}>
+      <div className="modal-heading"><div><span className="eyebrow">Jornada do projeto</span><h2>Adicionar etapas</h2><p>Crie uma etapa vazia ou selecione varias etapas salvas.</p></div><button className="icon-button" type="button" title="Fechar" onClick={onClose}><X size={18} /></button></div>
+      <button className="project-stage-blank" type="button" disabled={busy} onClick={() => { setBusy(true); void onCreateBlank().finally(() => setBusy(false)); }}><Plus size={20} /><span><strong>Criar etapa em branco</strong><small>Comece sem blocos e configure a estrutura depois.</small></span></button>
+      <label className="search-field project-stage-search"><Search size={16} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar etapa, template ou cliente" /></label>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div className="project-stage-picker-list">
+        {loading && <p role="status"><Loader2 className="spin" size={17} /> Carregando biblioteca...</p>}
+        {!loading && visible.map((item) => { const presentation = stagePresentation(item); const Icon = presentation.Icon; const source = sourceFor(item); return <label className={`project-stage-option ${source ? "" : "unavailable"}`} key={item.id}>
+          <input type="checkbox" disabled={!source || busy} checked={selectedIds.includes(item.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} />
+          <span className="stage-library-item-icon"><Icon size={18} /></span>
+          <span><strong>{presentation.title}</strong><small>{item.description || "Sem descricao"}</small><em>{source ? `Origem: ${source.templateName} · ${item.document.blocks.length} blocos` : "Disponivel depois de vincular a etapa a um template"}</em></span>
+        </label>; })}
+        {!loading && !visible.length && <p className="workspace-empty">Nenhuma etapa encontrada.</p>}
+      </div>
+      <div className="inline-actions project-stage-picker-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancelar</button><button className="primary-button" type="button" disabled={busy || !selectedIds.length} onClick={() => void importSelected()}>{busy ? <Loader2 className="spin" size={16} /> : <Layers3 size={16} />} Importar selecionadas ({selectedIds.length})</button></div>
+    </section>
+  </div>;
 }
 
 function DataAreaLoading({ loading, error, onRetry }: { loading: boolean; error?: string; onRetry: () => void }) {
@@ -3356,7 +3498,8 @@ function ProjectPortfolioRow({ row, client, workspace, onOpen, onShare, onEdit, 
   const clientNameParts = row.clientName.trim().split(/\s+/);
   const clientFirstLine = clientNameParts.shift() ?? row.clientName;
   const clientSecondLine = clientNameParts.join(" ");
-  const projectDisplayName = row.clientName && row.clientName !== "Sem cliente vinculado" ? `${row.name} - ${row.clientName}` : row.name;
+  const hasClientName = Boolean(row.clientName && row.clientName !== "Sem cliente vinculado");
+  const projectDisplayName = hasClientName ? `${row.name} - ${row.clientName}` : row.name;
 
   return (
     <article className="projects-row" role="listitem" data-status={row.displayStatus}>
@@ -3366,7 +3509,10 @@ function ProjectPortfolioRow({ row, client, workspace, onOpen, onShare, onEdit, 
           : <span className="projects-client-name"><span>{clientFirstLine}</span>{clientSecondLine && <span>{clientSecondLine}</span>}</span>}
       </span>
       <div className="projects-cell projects-project">
-        <button type="button" onClick={onOpen} title={projectDisplayName}>{projectDisplayName}</button>
+        <button type="button" onClick={onOpen} title={projectDisplayName}>
+          <span className="projects-project-name">{row.name}</span>
+          {hasClientName && <span className="projects-project-company"> - {row.clientName}</span>}
+        </button>
       </div>
       <span className="projects-cell projects-type" title={row.templateName}>{row.templateName}</span>
       <span className="projects-cell projects-owner">
@@ -3420,6 +3566,8 @@ function ProjectTemplatesView({
   setQuery,
   onUpdate,
   onDelete,
+  onRenameStep,
+  onRemoveStep,
   onRefresh,
   initialTemplateId,
   onEditorClosed,
@@ -3430,6 +3578,8 @@ function ProjectTemplatesView({
   setQuery: (query: string) => void;
   onUpdate: (templateId: string, payload: Pick<JourneyTemplate, "name" | "description" | "status" | "project_type_id">) => Promise<boolean>;
   onDelete: (template: JourneyTemplate) => Promise<void>;
+  onRenameStep: (stepId: string, name: string) => Promise<boolean>;
+  onRemoveStep: (step: JourneyStep) => Promise<boolean>;
   onRefresh: () => Promise<void>;
   initialTemplateId: string | null;
   onEditorClosed: () => void;
@@ -3439,6 +3589,9 @@ function ProjectTemplatesView({
   const [templateSection, setTemplateSection] = useState<"templates" | "stages" | "clientStages">("templates");
   const [createError, setCreateError] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [editingStepId, setEditingStepId] = useState<string | null>(null);
+  const [editingStepName, setEditingStepName] = useState("");
+  const [stepBusyId, setStepBusyId] = useState<string | null>(null);
   const allTemplates = tables.journey_templates
     .filter((template) => template.context === "projeto" || template.context === "geral")
     .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
@@ -3504,7 +3657,7 @@ function ProjectTemplatesView({
           <header className="template-type-heading"><Layers3 size={17} aria-hidden="true" /><h3>{templateTypeName({ project_type_id: groupId === "unclassified" ? null : groupId }, tables.project_types)}</h3><span>{templates.filter((template) => (template.project_type_id || "unclassified") === groupId).length}</span></header>
           <div className="template-grid">
           {templates.filter((template) => (template.project_type_id || "unclassified") === groupId).map((template) => {
-            const steps = tables.journey_steps.filter((step) => step.journey_template_id === template.id).sort(byOrder);
+            const steps = tables.journey_steps.filter((step) => step.journey_template_id === template.id && step.status === "ativo").sort(byOrder);
             const stepIds = new Set(steps.map((step) => step.id));
             const prompts = tables.step_prompts.filter((prompt) => stepIds.has(prompt.journey_step_id));
             const pendingPrompts = prompts.filter((prompt) => prompt.prompt_status === "pendente" || !String(prompt.content ?? "").trim()).length;
@@ -3530,7 +3683,22 @@ function ProjectTemplatesView({
                   {pendingPrompts > 0 && <span className="warning-chip">{pendingPrompts} pendentes</span>}
                 </div>
                 <div className="template-card-stage-list" aria-label={`Etapas de ${template.name}`}>
-                  {steps.map((step, index) => <div key={step.id}><span>{index + 1}</span><strong>{step.name}</strong><small>{step.description || "Sem descricao"}</small></div>)}
+                  {steps.map((step, index) => <div className="template-card-stage-row" key={step.id}>
+                    <span>{index + 1}</span>
+                    {editingStepId === step.id ? <form className="template-stage-inline-form" onSubmit={(event) => {
+                      event.preventDefault(); event.stopPropagation(); setStepBusyId(step.id);
+                      void onRenameStep(step.id, editingStepName).then((saved) => { if (saved) setEditingStepId(null); }).finally(() => setStepBusyId(null));
+                    }} onClick={(event) => event.stopPropagation()}>
+                      <input autoFocus value={editingStepName} onChange={(event) => setEditingStepName(event.target.value)} aria-label={`Novo nome de ${step.name}`} />
+                      <button className="icon-button" type="submit" title="Salvar nome" disabled={stepBusyId === step.id}><Check size={15} /></button>
+                      <button className="icon-button" type="button" title="Cancelar" onClick={() => setEditingStepId(null)}><X size={15} /></button>
+                    </form> : <strong>{step.name}</strong>}
+                    <small>{step.description || "Sem descricao"}</small>
+                    <span className="template-stage-inline-actions">
+                      <button className="icon-button" type="button" title={`Renomear ${step.name}`} onClick={(event) => { event.stopPropagation(); setEditingStepId(step.id); setEditingStepName(step.name); }}><Pencil size={14} /></button>
+                      <button className="icon-button danger" type="button" title={`Retirar ${step.name} deste template`} disabled={stepBusyId === step.id} onClick={(event) => { event.stopPropagation(); setStepBusyId(step.id); void onRemoveStep(step).finally(() => setStepBusyId(null)); }}><Trash2 size={14} /></button>
+                    </span>
+                  </div>)}
                   {!steps.length && <p>Nenhuma etapa. Abra o editor para montar este template.</p>}
                 </div>
                 <div className="template-card-actions">
@@ -4537,6 +4705,7 @@ function JourneyView({
   onUpdateContext,
   onDeleteContext,
   onAddNextStep,
+  onOpenStagePicker,
   onDeleteStep,
   onSaveTemplate,
   currentUser,
@@ -4580,6 +4749,7 @@ function JourneyView({
   onUpdateContext: (contextId: string, payload: Partial<ProjectStepContext>) => void;
   onDeleteContext: (contextId: string) => void;
   onAddNextStep: (projectId: string, name: string) => void;
+  onOpenStagePicker: () => void;
   onDeleteStep: (stepId: string) => void;
   onSaveTemplate: (project: Project, request: ProjectTemplateSaveRequest) => Promise<boolean>;
   currentUser: AppUser | null;
@@ -4802,7 +4972,7 @@ function JourneyView({
       </section>
 
       <section className="journey-layout block-journey-layout">
-        <JourneyStepRail ownerType="project" ownerId={project.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: workspace?.status === "organizado" ? "concluido" : workspace?.status === "parcial" ? "em_andamento" : "pendente", status_label: workspace?.status === "organizado" ? "Organizado" : workspace?.status === "parcial" ? "Parcial" : "Nao iniciado" }, ...steps]} selectedStepId={selectedStepId} onSelectStep={onSelectStep} onAdd={() => setIsStepManagerOpen(true)} onOrganize={() => setIsStepManagerOpen(true)} />
+        <JourneyStepRail ownerType="project" ownerId={project.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: workspace?.status === "organizado" ? "concluido" : workspace?.status === "parcial" ? "em_andamento" : "pendente", status_label: workspace?.status === "organizado" ? "Organizado" : workspace?.status === "parcial" ? "Parcial" : "Nao iniciado" }, ...steps]} selectedStepId={selectedStepId} onSelectStep={onSelectStep} onAdd={onOpenStagePicker} onOrganize={() => setIsStepManagerOpen(true)} />
 
         <section className="work-surface block-work-surface">
           <CommandBar mode={journeyMode}>

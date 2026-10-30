@@ -33,6 +33,7 @@
 .workspace-provider-badge[data-provider="claude"] { border-color: #ecc1b3; color: #99452e; }
 .workspace-provider-badge[data-provider="notebooklm"] { border-color: #b9cbec; color: #3b5996; }
 .workspace-provider-badge[data-provider="google-drive"] { border-color: #e9d99f; color: #786215; }
+.workspace-provider-badge[data-provider="google-photos"] { border-color: #9ec8f4; color: #275a98; background: #f5f9ff; }
 .workspace-provider-badge[data-provider="link"] { border-color: #cad5d2; color: #536b66; }
 .workspace-reference-copy strong, .workspace-reference-copy span, .workspace-reference-copy small { overflow-wrap: anywhere; }
 .workspace-reference-copy span { color: #276d70; font-size: .85rem; }
@@ -76,6 +77,7 @@
 .workspace-quick-add input, .workspace-context-form input, .workspace-context-form textarea { box-sizing: border-box; width: 100%; padding: 9px 10px; border: 1px solid #bfd2cb; border-radius: 5px; color: #183a34; background: #fff; font: inherit; }
 .workspace-checklist { display: grid; gap: 4px; }
 .workspace-checklist label { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 3px 6px; border-bottom: 1px solid #e5ece9; }
+.workspace-checklist input[type="checkbox"] { width: 19px; height: 19px; flex: 0 0 19px; accent-color: #08a579; cursor: pointer; }
 .workspace-checklist label span { flex: 1; }
 .workspace-prompt-shortcuts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .workspace-prompt-shortcuts button { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 8px 9px; border: 1px solid #bbd7cd; border-radius: 5px; color: #146b59; background: #f4fbf8; font: inherit; font-size: .78rem; cursor: pointer; }

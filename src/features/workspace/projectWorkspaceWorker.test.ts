@@ -24,6 +24,8 @@ describe("projectWorkspace API validation", () => {
     expect(toWorkspaceOverview(row, { project_id: "p", directory_count: 0, conversation_count: 0, support_count: 50 }).status).toBe("nao_iniciado");
     expect(toWorkspaceOverview(row, { project_id: "p", directory_count: 1, conversation_count: 0, support_count: 0 }).status).toBe("parcial");
     expect(toWorkspaceOverview({ ...row, conversation_not_applicable: 1 }, { project_id: "p", directory_count: 1, conversation_count: 0, support_count: 0 }).status).toBe("organizado");
+    expect(toWorkspaceOverview({ ...row, conversation_not_applicable: 1 }, { project_id: "p", directory_count: 1, conversation_count: 0, support_count: 0 }, { project_id: "p", checklist_count: 2, checklist_completed_count: 1 }).status).toBe("parcial");
+    expect(toWorkspaceOverview({ ...row, conversation_not_applicable: 1 }, { project_id: "p", directory_count: 1, conversation_count: 0, support_count: 0 }, { project_id: "p", checklist_count: 2, checklist_completed_count: 2 }).status).toBe("organizado");
   });
 
   test("only offers legacy client names that identify one client", () => {

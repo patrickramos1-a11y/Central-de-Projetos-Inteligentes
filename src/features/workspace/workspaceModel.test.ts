@@ -13,6 +13,8 @@ describe("local de trabalho", () => {
     expect(workspaceStatus(0, 2, false)).toBe("parcial");
     expect(workspaceStatus(1, 0, true)).toBe("organizado");
     expect(workspaceStatus(1, 3, false)).toBe("organizado");
+    expect(workspaceStatus(1, 3, false, 2, 1)).toBe("parcial");
+    expect(workspaceStatus(1, 3, false, 2, 2)).toBe("organizado");
     expect(workspaceMissing(pending)).toHaveLength(2);
     expect(workspaceMissing(organized)).toEqual([]);
   });
@@ -30,6 +32,8 @@ describe("local de trabalho", () => {
     expect(workspaceProvider("conversation", "https://claude.ai/chat/123")).toBe("claude");
     expect(workspaceProvider("support", "https://notebooklm.google.com/notebook/123")).toBe("notebooklm");
     expect(workspaceProvider("support", "https://drive.google.com/drive/folders/123")).toBe("google-drive");
+    expect(workspaceProvider("support", "https://photos.google.com/share/123")).toBe("google-photos");
+    expect(workspaceProvider("support", "https://photos.app.goo.gl/abc")).toBe("google-photos");
     expect(workspaceProvider("support", "https://example.com/file")).toBe("link");
   });
 

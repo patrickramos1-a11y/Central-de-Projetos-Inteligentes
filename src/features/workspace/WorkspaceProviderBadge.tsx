@@ -6,6 +6,7 @@ const providers = {
   claude: { label: "Claude", image: "/ai-tools/claude.png" },
   notebooklm: { label: "NotebookLM", image: "/ai-tools/notebooklm.png" },
   "google-drive": { label: "Google Drive", image: "/ai-tools/google-drive.png" },
+  "google-photos": { label: "Google Fotos", image: "/ai-tools/google-photos.png" },
 } as const;
 
 export function WorkspaceProviderBadge({ kind, target }: { kind: WorkspaceKind; target: string }) {

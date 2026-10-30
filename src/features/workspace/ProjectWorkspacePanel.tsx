@@ -168,6 +168,8 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, onCh
   if (!workspace) return <section className="workspace-stage-body"><p>{loading ? "Carregando local de trabalho..." : error || "Local de trabalho indisponivel."}</p><button className="secondary-button" type="button" onClick={() => void refresh()}><RefreshCw size={16} /> Tentar novamente</button></section>;
 
   const missing = workspaceMissing(workspace);
+  const checklistIncomplete = workspace.checklistItems.length > 0 && workspace.checklistItems.some((item) => !item.is_done);
+  const checklistVisible = checklistIncomplete || checklistOpen;
   return <section className="workspace-stage-body" aria-label="Local de trabalho do projeto">
     <div className="workspace-stage-intro">
       <div><h2>Local de trabalho</h2><p>Registre onde estao os materiais e as conversas deste projeto.</p>{workspace.guidance && <p className="workspace-template-guidance">{workspace.guidance}</p>}</div>
@@ -215,10 +217,10 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, onCh
     })}
     <section className="workspace-tool-section" aria-label="Checklist do projeto">
       <header>
-        <button className="workspace-tool-toggle" type="button" aria-expanded={checklistOpen} onClick={() => setChecklistOpen((value) => { if (value) setChecklistAdding(false); return !value; })}><ClipboardCheck size={17} /><span>Checklist</span><small>{workspace.checklistItems.filter((item) => item.is_done).length}/{workspace.checklistItems.length}</small><ChevronDown size={16} className={checklistOpen ? "open" : ""} /></button>
+        <button className="workspace-tool-toggle" type="button" aria-expanded={checklistVisible} title={checklistIncomplete ? "Conclua todos os itens para poder recolher o checklist" : undefined} onClick={() => { if (checklistIncomplete) { setChecklistOpen(true); return; } setChecklistOpen((value) => { if (value) setChecklistAdding(false); return !value; }); }}><ClipboardCheck size={17} /><span>Checklist</span><small>{workspace.checklistItems.filter((item) => item.is_done).length}/{workspace.checklistItems.length}</small><ChevronDown size={16} className={checklistVisible ? "open" : ""} /></button>
         <button className="icon-button" type="button" title="Adicionar item" onClick={() => { setChecklistOpen(true); setChecklistAdding(true); }}><Plus size={16} /></button>
       </header>
-      {checklistOpen && <div className="workspace-tool-body">
+      {checklistVisible && <div className="workspace-tool-body">
         {checklistAdding && <div className="workspace-quick-add"><input autoFocus value={checklistLabel} maxLength={300} placeholder="Novo requisito" onChange={(event) => setChecklistLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void addChecklistItem(); if (event.key === "Escape") { setChecklistAdding(false); setChecklistLabel(""); } }} /><button className="primary-button compact" type="button" disabled={saving || !checklistLabel.trim()} onClick={() => void addChecklistItem()}><Plus size={15} /> Adicionar</button></div>}
         <div className="workspace-checklist">{workspace.checklistItems.map((item) => <label key={item.id}><input type="checkbox" checked={item.is_done} disabled={saving} onChange={() => void mutateWorkspace(`checklist/${encodeURIComponent(item.id)}`, "PATCH", { isDone: !item.is_done })} /><span>{item.label}</span><button className="icon-button danger" type="button" title="Excluir item" onClick={(event) => { event.preventDefault(); void mutateWorkspace(`checklist/${encodeURIComponent(item.id)}`, "DELETE"); }}><Trash2 size={15} /></button></label>)}</div>
         {!workspace.checklistItems.length && <p className="workspace-empty">Adicione os pre-requisitos e orientacoes deste projeto.</p>}

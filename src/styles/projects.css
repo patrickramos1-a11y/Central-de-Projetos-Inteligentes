@@ -380,6 +380,9 @@
   text-decoration: underline;
 }
 
+.projects-project-name { color: #203931; }
+.projects-project-company { color: #7a568e; font-weight: 700; }
+
 .projects-client,
 .projects-type {
   overflow: hidden;
