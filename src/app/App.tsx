@@ -2959,7 +2959,7 @@ export default function App() {
           <section className="journey-hero journey-context-bar"><button className="ghost-button" type="button" onClick={() => setView("projects")}><PanelLeft size={17} /> Projetos</button><div className="journey-context-copy"><span className="eyebrow">Ramos Jornadas</span><h1>{selectedProject.name}</h1><p>{selectedProject.company || "Projeto sem empresa definida"}</p></div></section>
           <section className="journey-layout block-journey-layout">
             <JourneyStepRail ownerType="project" ownerId={selectedProject.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "concluido" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "em_andamento" : "pendente", status_label: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "Organizado" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "Parcial" : "Nao iniciado" }, ...projectSteps]} selectedStepId={WORKSPACE_STEP_ID} onSelectStep={setSelectedStepId} onAdd={() => setStagePickerProjectId(selectedProject.id)} />
-            <section className="work-surface block-work-surface"><ProjectWorkspacePanel key={selectedProject.id} baseUrl={cloudflareApiUrl} projectId={selectedProject.id} contextPrompts={selectWorkspaceContextPrompts(tables.prompts)} onChanged={onWorkspaceChanged} onOpenStep={setSelectedStepId} /></section>
+            <section className="work-surface block-work-surface"><ProjectWorkspacePanel key={selectedProject.id} baseUrl={cloudflareApiUrl} projectId={selectedProject.id} contextPrompts={selectWorkspaceContextPrompts(tables.prompts)} currentUser={currentUser} onChanged={onWorkspaceChanged} onOpenStep={setSelectedStepId} /></section>
           </section>
         </>}
 
@@ -3603,6 +3603,7 @@ function ProjectTemplatesView({
   onEditorDirtyChange: (dirty: boolean) => void;
 }) {
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(initialTemplateId);
+  const [autoStagePickerTemplateId, setAutoStagePickerTemplateId] = useState<string | null>(null);
   const [templateSection, setTemplateSection] = useState<"templates" | "stages" | "clientStages">("templates");
   const [createError, setCreateError] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -3634,7 +3635,7 @@ function ProjectTemplatesView({
     } catch (failure) { setCreateError(failure instanceof Error ? failure.message : "Falha ao criar template."); }
   }
 
-  if (editingTemplateId) return <TemplateEditor baseUrl={cloudflareApiUrl} templateId={editingTemplateId} projectTypes={tables.project_types} clients={tables.clients} prompts={tables.prompts.map((prompt) => ({ id: prompt.id, name: prompt.title, content: prompt.content }))} onClose={() => { setEditingTemplateId(null); onEditorClosed(); }} onOpenTemplate={setEditingTemplateId} onPublished={onRefresh} onDirtyChange={onEditorDirtyChange} />;
+  if (editingTemplateId) return <TemplateEditor baseUrl={cloudflareApiUrl} templateId={editingTemplateId} projectTypes={tables.project_types} clients={tables.clients} prompts={tables.prompts.map((prompt) => ({ id: prompt.id, name: prompt.title, content: prompt.content }))} onClose={() => { setEditingTemplateId(null); setAutoStagePickerTemplateId(null); onEditorClosed(); }} onOpenTemplate={setEditingTemplateId} onPublished={onRefresh} onDirtyChange={onEditorDirtyChange} openStagePickerOnLoad={autoStagePickerTemplateId === editingTemplateId} />;
 
   return (
     <>
@@ -3720,7 +3721,7 @@ function ProjectTemplatesView({
                 </div>
                 <div className="template-card-actions">
                   <button className="secondary-button compact" type="button" onClick={(event) => { event.stopPropagation(); setEditingTemplateId(template.id); }}><Route size={16} /> Organizar etapas</button>
-                  <button className="secondary-button compact" type="button" onClick={(event) => { event.stopPropagation(); setEditingTemplateId(template.id); }}><Plus size={16} /> Adicionar etapa</button>
+                  <button className="secondary-button compact" type="button" onClick={(event) => { event.stopPropagation(); setAutoStagePickerTemplateId(template.id); setEditingTemplateId(template.id); }}><Plus size={16} /> Adicionar etapa</button>
                   <button className="icon-button danger" type="button" title="Excluir template" onClick={(event) => { event.stopPropagation(); void onDelete(template); }}><Trash2 size={18} /></button>
                 </div>
               </article>
@@ -6853,7 +6854,7 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue,
       </div>
       {contextError && <p className="form-error" role="alert">{contextError}</p>}
       {ownerType === "project" && clientId && runtimeContexts.some((item) => !item.sourceContextId) && <div className="context-associate-review"><strong>Contextos locais para revisar</strong><p>Este projeto foi vinculado a um cliente. Selecione os textos que devem entrar na biblioteca; nada sera movido automaticamente.</p>{runtimeContexts.filter((item) => !item.sourceContextId).map((item) => <label key={item.id}><input type="checkbox" checked={selectedLocalIds.includes(item.id)} onChange={(event) => setSelectedLocalIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /> {item.title}</label>)}<button className="secondary-button" type="button" disabled={saving || !selectedLocalIds.length} onClick={() => void associateSelected()}>Associar selecionados ({selectedLocalIds.length})</button></div>}
-      {showImport && <div className="context-import-panel"><label className="search-field"><Search size={15} /><input value={librarySearch} onChange={(event) => { setLibrarySearch(event.target.value); setLibraryOffset(0); }} placeholder="Buscar na biblioteca do cliente" /></label><div className="context-import-list">{libraryLoading && <p role="status"><Loader2 className="spin" size={15} /> Buscando contextos...</p>}{libraryResults.map((item) => <label key={item.id}><input type="checkbox" checked={selectedLibraryIds.includes(item.id)} onChange={(event) => setSelectedLibraryIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span><strong>{item.title}</strong><small>{item.category || "Sem categoria"} · v{item.version}</small><em>{item.content}</em></span></label>)}{libraryHasMore && <button className="secondary-button" type="button" disabled={libraryLoading} onClick={() => setLibraryOffset((current) => current + 100)}>Carregar mais</button>}</div><div className="inline-actions"><button className="secondary-button" type="button" onClick={() => setShowImport(false)}>Cancelar</button><button className="primary-button" type="button" disabled={saving || selectedLibraryIds.length === 0} onClick={() => void importSelected()}>Importar selecionados ({selectedLibraryIds.length})</button></div></div>}
+      {showImport && <div className="context-import-panel"><label className="search-field"><Search size={15} /><input value={librarySearch} onChange={(event) => { setLibrarySearch(event.target.value); setLibraryOffset(0); }} placeholder="Buscar na biblioteca do cliente" /></label><div className="context-import-list">{libraryLoading && <p role="status"><Loader2 className="spin" size={15} /> Buscando contextos...</p>}{libraryResults.map((item) => <label key={item.id}><input type="checkbox" checked={selectedLibraryIds.includes(item.id)} onChange={(event) => setSelectedLibraryIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span><strong>{item.title}</strong></span></label>)}{libraryHasMore && <button className="secondary-button" type="button" disabled={libraryLoading} onClick={() => setLibraryOffset((current) => current + 100)}>Carregar mais</button>}</div><div className="inline-actions"><button className="secondary-button" type="button" onClick={() => setShowImport(false)}>Cancelar</button><button className="primary-button" type="button" disabled={saving || selectedLibraryIds.length === 0} onClick={() => void importSelected()}>Importar selecionados ({selectedLibraryIds.length})</button></div></div>}
 
       {isWriting && (
         <div className="context-compose compact-context-compose">

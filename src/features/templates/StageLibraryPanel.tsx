@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Archive, ArrowDown, ArrowUp, Bot, ClipboardCheck, Cloud, FileText, Layers3, Loader2, Map, MessageSquareText, NotebookTabs, Plus, Save, Search, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { Archive, ArrowDown, ArrowUp, Bot, BriefcaseBusiness, Building2, ChevronDown, ChevronRight, CircleGauge, ClipboardCheck, Cloud, Coffee, Compass, Database, FileStack, FileText, FolderTree, Globe2, Hammer, Image, KeyRound, Landmark, Layers3, LayoutTemplate, Lightbulb, Link, ListChecks, Loader2, Map, MessageSquareText, MessagesSquare, NotebookTabs, PackageCheck, PanelTop, Plus, Puzzle, Route, Save, ScanSearch, Search, ShieldCheck, Sparkles, Target, Trash2, Workflow } from "lucide-react";
 import type { TemplateBlock } from "./templateModel";
 
 export type StageLibraryItem = {
@@ -41,19 +41,31 @@ function move<T>(items: T[], index: number, direction: -1 | 1) {
   const next = [...items]; [next[index], next[target]] = [next[target], next[index]]; return next;
 }
 
-export function stagePresentation(item: Pick<StageLibraryItem, "name" | "templateUses" | "clientName">) {
+const stageIcons = [Cloud, Bot, MessageSquareText, Map, NotebookTabs, ClipboardCheck, FileText, Layers3, BriefcaseBusiness, Building2, CircleGauge, Coffee, Compass, Database, FileStack, FolderTree, Globe2, Hammer, Image, KeyRound, Landmark, LayoutTemplate, Lightbulb, Link, ListChecks, MessagesSquare, PackageCheck, Puzzle, Route, ScanSearch, ShieldCheck, Sparkles, Target, Workflow];
+
+function stableHash(value: string) {
+  return [...value].reduce((hash, character) => ((hash << 5) - hash + character.charCodeAt(0)) | 0, 0);
+}
+
+export function stagePresentation(item: Pick<StageLibraryItem, "id" | "name" | "templateUses" | "clientName">, position?: number) {
   const normalized = item.name.toLocaleLowerCase();
-  const Icon = /claud/.test(normalized) ? Cloud
-    : /gpt/.test(normalized) ? Bot
-      : /context/.test(normalized) ? MessageSquareText
-        : /mapa/.test(normalized) ? Map
-          : /notebook/.test(normalized) ? NotebookTabs
-            : /plano|check|cadastro/.test(normalized) ? ClipboardCheck
-              : /contrato|relat|sum[aá]rio/.test(normalized) ? FileText
-                : Layers3;
+  const identity = position ?? Math.abs(stableHash(item.id));
+  const Icon = stageIcons[identity % stageIcons.length];
   const baseName = normalized.trim() === "claud" ? "Claude" : normalized.includes("notebookl") ? "NotebookLM" : item.name.trim();
   const source = item.clientName ?? (item.templateUses.length === 1 ? item.templateUses[0].templateName : "");
-  return { Icon, title: source && !baseName.toLocaleLowerCase().includes(source.toLocaleLowerCase()) ? `${baseName} · ${source}` : baseName };
+  return { Icon, hue: (identity * 137.508) % 360, title: source && !baseName.toLocaleLowerCase().includes(source.toLocaleLowerCase()) ? `${baseName} · ${source}` : baseName };
+}
+
+function blockPresentation(type: string) {
+  const values: Record<string, { label: string; Icon: typeof Layers3 }> = {
+    long_text: { label: "Orientacao", Icon: FileText },
+    prompt: { label: "Prompt", Icon: Bot },
+    context: { label: "Contexto", Icon: MessageSquareText },
+    checklist: { label: "Checklist", Icon: ListChecks },
+    materials: { label: "Materiais", Icon: Link },
+    file_upload: { label: "Arquivos", Icon: FolderTree },
+  };
+  return values[type] ?? { label: type, Icon: Layers3 };
 }
 
 export function StageLibraryPanel({ baseUrl, clients = [], scope = "global", onChanged }: StageLibraryProps) {
@@ -62,6 +74,8 @@ export function StageLibraryPanel({ baseUrl, clients = [], scope = "global", onC
   const [draft, setDraft] = useState<StageLibraryItem | null>(null);
   const [query, setQuery] = useState("");
   const [clientFilter, setClientFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"active" | "archived">("active");
+  const [collapsedBlockIds, setCollapsedBlockIds] = useState<Set<string>>(new Set());
   const [newBlockType, setNewBlockType] = useState("long_text");
   const [busy, setBusy] = useState(true);
   const [message, setMessage] = useState("");
@@ -73,8 +87,9 @@ export function StageLibraryPanel({ baseUrl, clients = [], scope = "global", onC
       const next = await stageApi<StageLibraryItem[]>(baseUrl, `?scope=${scope}`);
       setItems(next);
       const id = preferredId ?? selectedId;
-      const selected = next.find((item) => item.id === id) ?? next.find((item) => item.status === "active") ?? null;
+      const selected = next.find((item) => item.id === id) ?? next.find((item) => item.status === statusFilter) ?? null;
       setSelectedId(selected?.id ?? ""); setDraft(selected ? structuredClone(selected) : null);
+      setCollapsedBlockIds(new Set(selected?.document.blocks.map((item) => item.id) ?? []));
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Falha ao carregar etapas."); }
     finally { setBusy(false); }
   }
@@ -82,8 +97,24 @@ export function StageLibraryPanel({ baseUrl, clients = [], scope = "global", onC
   useEffect(() => { void load(); }, [baseUrl, scope]);
   const visible = useMemo(() => items.filter((item) => {
     const haystack = `${item.name} ${item.description ?? ""} ${item.clientName ?? ""} ${item.templateUses.map((use) => use.templateName).join(" ")}`.toLocaleLowerCase();
-    return haystack.includes(query.toLocaleLowerCase()) && (!clientFilter || item.clientId === clientFilter);
-  }), [items, query, clientFilter]);
+    return item.status === statusFilter && haystack.includes(query.toLocaleLowerCase()) && (!clientFilter || item.clientId === clientFilter);
+  }), [items, query, clientFilter, statusFilter]);
+
+  function selectStage(item: StageLibraryItem) {
+    setSelectedId(item.id);
+    setDraft(structuredClone(item));
+    setCollapsedBlockIds(new Set(item.document.blocks.map((block) => block.id)));
+    setMessage("");
+  }
+
+  function selectStatus(status: "active" | "archived") {
+    setStatusFilter(status);
+    const selected = items.find((item) => item.status === status) ?? null;
+    setSelectedId(selected?.id ?? "");
+    setDraft(selected ? structuredClone(selected) : null);
+    setCollapsedBlockIds(new Set(selected?.document.blocks.map((item) => item.id) ?? []));
+    setMessage("");
+  }
 
   async function createStage() {
     setBusy(true); setError("");
@@ -116,11 +147,26 @@ export function StageLibraryPanel({ baseUrl, clients = [], scope = "global", onC
     setDraft((current) => current ? { ...current, document: { ...current.document, blocks: blocks.map((item, index) => ({ ...item, order: index + 1 })) } } : current);
   }
 
+  function toggleBlock(blockId: string) {
+    setCollapsedBlockIds((current) => {
+      const next = new Set(current);
+      if (next.has(blockId)) next.delete(blockId); else next.add(blockId);
+      return next;
+    });
+  }
+
+  function saveInitialView() {
+    if (!draft) return;
+    updateBlocks(draft.document.blocks.map((item) => ({ ...item, collapsedByDefault: collapsedBlockIds.has(item.id) })));
+    setMessage("Visual inicial preparado. Salve uma nova versao para aplica-lo aos templates vinculados.");
+  }
+
   return <section className="stage-library-layout">
     <aside className="stage-library-list">
       <div className="stage-library-list-head"><label className="search-field"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar etapa, template ou origem" /></label>{scope === "client" && <select aria-label="Filtrar etapas por cliente" value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}><option value="">Todos os clientes</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select>}<button className="secondary-button compact" type="button" title="Nova etapa" onClick={() => void createStage()}><Plus size={17} /> Nova etapa</button></div>
+      <div className="stage-library-status-tabs" role="tablist" aria-label="Estado das etapas"><button type="button" role="tab" aria-selected={statusFilter === "active"} onClick={() => selectStatus("active")}>Ativas <span>{items.filter((item) => item.status === "active").length}</span></button><button type="button" role="tab" aria-selected={statusFilter === "archived"} onClick={() => selectStatus("archived")}>Arquivadas <span>{items.filter((item) => item.status === "archived").length}</span></button></div>
       {busy && !items.length && <p role="status"><Loader2 className="spin" size={16} /> Carregando...</p>}
-      <div className="stage-library-catalog">{visible.map((item) => { const presentation = stagePresentation(item); const Icon = presentation.Icon; return <button className={`stage-library-list-item ${selectedId === item.id ? "active" : ""}`} type="button" key={item.id} onClick={() => { setSelectedId(item.id); setDraft(structuredClone(item)); setMessage(""); }}><span className="stage-library-item-icon"><Icon size={18} /></span><span><strong>{presentation.title}</strong><small>v{item.currentVersion} · {item.document.blocks.length} bloco(s) · {item.usageCount} template(s)</small><small>{item.templateUses.length ? `Usada em: ${item.templateUses.map((use) => use.templateName).join(", ")}` : "Ainda nao vinculada a template"}</small><p>{item.description || "Sem descricao. Abra para documentar o objetivo desta etapa."}</p></span>{item.status === "archived" && <em>Arquivada</em>}</button>; })}</div>
+      <div className="stage-library-catalog">{visible.map((item, index) => { const presentation = stagePresentation(item, index); const Icon = presentation.Icon; return <button className={`stage-library-list-item ${selectedId === item.id ? "active" : ""}`} style={{ "--stage-hue": presentation.hue } as CSSProperties} type="button" key={item.id} onClick={() => selectStage(item)}><span className="stage-library-item-icon"><Icon size={18} /></span><span><strong>{presentation.title}</strong><small>v{item.currentVersion} · {item.document.blocks.length} bloco(s) · {item.usageCount} template(s)</small><small>{item.templateUses.length ? `Usada em: ${item.templateUses.map((use) => use.templateName).join(", ")}` : "Ainda nao vinculada a template"}</small><p>{item.description || "Sem descricao. Abra para documentar o objetivo desta etapa."}</p></span>{item.status === "archived" && <em>Arquivada</em>}</button>; })}</div>
       {!visible.length && !busy && <p className="workspace-empty">Nenhuma etapa encontrada.</p>}
     </aside>
     <main className="stage-library-editor">
@@ -129,8 +175,20 @@ export function StageLibraryPanel({ baseUrl, clients = [], scope = "global", onC
         {error && <p className="form-error" role="alert">{error}</p>}{message && <p className="template-editor-notice" role="status">{message}</p>}
         <div className="stage-library-origin"><strong>Origem e uso</strong><span>{draft.clientName ? `Exclusiva de ${draft.clientName}` : "Etapa global"}</span>{draft.templateUses.map((use) => <span key={`${use.templateId}:${use.templateStepId}`}>{use.templateName}{use.clientName ? ` · ${use.clientName}` : ""}</span>)}</div>
         <div className="stage-library-meta"><label className="field"><span>Nome da etapa</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label><label className="field"><span>Descricao</span><input value={draft.description ?? ""} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Objetivo, extensao e quando esta etapa deve ser usada" /></label>{scope === "client" && <label className="field"><span>Cliente exclusivo</span><select value={draft.clientId ?? ""} onChange={(event) => setDraft({ ...draft, clientId: event.target.value || null, clientName: clients.find((client) => client.id === event.target.value)?.name ?? null })}><option value="">Etapa global</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>}</div>
-        <div className="stage-library-add"><select value={newBlockType} onChange={(event) => setNewBlockType(event.target.value)}><option value="long_text">Orientacao</option><option value="prompt">Prompt</option><option value="context">Contexto</option><option value="checklist">Checklist</option><option value="materials">Materiais</option><option value="file_upload">Arquivos</option></select><button className="secondary-button" type="button" onClick={() => updateBlocks([...draft.document.blocks, block(newBlockType, draft.document.blocks.length + 1)])}><Plus size={15} /> Adicionar bloco</button></div>
-        <div className="stage-library-blocks">{draft.document.blocks.map((item, index) => <article key={item.id}><div className="stage-library-block-order"><button className="icon-button" type="button" title="Mover para cima" disabled={index === 0} onClick={() => updateBlocks(move(draft.document.blocks, index, -1))}><ArrowUp size={14} /></button><button className="icon-button" type="button" title="Mover para baixo" disabled={index === draft.document.blocks.length - 1} onClick={() => updateBlocks(move(draft.document.blocks, index, 1))}><ArrowDown size={14} /></button></div><div className="stage-library-block-fields"><div className="stage-library-block-title"><span className="template-type-chip">{item.type}</span><label className="field"><span>Titulo</span><input value={item.title} onChange={(event) => updateBlocks(draft.document.blocks.map((candidate) => candidate.id === item.id ? { ...candidate, title: event.target.value } : candidate))} /></label></div>{["long_text", "prompt"].includes(item.type) && <label className="field full"><span>{item.type === "prompt" ? "Texto-modelo do prompt" : "Conteudo"}</span><textarea rows={4} value={String(item.config[item.type === "prompt" ? "contentSnapshot" : "content"] ?? "")} onChange={(event) => { const key = item.type === "prompt" ? "contentSnapshot" : "content"; updateBlocks(draft.document.blocks.map((candidate) => candidate.id === item.id ? { ...candidate, config: { ...candidate.config, [key]: event.target.value } } : candidate)); }} /></label>}</div><button className="icon-button danger" type="button" title="Remover bloco" onClick={() => updateBlocks(draft.document.blocks.filter((candidate) => candidate.id !== item.id))}><Trash2 size={15} /></button></article>)}</div>
+        <div className="stage-library-add"><select value={newBlockType} onChange={(event) => setNewBlockType(event.target.value)}><option value="long_text">Orientacao</option><option value="prompt">Prompt</option><option value="context">Contexto</option><option value="checklist">Checklist</option><option value="materials">Materiais</option><option value="file_upload">Arquivos</option></select><button className="secondary-button" type="button" onClick={() => { const next = block(newBlockType, draft.document.blocks.length + 1); updateBlocks([...draft.document.blocks, next]); setCollapsedBlockIds((current) => { const value = new Set(current); value.delete(next.id); return value; }); }}><Plus size={15} /> Adicionar bloco</button><span className="stage-library-view-actions"><button className="secondary-button compact" type="button" onClick={() => setCollapsedBlockIds(new Set())}>Abrir todos</button><button className="secondary-button compact" type="button" onClick={() => setCollapsedBlockIds(new Set(draft.document.blocks.map((item) => item.id)))}>Recolher todos</button><button className="secondary-button compact" type="button" onClick={saveInitialView}><PanelTop size={15} /> Salvar visual inicial</button></span></div>
+        <div className="stage-library-blocks">{draft.document.blocks.map((item, index) => {
+          const collapsed = collapsedBlockIds.has(item.id);
+          const presentation = blockPresentation(item.type);
+          const BlockIcon = presentation.Icon;
+          return <article className={collapsed ? "is-collapsed" : ""} key={item.id}>
+            <div className="stage-library-block-order"><button className="icon-button" type="button" title="Mover para cima" disabled={index === 0} onClick={() => updateBlocks(move(draft.document.blocks, index, -1))}><ArrowUp size={14} /></button><button className="icon-button" type="button" title="Mover para baixo" disabled={index === draft.document.blocks.length - 1} onClick={() => updateBlocks(move(draft.document.blocks, index, 1))}><ArrowDown size={14} /></button></div>
+            <div className="stage-library-block-fields">
+              <button className="stage-library-block-summary" type="button" aria-expanded={!collapsed} onClick={() => toggleBlock(item.id)}><span className="stage-library-block-icon"><BlockIcon size={17} /></span><span><strong>{item.title || presentation.label}</strong><small>{presentation.label} · bloco {index + 1} de {draft.document.blocks.length}</small></span>{collapsed ? <ChevronRight size={17} /> : <ChevronDown size={17} />}</button>
+              {!collapsed && <div className="stage-library-block-body"><label className="field"><span>Titulo</span><input value={item.title} onChange={(event) => updateBlocks(draft.document.blocks.map((candidate) => candidate.id === item.id ? { ...candidate, title: event.target.value } : candidate))} /></label>{["long_text", "prompt"].includes(item.type) && <label className="field full"><span>{item.type === "prompt" ? "Texto-modelo do prompt" : "Conteudo"}</span><textarea rows={4} value={String(item.config[item.type === "prompt" ? "contentSnapshot" : "content"] ?? "")} onChange={(event) => { const key = item.type === "prompt" ? "contentSnapshot" : "content"; updateBlocks(draft.document.blocks.map((candidate) => candidate.id === item.id ? { ...candidate, config: { ...candidate.config, [key]: event.target.value } } : candidate)); }} /></label>}</div>}
+            </div>
+            <button className="icon-button danger" type="button" title="Remover bloco" onClick={() => updateBlocks(draft.document.blocks.filter((candidate) => candidate.id !== item.id))}><Trash2 size={15} /></button>
+          </article>;
+        })}</div>
         {!draft.document.blocks.length && <div className="empty-state"><Layers3 size={28} /><strong>Etapa sem blocos</strong><span>Adicione os blocos que farao parte dos templates.</span></div>}
       </> : <div className="empty-state"><Layers3 size={30} /><strong>Biblioteca de etapas</strong><span>Crie ou selecione uma etapa para editar.</span></div>}
     </main>

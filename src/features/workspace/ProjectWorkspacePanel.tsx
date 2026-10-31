@@ -17,8 +17,20 @@ async function getWorkspace(baseUrl: string, projectId: string): Promise<Project
 }
 
 type ContextPrompt = { id: string; name: string; content: string };
+type WorkspaceActor = { id: string; name: string };
 
-export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, onChanged, onOpenStep }: { baseUrl: string; projectId: string; contextPrompts: ContextPrompt[]; onChanged: (overview: WorkspaceOverview) => void; onOpenStep: (stepId: string) => void }) {
+function workspaceReferenceUpdateLabel(reference: WorkspaceReference): string {
+  if (!reference.updated_at) return "";
+  const timestamp = new Date(reference.updated_at);
+  if (Number.isNaN(timestamp.getTime())) return "";
+  const formatted = new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(timestamp);
+  return `Atualizado em ${formatted}${reference.updated_by_name ? ` por ${reference.updated_by_name}` : ""}`;
+}
+
+export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, currentUser, onChanged, onOpenStep }: { baseUrl: string; projectId: string; contextPrompts: ContextPrompt[]; currentUser: WorkspaceActor | null; onChanged: (overview: WorkspaceOverview) => void; onOpenStep: (stepId: string) => void }) {
   const [workspace, setWorkspace] = useState<ProjectWorkspace | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -80,7 +92,7 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, onCh
     try {
       const response = await fetch(`${baseUrl}/api/projects/${encodeURIComponent(projectId)}/workspace`, {
         method: "PUT", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ expectedRevision: workspace.revision, conversationNotApplicable, references }),
+        body: JSON.stringify({ expectedRevision: workspace.revision, conversationNotApplicable, references, updatedByUserId: currentUser?.id ?? null }),
       });
       const body = await response.json() as { data?: ProjectWorkspace; error?: string };
       if (!response.ok || !body.data) throw new Error(body.error || "Nao foi possivel salvar.");
@@ -192,7 +204,7 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, onCh
           const manualIndex = manualKind.findIndex((item) => item.id === ref.id);
           return <article className="workspace-reference" data-provider={workspaceProvider(ref.kind, ref.target)} key={ref.id}>
             <WorkspaceProviderBadge kind={ref.kind} target={ref.target} />
-            <div className="workspace-reference-copy"><strong>{ref.title}</strong><span title={ref.target}>{ref.target}</span>{ref.notes && <small>{ref.notes}</small>}{ref.origin ? <small>Da etapa: {ref.origin.stepName}</small> : ref.updated_at && <small>Atualizado em {new Date(ref.updated_at).toLocaleDateString("pt-BR")}</small>}</div>
+            <div className="workspace-reference-copy"><strong>{ref.title}</strong><span title={ref.target}>{ref.target}</span>{ref.notes && <small>{ref.notes}</small>}{ref.origin ? <small>Da etapa: {ref.origin.stepName}</small> : workspaceReferenceUpdateLabel(ref) && <small>{workspaceReferenceUpdateLabel(ref)}</small>}</div>
             <div className="workspace-reference-actions">
               <button className="icon-button" type="button" title={kind === "directory" ? "Copiar caminho" : "Copiar link"} aria-label={`Copiar ${ref.title}`} onClick={() => void copyText(ref.target)}><Copy size={16} /></button>
               {accessible && <a className="icon-button" href={accessible} target="_blank" rel="noopener noreferrer" title="Abrir link" aria-label={`Abrir ${ref.title}`}><ExternalLink size={16} /></a>}

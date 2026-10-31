@@ -6,6 +6,7 @@ type WorkspaceRow = { project_id: string; conversation_not_applicable: number; r
 type CountRow = { project_id: string; directory_count: number; conversation_count: number; support_count: number };
 type ChecklistCountRow = { project_id: string; checklist_count: number; checklist_completed_count: number };
 type ClientRow = { id: string; name: string; company: string | null };
+type WorkspaceActor = { id: string; name: string };
 
 const headers = { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*" };
 const reply = (data: unknown, status = 200) => new Response(JSON.stringify({ data }), { status, headers });
@@ -58,7 +59,16 @@ export async function readWorkspaceOverview(db: D1Database) {
 async function readWorkspace(db: D1Database, projectId: string) {
   const [row, manual, linked, project, checklist, contexts] = await Promise.all([
     db.prepare("select project_id, conversation_not_applicable, revision from project_workspaces where project_id = ?").bind(projectId).first<WorkspaceRow>(),
-    db.prepare("select id, project_id, kind, title, target, notes, sort_order, created_at, updated_at from project_workspace_references where project_id = ? order by kind, sort_order, created_at").bind(projectId).all<WorkspaceReference>(),
+    db.prepare(`select reference.id, reference.project_id, reference.kind, reference.title, reference.target, reference.notes,
+      reference.sort_order, reference.created_at, reference.updated_at,
+      event.actor_user_id updated_by_user_id, event.actor_name updated_by_name
+      from project_workspace_references reference
+      left join project_workspace_reference_events event on event.id = (
+        select latest.id from project_workspace_reference_events latest
+        where latest.reference_id = reference.id
+        order by latest.created_at desc, latest.id desc limit 1
+      )
+      where reference.project_id = ? order by reference.kind, reference.sort_order, reference.created_at`).bind(projectId).all<WorkspaceReference>(),
     readLinkedWorkspaceReferences(db, projectId),
     db.prepare("select id, journey_template_id from projects where id = ?").bind(projectId).first<{ id: string; journey_template_id: string | null }>(),
     db.prepare("select id, project_id, label, is_done, item_order, created_at, updated_at from project_workspace_checklist_items where project_id = ? order by item_order, created_at").bind(projectId).all<WorkspaceChecklistItem>(),
@@ -114,12 +124,13 @@ async function createWorkspaceContext(db: D1Database, projectId: string, body: R
 
 type SubmittedReference = Pick<WorkspaceReference, "id" | "kind" | "title" | "target" | "notes">;
 
-export function validateWorkspaceSubmission(body: unknown): { expectedRevision: number; conversationNotApplicable: boolean; references: SubmittedReference[] } | string {
+export function validateWorkspaceSubmission(body: unknown): { expectedRevision: number; conversationNotApplicable: boolean; references: SubmittedReference[]; updatedByUserId: string | null } | string {
   if (!body || typeof body !== "object") return "Envie os dados do local de trabalho.";
   const value = body as Record<string, unknown>;
   if (!Number.isSafeInteger(value.expectedRevision) || Number(value.expectedRevision) < 0) return "Versao invalida.";
   if (typeof value.conversationNotApplicable !== "boolean") return "Informe se a conversa nao se aplica.";
   if (!Array.isArray(value.references) || value.references.length > 100) return "Limite de 100 referencias por projeto.";
+  if (value.updatedByUserId != null && (typeof value.updatedByUserId !== "string" || !value.updatedByUserId.trim() || value.updatedByUserId.length > 100)) return "Usuario responsavel invalido.";
   const ids = new Set<string>();
   const references: SubmittedReference[] = [];
   for (const item of value.references) {
@@ -141,7 +152,7 @@ export function validateWorkspaceSubmission(body: unknown): { expectedRevision: 
     references.push({ id: ref.id, kind: ref.kind as WorkspaceKind, title: ref.title.trim(), target: ref.target.trim(), notes: typeof ref.notes === "string" ? ref.notes.trim() || null : null });
   }
   if (value.conversationNotApplicable && references.some((ref) => ref.kind === "conversation")) return "Remova os links de conversa antes de marcar Nao se aplica.";
-  return { expectedRevision: value.expectedRevision as number, conversationNotApplicable: value.conversationNotApplicable, references };
+  return { expectedRevision: value.expectedRevision as number, conversationNotApplicable: value.conversationNotApplicable, references, updatedByUserId: typeof value.updatedByUserId === "string" ? value.updatedByUserId.trim() : null };
 }
 
 export function uniqueLegacyNames(client: ClientRow, clients: ClientRow[]) {
@@ -210,14 +221,27 @@ export async function handleProjectWorkspaceRequest(request: Request, env: Env, 
     if (!before) return fail("Projeto nao encontrado.", 404);
     if (before.revision !== submitted.expectedRevision) return fail("O local de trabalho foi alterado em outra sessao. Atualize antes de salvar.", 409);
     if (submitted.conversationNotApplicable && before.references.some((ref) => ref.kind === "conversation" && ref.origin)) return fail("A jornada ja possui um link de conversa. Remova-o na etapa de origem antes de marcar Nao se aplica.", 400);
+    let actor: WorkspaceActor | null = null;
+    if (submitted.updatedByUserId) {
+      actor = await env.DB.prepare("select id, name from app_users where id = ? and status = 'ativo'").bind(submitted.updatedByUserId).first<WorkspaceActor>();
+      if (!actor) return fail("Usuario responsavel nao encontrado ou inativo.", 400);
+    }
     const now = new Date().toISOString();
     const existing = new Map(before.manualReferences.map((ref) => [ref.id, ref]));
+    const changedReferences = submitted.references.filter((ref) => {
+      const current = existing.get(ref.id);
+      return !current || current.kind !== ref.kind || current.title !== ref.title || current.target !== ref.target || (current.notes ?? null) !== ref.notes;
+    });
     const statements = [
       env.DB.prepare("delete from project_workspace_references where project_id = ? and (select revision from project_workspaces where project_id = ?) = ?").bind(projectId, projectId, submitted.expectedRevision),
       ...submitted.references.map((ref, index) => env.DB.prepare(`insert into project_workspace_references
         (id, project_id, kind, title, target, notes, sort_order, created_at, updated_at)
         select ?, ?, ?, ?, ?, ?, ?, ?, ? where (select revision from project_workspaces where project_id = ?) = ?`)
-        .bind(ref.id, projectId, ref.kind, ref.title, ref.target, ref.notes, index, existing.get(ref.id)?.created_at ?? now, now, projectId, submitted.expectedRevision)),
+        .bind(ref.id, projectId, ref.kind, ref.title, ref.target, ref.notes, index, existing.get(ref.id)?.created_at ?? now, changedReferences.some((item) => item.id === ref.id) ? now : existing.get(ref.id)?.updated_at ?? now, projectId, submitted.expectedRevision)),
+      ...changedReferences.map((ref) => env.DB.prepare(`insert into project_workspace_reference_events
+        (id, reference_id, project_id, action, actor_user_id, actor_name, created_at)
+        values (?, ?, ?, ?, ?, ?, ?)`)
+        .bind(crypto.randomUUID(), ref.id, projectId, existing.has(ref.id) ? "updated" : "created", actor?.id ?? null, actor?.name ?? null, now)),
       env.DB.prepare("update project_workspaces set conversation_not_applicable = ?, revision = revision + 1, updated_at = ? where project_id = ? and revision = ?")
         .bind(submitted.conversationNotApplicable ? 1 : 0, now, projectId, submitted.expectedRevision),
     ];

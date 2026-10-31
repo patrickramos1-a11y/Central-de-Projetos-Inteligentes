@@ -1038,9 +1038,28 @@ button {
 }
 
 .template-card-compact {
-  min-height: 166px;
+  min-height: 0;
   align-content: start;
+  gap: 8px;
+  padding: 13px;
   cursor: pointer;
+}
+
+.template-card-compact > p {
+  margin: 0;
+  line-height: 1.3;
+}
+
+.template-card-compact .project-card-head {
+  margin: 0;
+}
+
+.template-card-compact .template-meta {
+  gap: 5px;
+}
+
+.template-card-compact .template-card-actions {
+  margin-top: 2px;
 }
 
 .template-card-compact:focus-visible {

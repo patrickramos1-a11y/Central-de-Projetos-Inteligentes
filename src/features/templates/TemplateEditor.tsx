@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Check, ChevronLeft, Copy, Eye, Layers3, Loader2, Plus, Save, Search, Trash2, X } from "lucide-react";
 import type { TemplateBlock, TemplateSnapshot, TemplateStep } from "./templateModel";
 import { stagePresentation, type StageLibraryItem } from "./StageLibraryPanel";
@@ -17,6 +17,7 @@ type Props = {
   onOpenTemplate: (id: string) => void;
   onPublished: () => Promise<void>;
   onDirtyChange: (dirty: boolean) => void;
+  openStagePickerOnLoad?: boolean;
 };
 
 async function api<T>(baseUrl: string, path: string, init?: RequestInit): Promise<T> {
@@ -46,7 +47,7 @@ function moveItem<T>(items: T[], index: number, direction: -1 | 1): T[] {
   return result;
 }
 
-export function TemplateEditor({ baseUrl, templateId, projectTypes, clients, prompts, onClose, onOpenTemplate, onPublished, onDirtyChange }: Props) {
+export function TemplateEditor({ baseUrl, templateId, projectTypes, clients, prompts, onClose, onOpenTemplate, onPublished, onDirtyChange, openStagePickerOnLoad = false }: Props) {
   const [loaded, setLoaded] = useState<EditorPayload | null>(null);
   const [snapshot, setSnapshot] = useState<TemplateSnapshot | null>(null);
   const [baseline, setBaseline] = useState("");
@@ -61,6 +62,7 @@ export function TemplateEditor({ baseUrl, templateId, projectTypes, clients, pro
   const [showStagePicker, setShowStagePicker] = useState(false);
   const [stageLibrary, setStageLibrary] = useState<StageLibraryItem[]>([]);
   const [stageSearch, setStageSearch] = useState("");
+  const [selectedStageIds, setSelectedStageIds] = useState<string[]>([]);
   const [library, setLibrary] = useState<LibraryContext[]>([]);
   const [libraryResults, setLibraryResults] = useState<LibraryContext[]>([]);
   const [librarySearch, setLibrarySearch] = useState("");
@@ -72,6 +74,7 @@ export function TemplateEditor({ baseUrl, templateId, projectTypes, clients, pro
   const [libraryPreviewId, setLibraryPreviewId] = useState("");
   const [libraryError, setLibraryError] = useState("");
   const requestVersion = useRef(0);
+  const autoStagePickerOpened = useRef("");
   const libraryRequestVersion = useRef(0);
   const dirty = snapshot !== null && JSON.stringify(snapshot) !== baseline;
   const step = selectedStepId ? snapshot?.steps.find((item) => item.id === selectedStepId) ?? snapshot?.steps[0] : undefined;
@@ -88,6 +91,12 @@ export function TemplateEditor({ baseUrl, templateId, projectTypes, clients, pro
       .catch((failure) => { if (version === requestVersion.current) setError(failure instanceof Error ? failure.message : "Falha ao abrir template."); });
     return () => { requestVersion.current += 1; };
   }, [baseUrl, templateId]);
+
+  useEffect(() => {
+    if (!snapshot || !openStagePickerOnLoad || autoStagePickerOpened.current === templateId) return;
+    autoStagePickerOpened.current = templateId;
+    void openStagePicker();
+  }, [snapshot, openStagePickerOnLoad, templateId]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -237,19 +246,25 @@ export function TemplateEditor({ baseUrl, templateId, projectTypes, clients, pro
     setError(""); setBusy(true);
     try {
       const stages = await api<StageLibraryItem[]>(baseUrl, `/stage-library?scope=available${snapshot?.clientId ? `&clientId=${encodeURIComponent(snapshot.clientId)}` : ""}`);
-      setStageLibrary(stages.filter((item) => item.status === "active")); setShowStagePicker(true);
+      setStageLibrary(stages.filter((item) => item.status === "active")); setSelectedStageIds([]); setStageSearch(""); setShowStagePicker(true);
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Falha ao carregar etapas salvas."); }
     finally { setBusy(false); }
   }
 
-  function addSharedStage(source: StageLibraryItem) {
-    if (!snapshot) return;
+  function sharedStage(source: StageLibraryItem, templateIdValue: string, order: number): TemplateStep {
     const id = crypto.randomUUID();
-    const item: TemplateStep = {
-      id, sourceStageId: source.id, sourceStageVersion: source.currentVersion, name: source.name, description: source.description ?? "", stepOrder: snapshot.steps.length + 1,
-      document: { schemaVersion: 1, ownerType: "template", templateId: snapshot.templateId, stepId: id, structureId: crypto.randomUUID(), title: source.name, status: "ativo", state: "draft", versionNumber: 1, revision: 1, blocks: structuredClone(source.document.blocks), completionRules: structuredClone(source.document.completionRules) },
+    return {
+      id, sourceStageId: source.id, sourceStageVersion: source.currentVersion, name: source.name, description: source.description ?? "", stepOrder: order,
+      document: { schemaVersion: 1, ownerType: "template", templateId: templateIdValue, stepId: id, structureId: crypto.randomUUID(), title: source.name, status: "ativo", state: "draft", versionNumber: 1, revision: 1, blocks: structuredClone(source.document.blocks), completionRules: structuredClone(source.document.completionRules) },
     };
-    change((current) => ({ ...current, steps: [...current.steps, item] })); setSelectedStepId(id); setSelectedBlockId(""); setShowStagePicker(false);
+  }
+
+  function addSharedStages() {
+    if (!snapshot || !selectedStageIds.length) return;
+    const selected = stageLibrary.filter((item) => selectedStageIds.includes(item.id));
+    const additions = selected.map((source, index) => sharedStage(source, snapshot.templateId, snapshot.steps.length + index + 1));
+    change((current) => ({ ...current, steps: [...current.steps, ...additions] }));
+    setSelectedStepId(additions[0]?.id ?? ""); setSelectedBlockId(""); setSelectedStageIds([]); setShowStagePicker(false);
   }
 
   function reorderSteps(index: number, direction: -1 | 1) {
@@ -352,6 +367,6 @@ export function TemplateEditor({ baseUrl, templateId, projectTypes, clients, pro
       </main>
     </div>
     {showImport && <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowImport(false)}><section className="template-context-picker glass-panel" role="dialog" aria-modal="true" aria-label="Puxar contextos do cliente" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><h2>Puxar contextos do cliente</h2><button className="icon-button" type="button" title="Fechar" onClick={() => setShowImport(false)}><X size={18} /></button></div><label className="search-field"><Search size={16} /><input value={librarySearch} onChange={(event) => { setLibrarySearch(event.target.value); setLibraryOffset(0); }} placeholder="Buscar titulo, conteudo ou categoria" /></label>{libraryError && <p role="alert" className="form-error">{libraryError}</p>}<div className="template-context-picker-list">{libraryLoading && <p role="status"><Loader2 className="spin" size={15} /> Buscando contextos...</p>}{visibleLibrary.map((item) => <div key={item.id} className="template-context-picker-item"><label><input type="checkbox" checked={selectedLibraryIds.includes(item.id)} onChange={(event) => setSelectedLibraryIds((ids) => event.target.checked ? [...ids, item.id] : ids.filter((id) => id !== item.id))} /><strong>{item.title}</strong><small>{item.category || "Sem categoria"} · v{item.version}</small></label><button className="icon-button" type="button" title="Previa" onClick={() => setLibraryPreviewId(libraryPreviewId === item.id ? "" : item.id)}><Eye size={16} /></button>{libraryPreviewId === item.id && <p>{item.content}</p>}</div>)}{libraryHasMore && <button className="secondary-button" type="button" disabled={libraryLoading} onClick={() => setLibraryOffset((current) => current + 100)}>Carregar mais</button>}</div><div className="inline-actions"><button className="secondary-button" type="button" onClick={() => setShowImport(false)}>Cancelar</button><button className="primary-button" type="button" disabled={!selectedLibraryIds.length} onClick={importContexts}>Importar selecionados ({selectedLibraryIds.length})</button></div></section></div>}
-    {showStagePicker && <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowStagePicker(false)}><section className="template-context-picker glass-panel" role="dialog" aria-modal="true" aria-label="Puxar etapa da biblioteca" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><h2>Puxar etapa da biblioteca</h2><p>Etapas exclusivas aparecem somente quando o template esta vinculado ao mesmo cliente.</p></div><button className="icon-button" type="button" title="Fechar" onClick={() => setShowStagePicker(false)}><X size={18} /></button></div><label className="search-field"><Search size={16} /><input value={stageSearch} onChange={(event) => setStageSearch(event.target.value)} placeholder="Buscar etapa, template ou cliente" /></label><div className="template-stage-picker-list">{stageLibrary.filter((item) => `${item.name} ${item.description ?? ""} ${item.clientName ?? ""} ${item.templateUses.map((use) => use.templateName).join(" ")}`.toLocaleLowerCase().includes(stageSearch.toLocaleLowerCase())).map((item) => { const presentation = stagePresentation(item); const Icon = presentation.Icon; return <article key={item.id}><span className="stage-library-item-icon"><Icon size={18} /></span><div><strong>{presentation.title}</strong><small>v{item.currentVersion} · {item.usageCount} template(s) · {item.document.blocks.length} blocos</small><small>{item.clientName ? `Exclusiva de ${item.clientName}` : "Etapa global"}</small><p>{item.description || "Sem descricao cadastrada."}</p>{item.templateUses.length > 0 && <p className="template-stage-origin">Origem: {item.templateUses.map((use) => use.templateName).join(", ")}</p>}</div><button className="primary-button compact" type="button" onClick={() => addSharedStage(item)}><Plus size={15} /> Adicionar</button></article>; })}</div></section></div>}
+    {showStagePicker && <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowStagePicker(false)}><section className="template-context-picker template-stage-picker glass-panel" role="dialog" aria-modal="true" aria-label="Puxar etapa da biblioteca" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><h2>Adicionar etapas</h2><p>Crie uma etapa em branco ou selecione varias etapas da biblioteca.</p></div><button className="icon-button" type="button" title="Fechar" onClick={() => setShowStagePicker(false)}><X size={18} /></button></div><button className="project-stage-blank" type="button" onClick={() => { addStep(); setShowStagePicker(false); }}><Plus size={20} /><span><strong>Criar etapa em branco</strong><small>Comece sem blocos e personalize a estrutura.</small></span></button><label className="search-field"><Search size={16} /><input value={stageSearch} onChange={(event) => setStageSearch(event.target.value)} placeholder="Buscar etapa, template ou cliente" /></label><div className="template-stage-picker-list">{stageLibrary.filter((item) => `${item.name} ${item.description ?? ""} ${item.clientName ?? ""} ${item.templateUses.map((use) => use.templateName).join(" ")}`.toLocaleLowerCase().includes(stageSearch.toLocaleLowerCase())).map((item, index) => { const presentation = stagePresentation(item, index); const Icon = presentation.Icon; return <label className="template-stage-picker-option" key={item.id}><input type="checkbox" checked={selectedStageIds.includes(item.id)} onChange={(event) => setSelectedStageIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span className="stage-library-item-icon" style={{ "--stage-hue": presentation.hue } as React.CSSProperties}><Icon size={18} /></span><span><strong>{presentation.title}</strong><small>v{item.currentVersion} · {item.usageCount} template(s) · {item.document.blocks.length} blocos</small><small>{item.clientName ? `Exclusiva de ${item.clientName}` : "Etapa global"}</small><p>{item.description || "Sem descricao cadastrada."}</p>{item.templateUses.length > 0 && <p className="template-stage-origin">Origem: {item.templateUses.map((use) => use.templateName).join(", ")}</p>}</span></label>; })}</div><div className="inline-actions template-stage-picker-actions"><button className="secondary-button" type="button" onClick={() => setShowStagePicker(false)}>Cancelar</button><button className="primary-button" type="button" disabled={!selectedStageIds.length} onClick={addSharedStages}><Layers3 size={16} /> Importar selecionadas ({selectedStageIds.length})</button></div></section></div>}
   </section>;
 }

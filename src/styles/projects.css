@@ -394,11 +394,14 @@
 .projects-client {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
+  text-align: center;
 }
 
 .projects-client-name {
   display: grid;
+  justify-items: center;
   min-width: 0;
   overflow-wrap: anywhere;
   color: #2d6c63;

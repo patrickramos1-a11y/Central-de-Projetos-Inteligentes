@@ -11,6 +11,8 @@ function database() {
     create table projects (id text, journey_template_id text);
     create table template_workspace_guidance (template_id text, guidance text);
     create table project_workspace_references (id text, project_id text, kind text, title text, target text, notes text, sort_order integer, created_at text, updated_at text);
+    create table project_workspace_reference_events (id text, reference_id text, project_id text, action text, actor_user_id text, actor_name text, created_at text);
+    create table app_users (id text, name text, status text);
     create table project_workspace_checklist_items (id text, project_id text, label text, is_done integer, item_order integer, created_at text, updated_at text);
     create table project_workspace_contexts (id text, project_id text, title text, content text, category text, source_client_context_id text, source_version integer, context_order integer, created_at text, updated_at text);
     create table project_steps (id text, project_id text, name text);
@@ -152,6 +154,42 @@ describe("linked workspace references", () => {
     expect(detail.data.references).toHaveLength(2);
     expect(detail.data.manualReferences).toHaveLength(1);
     expect(sqlite.query("select count(*) as total from project_workspace_references").get()).toMatchObject({ total: 1 });
+    sqlite.close();
+  });
+
+  test("records the active user and preserves timestamps for unchanged references", async () => {
+    const { sqlite, d1 } = database();
+    sqlite.exec(`insert into projects values ('p', null);
+      insert into app_users values ('patrick', 'Patrick', 'ativo');
+      insert into project_workspaces (project_id, conversation_not_applicable, revision) values ('p', 0, 0);
+      insert into project_workspace_references values ('dir', 'p', 'directory', 'Pasta', 'C:\\Projetos\\P', null, 0, '2026-01-01', '2026-01-01');`);
+    const env = { DB: d1 };
+    const parts = ["api", "projects", "p", "workspace"];
+    const saved = await handleProjectWorkspaceRequest(new Request("http://local/api/projects/p/workspace", {
+      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({
+        expectedRevision: 0,
+        conversationNotApplicable: false,
+        updatedByUserId: "patrick",
+        references: [{ id: "dir", kind: "directory", title: "Pasta atualizada", target: "C:\\Projetos\\P", notes: null }],
+      }),
+    }), env, parts);
+    expect(saved?.status).toBe(200);
+    const detail = (await saved?.json()) as { data: { manualReferences: WorkspaceReference[] } };
+    expect(detail.data.manualReferences[0]).toMatchObject({ updated_by_user_id: "patrick", updated_by_name: "Patrick" });
+    expect(sqlite.query("select action, actor_name from project_workspace_reference_events where reference_id = 'dir'").get()).toMatchObject({ action: "updated", actor_name: "Patrick" });
+
+    const updatedAt = detail.data.manualReferences[0].updated_at;
+    const savedAgain = await handleProjectWorkspaceRequest(new Request("http://local/api/projects/p/workspace", {
+      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({
+        expectedRevision: 1,
+        conversationNotApplicable: false,
+        updatedByUserId: "patrick",
+        references: [{ id: "dir", kind: "directory", title: "Pasta atualizada", target: "C:\\Projetos\\P", notes: null }],
+      }),
+    }), env, parts);
+    const detailAgain = (await savedAgain?.json()) as { data: { manualReferences: WorkspaceReference[] } };
+    expect(detailAgain.data.manualReferences[0].updated_at).toBe(updatedAt);
+    expect(sqlite.query("select count(*) as total from project_workspace_reference_events").get()).toMatchObject({ total: 1 });
     sqlite.close();
   });
 });

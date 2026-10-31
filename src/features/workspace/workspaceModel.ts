@@ -14,6 +14,8 @@ export type WorkspaceReference = {
   sort_order: number;
   created_at: string;
   updated_at: string;
+  updated_by_user_id?: string | null;
+  updated_by_name?: string | null;
   origin?: { type: "journey"; stepId: string; stepName: string; blockTitle: string };
 };
 
