@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, ArrowUpRight, CheckCircle2, ChevronDown, ClipboardCheck, Copy, ExternalLink, Layers3, Link2, Pencil, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpRight, CheckCircle2, ChevronDown, ClipboardCheck, Clock3, Copy, ExternalLink, Layers3, Link2, Pencil, Plus, RefreshCw, Save, Trash2, UserRound, X } from "lucide-react";
 import { copyText } from "../../components/ui/clipboard";
 import { buildJourneyLink } from "../projects/journeyLink";
 import { browserAccessibleUrl, contextTitleFromContent, serverDirectoryPath, workspaceMissing, workspaceProvider, workspaceStatusLabel, type ProjectWorkspace, type WorkspaceKind, type WorkspaceOverview, type WorkspaceReference } from "./workspaceModel";
@@ -19,15 +19,15 @@ async function getWorkspace(baseUrl: string, projectId: string): Promise<Project
 type ContextPrompt = { id: string; name: string; content: string };
 type WorkspaceActor = { id: string; name: string };
 
-function workspaceReferenceUpdateLabel(reference: WorkspaceReference): string {
-  if (!reference.updated_at) return "";
+function workspaceReferenceUpdateParts(reference: WorkspaceReference): { date: string; time: string; actor: string } | null {
+  if (!reference.updated_at) return null;
   const timestamp = new Date(reference.updated_at);
-  if (Number.isNaN(timestamp.getTime())) return "";
-  const formatted = new Intl.DateTimeFormat("pt-BR", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(timestamp);
-  return `Atualizado em ${formatted}${reference.updated_by_name ? ` por ${reference.updated_by_name}` : ""}`;
+  if (Number.isNaN(timestamp.getTime())) return null;
+  return {
+    date: new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(timestamp),
+    time: new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(timestamp),
+    actor: reference.updated_by_name || "Perfil nao registrado",
+  };
 }
 
 export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, currentUser, onChanged, onOpenStep }: { baseUrl: string; projectId: string; contextPrompts: ContextPrompt[]; currentUser: WorkspaceActor | null; onChanged: (overview: WorkspaceOverview) => void; onOpenStep: (stepId: string) => void }) {
@@ -202,9 +202,10 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, curr
           const accessible = browserAccessibleUrl(ref.target);
           const manualKind = workspace.manualReferences.filter((item) => item.kind === kind);
           const manualIndex = manualKind.findIndex((item) => item.id === ref.id);
+          const update = workspaceReferenceUpdateParts(ref);
           return <article className="workspace-reference" data-provider={workspaceProvider(ref.kind, ref.target)} key={ref.id}>
             <WorkspaceProviderBadge kind={ref.kind} target={ref.target} />
-            <div className="workspace-reference-copy"><strong>{ref.title}</strong><span title={ref.target}>{ref.target}</span>{ref.notes && <small>{ref.notes}</small>}{ref.origin ? <small>Da etapa: {ref.origin.stepName}</small> : workspaceReferenceUpdateLabel(ref) && <small>{workspaceReferenceUpdateLabel(ref)}</small>}</div>
+            <div className="workspace-reference-copy"><strong>{ref.title}</strong><span title={ref.target}>{ref.target}</span>{ref.notes && <small>{ref.notes}</small>}{ref.origin ? <small>Da etapa: {ref.origin.stepName}</small> : update && <small className="workspace-reference-meta"><span>Atualizado em {update.date}</span><span><Clock3 size={13} aria-hidden="true" /> {update.time}</span><span className={ref.updated_by_name ? "has-actor" : "legacy-actor"}><UserRound size={13} aria-hidden="true" /> {update.actor}</span></small>}</div>
             <div className="workspace-reference-actions">
               <button className="icon-button" type="button" title={kind === "directory" ? "Copiar caminho" : "Copiar link"} aria-label={`Copiar ${ref.title}`} onClick={() => void copyText(ref.target)}><Copy size={16} /></button>
               {accessible && <a className="icon-button" href={accessible} target="_blank" rel="noopener noreferrer" title="Abrir link" aria-label={`Abrir ${ref.title}`}><ExternalLink size={16} /></a>}

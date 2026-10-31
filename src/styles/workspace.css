@@ -38,6 +38,10 @@
 .workspace-reference-copy strong, .workspace-reference-copy span, .workspace-reference-copy small { overflow-wrap: anywhere; }
 .workspace-reference-copy span { color: #276d70; font-size: .85rem; }
 .workspace-reference-copy small { color: #637773; }
+.workspace-reference-copy .workspace-reference-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 9px; margin-top: 1px; }
+.workspace-reference-meta > span { display: inline-flex; align-items: center; gap: 4px; color: #637773; font-size: .74rem; }
+.workspace-reference-meta .has-actor { color: #176b5b; font-weight: 750; }
+.workspace-reference-meta .legacy-actor { color: #8a6d41; }
 .workspace-reference-actions { display: flex; flex: 0 0 auto; gap: 2px; }
 .workspace-reference-actions .icon-button { width: 32px; height: 32px; }
 .workspace-reference-form { display: grid; gap: 10px; margin-top: 12px; padding: 12px; border: 1px solid #cadbd5; border-radius: 6px; background: #f7fbf9; }
