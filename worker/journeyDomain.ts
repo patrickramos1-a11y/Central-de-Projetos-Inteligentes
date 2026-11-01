@@ -132,7 +132,7 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
   }
 
   if (resource === "journey-templates" && id && request.method === "PATCH") {
-    const body = await request.json<{ name?: string; description?: string | null; status?: string; project_type_id?: string | null }>();
+    const body = await request.json<{ name?: string; description?: string | null; status?: string; project_type_id?: string | null; project_modality_id?: string | null }>();
     return json(await updateJourneyTemplate(env.DB, id, body));
   }
 
@@ -671,13 +671,13 @@ async function saveProjectAsTemplate(
       fileMapping.push({ projectStepId: String(projectStep.id), templateStepId: stepId, blockIds: document.blocks.filter((block) => block.type === "prompt" || block.type === "file_upload" && block.config?.fileMode === "resource_pack").map((block) => block.id) });
       steps.push({ id: stepId, name: String(projectStep.name ?? source.title), description: String(projectStep.description ?? ""), stepOrder: steps.length + 1, document: document as TemplateSnapshot["steps"][number]["document"] });
     }
-    const snapshot: TemplateSnapshot = { ...editor.published, name, description: `Atualizado a partir do projeto ${project.name ?? ""}.`, projectTypeId: project.project_type_id == null ? null : String(project.project_type_id), steps };
+    const snapshot: TemplateSnapshot = { ...editor.published, name, description: `Atualizado a partir do projeto ${project.name ?? ""}.`, projectTypeId: project.project_type_id == null ? null : String(project.project_type_id), projectModalityId: project.project_modality_id == null ? null : String(project.project_modality_id), steps };
     await saveTemplateDraft(db, templateId!, snapshot, editor.draftRevision);
     await stageProjectModelFiles(db, env.FILES, templateId!, fileMapping);
     return { id: templateId, name, mode, draft: true };
   } else {
-    await db.prepare("insert into journey_templates (id, name, description, project_type_id, context, status, created_at) values (?, ?, ?, ?, 'projeto', 'ativo', ?)")
-      .bind(templateId, name, `Criado a partir do projeto ${project.name ?? ""}.`, project.project_type_id ?? null, now).run();
+    await db.prepare("insert into journey_templates (id, name, description, project_type_id, project_modality_id, context, status, created_at) values (?, ?, ?, ?, ?, 'projeto', 'ativo', ?)")
+      .bind(templateId, name, `Criado a partir do projeto ${project.name ?? ""}.`, project.project_type_id ?? null, project.project_modality_id ?? null, now).run();
   }
 
   const steps = await db.prepare("select * from project_steps where project_id = ? order by step_order asc").bind(projectId).all<Record<string, unknown>>();
@@ -878,7 +878,7 @@ async function createProjectTemplateDocument(
   };
 }
 
-async function updateJourneyTemplate(db: D1Database, templateId: string, patch: { name?: string; description?: string | null; status?: string; project_type_id?: string | null }) {
+async function updateJourneyTemplate(db: D1Database, templateId: string, patch: { name?: string; description?: string | null; status?: string; project_type_id?: string | null; project_modality_id?: string | null }) {
   const template = await db.prepare("select * from journey_templates where id = ?").bind(templateId).first<Record<string, unknown>>();
   if (!template) throw new Error("Template nao encontrado.");
   const name = String(patch.name ?? template.name ?? "").trim();
@@ -886,13 +886,18 @@ async function updateJourneyTemplate(db: D1Database, templateId: string, patch: 
   const description = patch.description === undefined ? template.description ?? null : patch.description;
   const status = ["ativo", "inativo", "arquivado"].includes(String(patch.status)) ? patch.status : template.status ?? "ativo";
   const projectTypeId = patch.project_type_id === undefined ? template.project_type_id ?? null : String(patch.project_type_id ?? "").trim() || null;
+  const projectModalityId = patch.project_modality_id === undefined ? template.project_modality_id ?? null : String(patch.project_modality_id ?? "").trim() || null;
   if (projectTypeId) {
     const projectType = await db.prepare("select id from project_types where id = ?").bind(projectTypeId).first();
     if (!projectType) throw new Error("Tipo de projeto nao encontrado.");
   }
-  await db.prepare("update journey_templates set name = ?, description = ?, status = ?, project_type_id = ? where id = ?")
-    .bind(name, description, status, projectTypeId, templateId).run();
-  return { ...template, id: templateId, name, description, status, project_type_id: projectTypeId };
+  if (projectModalityId) {
+    const projectModality = await db.prepare("select id from project_modalities where id = ? and project_type_id = ?").bind(projectModalityId, projectTypeId).first();
+    if (!projectModality) throw new Error("Modalidade nao pertence ao tipo selecionado.");
+  }
+  await db.prepare("update journey_templates set name = ?, description = ?, status = ?, project_type_id = ?, project_modality_id = ? where id = ?")
+    .bind(name, description, status, projectTypeId, projectModalityId, templateId).run();
+  return { ...template, id: templateId, name, description, status, project_type_id: projectTypeId, project_modality_id: projectModalityId };
 }
 
 async function deleteJourneyTemplate(db: D1Database, templateId: string) {

@@ -4,6 +4,7 @@ import type { TemplateBlock, TemplateSnapshot, TemplateStep } from "./templateMo
 import { stagePresentation, type StageLibraryItem } from "./StageLibraryPanel";
 
 type Option = { id: string; name: string };
+type ModalityOption = Option & { project_type_id: string; status?: string };
 type LibraryContext = { id: string; title: string; content: string; category: string | null; status: string; version: number };
 type TemplateFile = { id: string; step_id: string; block_id: string; r2_key: string; name: string; size_bytes: number };
 type EditorPayload = { snapshot: TemplateSnapshot; published: TemplateSnapshot; files: TemplateFile[]; draftRevision: number | null; publishedVersion: number; hasDraft: boolean };
@@ -11,6 +12,7 @@ type Props = {
   baseUrl: string;
   templateId: string;
   projectTypes: Option[];
+  projectModalities: ModalityOption[];
   clients: Option[];
   prompts: Array<Option & { content: string }>;
   onClose: () => void;
@@ -47,7 +49,7 @@ function moveItem<T>(items: T[], index: number, direction: -1 | 1): T[] {
   return result;
 }
 
-export function TemplateEditor({ baseUrl, templateId, projectTypes, clients, prompts, onClose, onOpenTemplate, onPublished, onDirtyChange, openStagePickerOnLoad = false }: Props) {
+export function TemplateEditor({ baseUrl, templateId, projectTypes, projectModalities, clients, prompts, onClose, onOpenTemplate, onPublished, onDirtyChange, openStagePickerOnLoad = false }: Props) {
   const [loaded, setLoaded] = useState<EditorPayload | null>(null);
   const [snapshot, setSnapshot] = useState<TemplateSnapshot | null>(null);
   const [baseline, setBaseline] = useState("");
@@ -332,7 +334,8 @@ export function TemplateEditor({ baseUrl, templateId, projectTypes, clients, pro
     {!preview && <div className="template-editor-meta">
       <label className="field"><span>Nome</span><input value={snapshot.name} onChange={(event) => change((current) => ({ ...current, name: event.target.value }))} /></label>
       <label className="field"><span>Descricao</span><input value={snapshot.description} onChange={(event) => change((current) => ({ ...current, description: event.target.value }))} /></label>
-      <label className="field"><span>Tipo de projeto</span><select value={snapshot.projectTypeId ?? ""} onChange={(event) => change((current) => ({ ...current, projectTypeId: event.target.value || null }))}><option value="">Geral</option>{projectTypes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      <label className="field"><span>Tipo de projeto</span><select value={snapshot.projectTypeId ?? ""} onChange={(event) => change((current) => ({ ...current, projectTypeId: event.target.value || null, projectModalityId: null }))}><option value="">Geral</option>{projectTypes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      <label className="field"><span>Modalidade</span><select value={snapshot.projectModalityId ?? ""} disabled={!snapshot.projectTypeId} onChange={(event) => change((current) => ({ ...current, projectModalityId: event.target.value || null }))}><option value="">Sem modalidade</option>{projectModalities.filter((item) => item.project_type_id === snapshot.projectTypeId && item.status !== "arquivado").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <label className="field"><span>Cliente dos contextos</span><select value={snapshot.clientId ?? ""} onChange={(event) => change((current) => ({ ...current, clientId: event.target.value || null }))}><option value="">Sem cliente vinculado</option>{clients.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <label className="field template-workspace-guidance"><span>Orientacao do Local de trabalho</span><input value={snapshot.workspaceGuidance} onChange={(event) => change((current) => ({ ...current, workspaceGuidance: event.target.value }))} placeholder="Explique onde cadastrar diretórios e conversas" /></label>
     </div>}

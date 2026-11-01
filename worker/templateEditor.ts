@@ -83,6 +83,7 @@ function normalizeSnapshot(raw: TemplateSnapshot, templateId: string): TemplateS
     name,
     description: String(raw.description ?? ""),
     projectTypeId: raw.projectTypeId || null,
+    projectModalityId: raw.projectModalityId || null,
     clientId: raw.clientId || null,
     workspaceGuidance: String(raw.workspaceGuidance ?? ""),
     steps,
@@ -90,7 +91,7 @@ function normalizeSnapshot(raw: TemplateSnapshot, templateId: string): TemplateS
 }
 
 async function templateRow(db: D1Database, id: string) {
-  const row = await db.prepare("select id, name, description, project_type_id, context, status, created_at from journey_templates where id = ? and context in ('projeto', 'geral')")
+  const row = await db.prepare("select id, name, description, project_type_id, project_modality_id, context, status, created_at from journey_templates where id = ? and context in ('projeto', 'geral')")
     .bind(id).first<Row>();
   if (!row) throw new Error("Template de projeto nao encontrado.");
   return row;
@@ -125,7 +126,7 @@ async function legacyPublishedSnapshot(db: D1Database, id: string): Promise<Temp
     };
     steps.push({ id: stepId, name: String(row.name), description: String(row.description ?? ""), stepOrder: Number(row.step_order), document });
   }
-  return { schemaVersion: 1, templateId: id, name: String(template.name), description: String(template.description ?? ""), projectTypeId: template.project_type_id == null ? null : String(template.project_type_id), clientId: null, workspaceGuidance: String(guidance?.guidance ?? ""), steps };
+  return { schemaVersion: 1, templateId: id, name: String(template.name), description: String(template.description ?? ""), projectTypeId: template.project_type_id == null ? null : String(template.project_type_id), projectModalityId: template.project_modality_id == null ? null : String(template.project_modality_id), clientId: null, workspaceGuidance: String(guidance?.guidance ?? ""), steps };
 }
 
 export async function getTemplateEditor(db: D1Database, id: string) {
@@ -146,11 +147,11 @@ export async function getTemplateEditor(db: D1Database, id: string) {
   };
 }
 
-export async function createEmptyProjectTemplate(db: D1Database, body: { name?: string; projectTypeId?: string | null }) {
+export async function createEmptyProjectTemplate(db: D1Database, body: { name?: string; projectTypeId?: string | null; projectModalityId?: string | null }) {
   const name = String(body.name ?? "Novo template").trim() || "Novo template";
   const id = crypto.randomUUID();
-  await db.prepare("insert into journey_templates (id, name, description, project_type_id, context, status, created_at) values (?, ?, '', ?, 'projeto', 'inativo', ?)")
-    .bind(id, name, body.projectTypeId || null, stamp()).run();
+  await db.prepare("insert into journey_templates (id, name, description, project_type_id, project_modality_id, context, status, created_at) values (?, ?, '', ?, ?, 'projeto', 'inativo', ?)")
+    .bind(id, name, body.projectTypeId || null, body.projectModalityId || null, stamp()).run();
   return { id, name };
 }
 
@@ -160,6 +161,10 @@ export async function saveTemplateDraft(db: D1Database, id: string, raw: Templat
   if (snapshot.projectTypeId) {
     const type = await db.prepare("select id from project_types where id = ?").bind(snapshot.projectTypeId).first();
     if (!type) throw new Error("Tipo de projeto nao encontrado.");
+  }
+  if (snapshot.projectModalityId) {
+    const modality = await db.prepare("select id from project_modalities where id = ? and project_type_id = ?").bind(snapshot.projectModalityId, snapshot.projectTypeId).first();
+    if (!modality) throw new Error("Modalidade nao pertence ao tipo selecionado.");
   }
   if (snapshot.clientId) {
     const client = await db.prepare("select id from clients where id = ?").bind(snapshot.clientId).first();
@@ -319,8 +324,8 @@ export async function publishTemplateDraft(db: D1Database, id: string, expectedR
       .bind(crypto.randomUUID(), draft.id, file.step_id, file.block_id, file.r2_key, file.name, file.content_type, file.size_bytes, file.description, timestamp));
   }
   statements.push(db.prepare("delete from template_draft_files where template_id = ?").bind(id));
-  statements.push(db.prepare("update journey_templates set name = ?, description = ?, project_type_id = ?, status = 'ativo' where id = ?")
-    .bind(snapshot.name, snapshot.description || null, snapshot.projectTypeId, id));
+  statements.push(db.prepare("update journey_templates set name = ?, description = ?, project_type_id = ?, project_modality_id = ?, status = 'ativo' where id = ?")
+    .bind(snapshot.name, snapshot.description || null, snapshot.projectTypeId, snapshot.projectModalityId, id));
   statements.push(db.prepare("delete from journey_template_client_scopes where template_id = ?").bind(id));
   if (snapshot.clientId) {
     statements.push(db.prepare("insert into journey_template_client_scopes (template_id, client_id, created_at, updated_at) values (?, ?, ?, ?)")
@@ -360,8 +365,8 @@ export async function duplicateProjectTemplate(db: D1Database, files: R2Bucket |
       }
     }
     await db.batch([
-    db.prepare("insert into journey_templates (id, name, description, project_type_id, context, status, created_at) values (?, ?, ?, ?, 'projeto', 'inativo', ?)")
-      .bind(newId, snapshot.name, snapshot.description || null, snapshot.projectTypeId, timestamp),
+    db.prepare("insert into journey_templates (id, name, description, project_type_id, project_modality_id, context, status, created_at) values (?, ?, ?, ?, ?, 'projeto', 'inativo', ?)")
+      .bind(newId, snapshot.name, snapshot.description || null, snapshot.projectTypeId, snapshot.projectModalityId, timestamp),
     db.prepare("insert into journey_template_versions (id, template_id, version_number, revision, state, snapshot_json, created_at, updated_at) values (?, ?, 1, 1, 'draft', ?, ?, ?)")
       .bind(crypto.randomUUID(), newId, JSON.stringify(snapshot), timestamp, timestamp),
     ...copied.map(({ source, stepId, blockId, key }) => db.prepare("insert into template_draft_files (id, template_id, step_id, block_id, r2_key, name, content_type, size_bytes, description, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")

@@ -5,9 +5,10 @@ import { handleJourneyDomainRequest } from "../../worker/journeyDomain";
 function createDatabase() {
   const sqlite = new Database(":memory:");
   sqlite.exec(`
-    create table journey_templates (id text primary key, name text, description text, status text, project_type_id text);
+    create table journey_templates (id text primary key, name text, description text, status text, project_type_id text, project_modality_id text);
     create table project_types (id text primary key, name text);
-    insert into journey_templates values ('template-a', 'Modelo', null, 'ativo', null);
+    create table project_modalities (id text primary key, name text, project_type_id text);
+    insert into journey_templates values ('template-a', 'Modelo', null, 'ativo', null, null);
     insert into project_types values ('ria', 'RIA');
   `);
   const prepare = (sql: string, values: unknown[] = []): D1PreparedStatement => ({

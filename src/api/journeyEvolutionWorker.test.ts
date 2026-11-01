@@ -11,11 +11,12 @@ function fixture() {
     PRAGMA foreign_keys = ON;
     create table clients (id text primary key, name text);
     create table project_types (id text primary key, name text);
-    create table journey_templates (id text primary key, name text, description text, project_type_id text, context text, status text, created_at text);
+    create table project_modalities (id text primary key, name text, project_type_id text, status text);
+    create table journey_templates (id text primary key, name text, description text, project_type_id text, project_modality_id text, context text, status text, created_at text);
     create table template_workspace_guidance (template_id text primary key, guidance text, updated_at text);
     create table journey_steps (id text primary key, journey_template_id text references journey_templates(id), name text, description text, step_order integer, objective text, execution_instructions text, expected_output text, checklist text, status text, created_at text);
     create table step_prompts (id text primary key, journey_step_id text references journey_steps(id), prompt_id text, title text, content text, ai_tool_id text, prompt_status text, is_required integer, prompt_order integer, usage_notes text, created_at text);
-    create table projects (id text primary key, name text, client_id text references clients(id), created_at text);
+    create table projects (id text primary key, name text, client_id text references clients(id), project_type_id text, project_modality_id text, created_at text);
     create table project_steps (id text primary key, project_id text references projects(id), source_journey_step_id text, name text, status text, is_not_applicable integer default 0, updated_at text);
     create table project_step_contexts (id text primary key, project_step_id text, title text, content text);
     create table journey_step_documents (id text primary key, owner_type text, owner_id text, step_id text, schema_version integer, version_number integer, revision integer, state text, title text, document_json text, created_at text, updated_at text, published_at text, unique(owner_type, step_id, state));
@@ -23,9 +24,9 @@ function fixture() {
     create table journey_step_files (id text primary key, owner_type text, owner_step_id text, document_id text references journey_step_documents(id), block_id text, item_id text, r2_key text, name text, content_type text, size_bytes integer, description text, created_by text, created_at text);
     create table journey_step_events (id text primary key, owner_type text, owner_step_id text, document_id text, block_id text, event_type text, event_payload_json text, created_by text, created_at text);
     insert into clients values ('client-a','Cliente A');
-    insert into journey_templates values ('template-a','Modelo',null,null,'projeto','ativo','2026-01-01');
+    insert into journey_templates values ('template-a','Modelo',null,null,null,'projeto','ativo','2026-01-01');
     insert into journey_steps values ('template-step','template-a','Inicio',null,1,null,null,null,'','ativo','2026-01-01');
-    insert into projects values ('project-a','Projeto A','client-a','2026-01-01');
+    insert into projects values ('project-a','Projeto A','client-a',null,null,'2026-01-01');
     insert into project_steps (id,project_id,source_journey_step_id,name,status,updated_at) values ('project-step','project-a','template-step','Inicio','pendente','2026-01-01');
   `);
   const migration = readFileSync(new URL("../../cloudflare/migrations/0019_template_versions_client_contexts.sql", import.meta.url), "utf8");

@@ -39,6 +39,7 @@ export type TemplateSnapshot = {
   name: string;
   description: string;
   projectTypeId: string | null;
+  projectModalityId?: string | null;
   clientId: string | null;
   workspaceGuidance: string;
   steps: TemplateStep[];

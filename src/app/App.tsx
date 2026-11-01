@@ -186,6 +186,16 @@ type ProjectType = {
   status: ConfigStatus;
 };
 
+type ProjectModality = {
+  id: string;
+  name: string;
+  description: string | null;
+  project_type_id: string;
+  status: ConfigStatus;
+  created_at: string;
+  updated_at: string | null;
+};
+
 type Prompt = {
   id: string;
   title: string;
@@ -204,6 +214,7 @@ type JourneyTemplate = {
   name: string;
   description: string | null;
   project_type_id: string | null;
+  project_modality_id?: string | null;
   context: "projeto" | "cliente" | "geral";
   status: ConfigStatus;
 };
@@ -262,6 +273,7 @@ type Project = {
   responsible: string | null;
   responsible_user_id: string | null;
   project_type_id: string | null;
+  project_modality_id?: string | null;
   journey_template_id: string | null;
   status: ProjectStatus;
   notes: string | null;
@@ -514,6 +526,7 @@ type Tables = {
   ai_tools: AiTool[];
   prompt_categories: PromptCategory[];
   project_types: ProjectType[];
+  project_modalities: ProjectModality[];
   prompts: Prompt[];
   journey_templates: JourneyTemplate[];
   journey_steps: JourneyStep[];
@@ -566,6 +579,7 @@ const emptyTables: Tables = {
   ai_tools: [],
   prompt_categories: [],
   project_types: [],
+  project_modalities: [],
   prompts: [],
   journey_templates: [],
   journey_steps: [],
@@ -589,16 +603,17 @@ const emptyTables: Tables = {
 };
 
 const coreTableNames: Array<keyof Tables> = [
-  "app_users", "projects", "project_steps", "clients", "project_types", "journey_templates",
+  "app_users", "projects", "project_steps", "clients", "project_types", "project_modalities", "journey_templates",
 ];
 const detailTableNames = ["project_steps", "project_summaries", "project_summary_items", "generated_prompts"] as const;
 const initialReadColumns: Partial<Record<keyof Tables, string>> = {
   app_users: "id,name,status,created_at,updated_at",
-  projects: "id,name,company,client_id,responsible,responsible_user_id,project_type_id,journey_template_id,status,notes,created_at,updated_at",
+  projects: "id,name,company,client_id,responsible,responsible_user_id,project_type_id,project_modality_id,journey_template_id,status,notes,created_at,updated_at",
   project_steps: "id,project_id,source_journey_step_id,name,step_order,status,is_not_applicable,created_at,updated_at",
   clients: "id,name,company,logo_url,client_kind,is_active,responsible,responsible_user_id,project_type_id,journey_template_id,entry_month,status,notes,created_at,updated_at",
   project_types: "id,name,description,status,created_at",
-  journey_templates: "id,name,description,project_type_id,context,status,created_at",
+  project_modalities: "id,name,description,project_type_id,status,created_at,updated_at",
+  journey_templates: "id,name,description,project_type_id,project_modality_id,context,status,created_at",
 };
 function activeSecondaryTables(view: ViewMode, activeConfig: ConfigModuleKey, selectedStepId?: string | null): Array<keyof Tables> {
   if (view === "projectTemplates") return ["journey_steps", "step_prompts"];
@@ -1164,6 +1179,32 @@ export default function App() {
     setIsLoading(true);
     const responsibleUser = tables.app_users.find((user) => user.id === form.responsible_user_id) ?? null;
     let linkedClient = tables.clients.find((client) => client.id === form.client_id) ?? null;
+    let projectModalityId = form.project_modality_id;
+
+    if (projectModalityId === "__new") {
+      const modalityName = form.new_project_modality_name.trim();
+      if (!form.project_type_id || !modalityName) {
+        setNotice("Escolha o tipo e informe o nome da nova modalidade.");
+        setIsLoading(false);
+        return;
+      }
+      const existing = tables.project_modalities.find((item) => item.project_type_id === form.project_type_id && normalizeSearchText(item.name) === normalizeSearchText(modalityName));
+      if (existing) {
+        projectModalityId = existing.id;
+      } else {
+        const { data: modality, error: modalityError } = await supabase
+          .from<ProjectModality>("project_modalities")
+          .insert(normalizePayload({ id: crypto.randomUUID(), name: modalityName, description: null, project_type_id: form.project_type_id, status: "ativo", updated_at: new Date().toISOString() }))
+          .select("*")
+          .single();
+        if (modalityError || !modality) {
+          setNotice(`Nao foi possivel criar a modalidade: ${modalityError?.message ?? "erro desconhecido"}`);
+          setIsLoading(false);
+          return;
+        }
+        projectModalityId = modality.id;
+      }
+    }
 
     if (form.client_id === "__new") {
       const clientName = form.new_client_name.trim() || form.company.trim();
@@ -1210,6 +1251,7 @@ export default function App() {
           responsible: responsibleUser?.name ?? null,
           responsible_user_id: responsibleUser?.id ?? null,
           project_type_id: form.project_type_id,
+          project_modality_id: projectModalityId || null,
           journey_template_id: form.journey_template_id,
           status: "em_andamento",
           notes: form.notes,
@@ -2352,7 +2394,7 @@ export default function App() {
     }
   }
 
-  async function updateJourneyTemplate(templateId: string, payload: Pick<JourneyTemplate, "name" | "description" | "status" | "project_type_id">): Promise<boolean> {
+  async function updateJourneyTemplate(templateId: string, payload: Pick<JourneyTemplate, "name" | "description" | "status" | "project_type_id" | "project_modality_id">): Promise<boolean> {
     try {
       const response = await fetch(`${cloudflareApiUrl}/api/journey-templates/${encodeURIComponent(templateId)}`, {
         method: "PATCH",
@@ -3143,6 +3185,8 @@ type NewProjectFormState = {
   new_client_name: string;
   responsible_user_id: string;
   project_type_id: string;
+  project_modality_id: string;
+  new_project_modality_name: string;
   journey_template_id: string;
   notes: string;
 };
@@ -3218,6 +3262,7 @@ function ProjectsView({
   const [projectClientDraft, setProjectClientDraft] = useState("");
   const [projectResponsibleUserDraft, setProjectResponsibleUserDraft] = useState("");
   const [projectTypeDraft, setProjectTypeDraft] = useState("");
+  const [projectModalityDraft, setProjectModalityDraft] = useState("");
   const activeUsers = tables.app_users.filter((user) => user.status === "ativo");
   const managementRows = useMemo(() => buildManagementProjectRows({
     projects: tables.projects,
@@ -3308,6 +3353,7 @@ function ProjectsView({
     setProjectClientDraft(project.client_id ?? resolveLegacyClientId(project.company, tables.clients));
     setProjectResponsibleUserDraft(resolveResponsibleUserId(project, tables.app_users));
     setProjectTypeDraft(project.project_type_id ?? "");
+    setProjectModalityDraft(project.project_modality_id ?? "");
   }
 
   function saveProjectEditor() {
@@ -3321,6 +3367,7 @@ function ProjectsView({
       responsible: responsibleUser?.name ?? null,
       responsible_user_id: responsibleUser?.id ?? null,
       project_type_id: projectTypeDraft || null,
+      project_modality_id: projectModalityDraft || null,
     });
     setEditingProject(null);
   }
@@ -3462,7 +3509,8 @@ function ProjectsView({
               <ClientSearchSelect label="Cliente vinculado" value={projectClientDraft} clients={tables.clients} onChange={(value) => { setProjectClientDraft(value); const client = tables.clients.find((item) => item.id === value); if (client) setProjectCompanyDraft(client.name); }} />
               {!projectClientDraft && <Field label="Empresa legada" value={projectCompanyDraft} onChange={setProjectCompanyDraft} />}
               <SelectField label="Responsavel" value={projectResponsibleUserDraft} onChange={setProjectResponsibleUserDraft} options={activeUsers.map(toOption)} />
-              <SelectField label="Tipo de projeto" value={projectTypeDraft} onChange={setProjectTypeDraft} options={tables.project_types.map(toOption)} />
+              <SelectField label="Tipo de projeto" value={projectTypeDraft} onChange={(value) => { setProjectTypeDraft(value); setProjectModalityDraft(""); }} options={tables.project_types.filter((item) => item.status === "ativo").map(toOption)} />
+              <SelectField label="Modalidade" value={projectModalityDraft} onChange={setProjectModalityDraft} options={tables.project_modalities.filter((item) => item.status === "ativo" && item.project_type_id === projectTypeDraft).map(toOption)} />
             </div>
             <div className="inline-actions project-editor-actions">
               <button className="secondary-button" type="button" onClick={() => setEditingProject(null)}>Cancelar</button>
@@ -3593,7 +3641,7 @@ function ProjectTemplatesView({
   tables: Tables;
   query: string;
   setQuery: (query: string) => void;
-  onUpdate: (templateId: string, payload: Pick<JourneyTemplate, "name" | "description" | "status" | "project_type_id">) => Promise<boolean>;
+  onUpdate: (templateId: string, payload: Pick<JourneyTemplate, "name" | "description" | "status" | "project_type_id" | "project_modality_id">) => Promise<boolean>;
   onDelete: (template: JourneyTemplate) => Promise<void>;
   onRenameStep: (stepId: string, name: string) => Promise<boolean>;
   onRemoveStep: (step: JourneyStep) => Promise<boolean>;
@@ -3615,7 +3663,7 @@ function ProjectTemplatesView({
     .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   const templates = allTemplates.filter((template) =>
     (typeFilter === "all" || (typeFilter === "unclassified" ? !template.project_type_id : template.project_type_id === typeFilter))
-    && normalizeSearch(template.name, template.description, templateTypeName(template, tables.project_types)).includes(query.toLowerCase()),
+    && normalizeSearch(template.name, template.description, templateTypeName(template, tables.project_types), tables.project_modalities.find((item) => item.id === template.project_modality_id)?.name).includes(query.toLowerCase()),
   );
   const templateGroups = [...new Set(templates.map((template) => template.project_type_id || "unclassified"))]
     .sort((a, b) => {
@@ -3635,7 +3683,7 @@ function ProjectTemplatesView({
     } catch (failure) { setCreateError(failure instanceof Error ? failure.message : "Falha ao criar template."); }
   }
 
-  if (editingTemplateId) return <TemplateEditor baseUrl={cloudflareApiUrl} templateId={editingTemplateId} projectTypes={tables.project_types} clients={tables.clients} prompts={tables.prompts.map((prompt) => ({ id: prompt.id, name: prompt.title, content: prompt.content }))} onClose={() => { setEditingTemplateId(null); setAutoStagePickerTemplateId(null); onEditorClosed(); }} onOpenTemplate={setEditingTemplateId} onPublished={onRefresh} onDirtyChange={onEditorDirtyChange} openStagePickerOnLoad={autoStagePickerTemplateId === editingTemplateId} />;
+  if (editingTemplateId) return <TemplateEditor baseUrl={cloudflareApiUrl} templateId={editingTemplateId} projectTypes={tables.project_types.filter((item) => item.status === "ativo")} projectModalities={tables.project_modalities} clients={tables.clients} prompts={tables.prompts.map((prompt) => ({ id: prompt.id, name: prompt.title, content: prompt.content }))} onClose={() => { setEditingTemplateId(null); setAutoStagePickerTemplateId(null); onEditorClosed(); }} onOpenTemplate={setEditingTemplateId} onPublished={onRefresh} onDirtyChange={onEditorDirtyChange} openStagePickerOnLoad={autoStagePickerTemplateId === editingTemplateId} />;
 
   return (
     <>
@@ -3696,6 +3744,7 @@ function ProjectTemplatesView({
                 <p>{template.description || "Template sem descricao."}</p>
                 <div className="template-meta">
                   <span className="template-type-chip">{templateTypeName(template, tables.project_types)}</span>
+                  {template.project_modality_id && <span className="template-type-chip">{tables.project_modalities.find((item) => item.id === template.project_modality_id)?.name ?? "Modalidade indisponivel"}</span>}
                   <span>{steps.length} etapas</span>
                   <span>{prompts.length} prompts</span>
                   {pendingPrompts > 0 && <span className="warning-chip">{pendingPrompts} pendentes</span>}
@@ -3754,10 +3803,12 @@ function NewProjectPanel({ tables, currentUser, onCreate, onClose }: { tables: T
     new_client_name: "",
     responsible_user_id: currentUser?.id ?? "",
     project_type_id: "",
+    project_modality_id: "",
+    new_project_modality_name: "",
     journey_template_id: "",
     notes: "",
   });
-  const projectTemplates = availableProjectTemplates(tables.journey_templates, form.project_type_id);
+  const projectTemplates = availableProjectTemplates(tables.journey_templates, form.project_type_id, form.project_modality_id === "__new" ? "" : form.project_modality_id);
 
   return (
     <section className="form-panel inline-panel">
@@ -3782,13 +3833,20 @@ function NewProjectPanel({ tables, currentUser, onCreate, onClose }: { tables: T
         {form.client_id === "__new" && <Field label="Novo cliente" value={form.new_client_name} onChange={(value) => setForm({ ...form, new_client_name: value, company: value })} />}
         {!form.client_id && <Field label="Empresa / cliente legado" value={form.company} onChange={(value) => setForm({ ...form, company: value })} />}
         <SelectField label="Responsavel" value={form.responsible_user_id} onChange={(value) => setForm({ ...form, responsible_user_id: value })} options={activeUsers.map(toOption)} />
-        <SelectField label="Tipo de projeto" value={form.project_type_id} onChange={(value) => setForm((current) => ({ ...current, project_type_id: value, journey_template_id: templateAfterTypeChange(current.journey_template_id, value, tables.journey_templates) }))} options={tables.project_types.filter((type) => type.status === "ativo" || type.id === form.project_type_id).map(toOption)} />
+        <SelectField label="Tipo de projeto" value={form.project_type_id} onChange={(value) => setForm((current) => ({ ...current, project_type_id: value, project_modality_id: "", new_project_modality_name: "", journey_template_id: templateAfterTypeChange(current.journey_template_id, value, "", tables.journey_templates) }))} options={tables.project_types.filter((type) => type.status === "ativo" || type.id === form.project_type_id).map(toOption)} />
+        <ModalitySearchSelect
+          value={form.project_modality_id}
+          projectTypeId={form.project_type_id}
+          modalities={tables.project_modalities}
+          newName={form.new_project_modality_name}
+          onChange={(value, newName = "") => setForm((current) => ({ ...current, project_modality_id: value, new_project_modality_name: newName, journey_template_id: templateAfterTypeChange(current.journey_template_id, current.project_type_id, value === "__new" ? "" : value, tables.journey_templates) }))}
+        />
         <SelectField
           label="Template"
           value={form.journey_template_id}
           onChange={(value) => {
             const template = tables.journey_templates.find((item) => item.id === value);
-            setForm((current) => ({ ...current, journey_template_id: value, project_type_id: template?.project_type_id ?? current.project_type_id }));
+            setForm((current) => ({ ...current, journey_template_id: value, project_type_id: template?.project_type_id ?? current.project_type_id, project_modality_id: template?.project_modality_id ?? current.project_modality_id, new_project_modality_name: "" }));
           }}
           options={projectTemplates.map((template) => ({ value: template.id, label: `${template.name} · ${templateTypeName(template, tables.project_types)}` }))}
           emptyLabel="Comecar vazio"
@@ -8349,6 +8407,67 @@ function ClientSearchSelect({ label, value, clients, onChange, allowCreate = fal
       {filtered.map((client, index) => <button type="button" role="option" aria-selected={index === activeIndex} className="client-search-result" key={client.id} onClick={() => select(client.id)}><ClientLogo client={client} small /><span>{client.name}</span>{client.client_kind && <span className="client-kind-badge">{client.client_kind}</span>}{!client.is_active && <small>Inativo</small>}</button>)}
       {!filtered.length && <span className="client-search-empty">Nenhum cliente encontrado</span>}
       {allowCreate && <button type="button" role="option" aria-selected={activeIndex === filtered.length} className="client-search-result create" onClick={() => select("__new")}><Plus size={16} /> Criar novo cliente</button>}
+    </div>}
+  </div>;
+}
+
+function ModalitySearchSelect({ value, projectTypeId, modalities, newName, onChange }: {
+  value: string;
+  projectTypeId: string;
+  modalities: ProjectModality[];
+  newName: string;
+  onChange: (value: string, newName?: string) => void;
+}) {
+  const listId = useId();
+  const selected = modalities.find((item) => item.id === value);
+  const selectedLabel = value === "__new" ? newName : selected?.name ?? "";
+  const [search, setSearch] = useState(selectedLabel);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { if (!open) setSearch(selectedLabel); }, [open, selectedLabel]);
+  const normalized = normalizeSearchText(search);
+  const filtered = modalities
+    .filter((item) => item.project_type_id === projectTypeId && item.status === "ativo")
+    .filter((item) => normalizeSearchText(item.name).includes(normalized))
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+    .slice(0, 20);
+  const exact = modalities.some((item) => item.project_type_id === projectTypeId && normalizeSearchText(item.name) === normalized);
+  const canCreate = Boolean(projectTypeId && search.trim() && !exact);
+
+  function select(nextValue: string, nextName = "") {
+    onChange(nextValue, nextName);
+    setSearch(nextValue === "__new" ? nextName : modalities.find((item) => item.id === nextValue)?.name ?? "");
+    setOpen(false);
+  }
+
+  return <div className="field client-search-select" onBlur={(event) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) { setOpen(false); setSearch(selectedLabel); }
+  }}>
+    <span>Modalidade</span>
+    <div className="client-search-input"><Search size={16} aria-hidden="true" /><input
+      type="text"
+      role="combobox"
+      aria-label="Modalidade"
+      aria-autocomplete="list"
+      aria-expanded={open}
+      aria-controls={listId}
+      disabled={!projectTypeId}
+      placeholder={projectTypeId ? "Digite para buscar ou criar" : "Escolha primeiro o tipo"}
+      value={search}
+      onFocus={(event) => { setOpen(true); event.currentTarget.select(); }}
+      onChange={(event) => { setSearch(event.target.value); setOpen(true); }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") { setOpen(false); setSearch(selectedLabel); }
+        if (event.key === "Enter" && open) {
+          event.preventDefault();
+          if (filtered[0]) select(filtered[0].id);
+          else if (canCreate) select("__new", search.trim());
+        }
+      }}
+    /></div>
+    {open && projectTypeId && <div id={listId} className="client-search-results" role="listbox" aria-label="Modalidades disponiveis">
+      {filtered.map((item) => <button type="button" role="option" aria-selected={item.id === value} className="client-search-result" key={item.id} onClick={() => select(item.id)}><Layers3 size={16} /><span>{item.name}</span></button>)}
+      {!filtered.length && !canCreate && <span className="client-search-empty">Nenhuma modalidade encontrada</span>}
+      {canCreate && <button type="button" role="option" aria-selected={value === "__new"} className="client-search-result create" onClick={() => select("__new", search.trim())}><Plus size={16} /> Criar modalidade “{search.trim()}”</button>}
     </div>}
   </div>;
 }
