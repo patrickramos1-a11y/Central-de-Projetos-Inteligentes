@@ -5,34 +5,38 @@
   --font-display: "Outfit", "Inter", sans-serif;
   --font-mono: "JetBrains Mono", Consolas, monospace;
 
-  --color-ink: #18352f;
-  --color-muted: #61736d;
-  --color-canvas: #fbfdfc;
-  --color-sage: #dce6e1;
-  --color-border: #c6d4ce;
-  --color-green: #0b9b68;
-  --color-progress: #25d58a;
-  --color-blue: #2878d4;
+  --color-primary: #4169d8;
+  --color-primary-hover: #3156b7;
+  --color-primary-rgb: 65 105 216;
+  --color-heading: #1b315e;
+  --color-ink: #263958;
+  --color-muted: #68758c;
+  --color-canvas: #f4f7fc;
+  --color-sage: #e6ebf4;
+  --color-border: #d5ddec;
+  --color-green: #0b8f63;
+  --color-progress: #22b879;
+  --color-blue: var(--color-primary);
   --color-violet: #7057d9;
   --color-amber: #d99518;
   --color-red: #c9555d;
   --color-metal: #6b7b75;
 
-  --surface-page: #dce6e1;
-  --surface-glass: rgb(251 253 252 / 78%);
-  --surface-solid: #fbfdfc;
-  --surface-subtle: #f0f5f2;
-  --surface-selected: #e7f8ef;
-  --surface-info: #eaf3ff;
+  --surface-page: #f4f7fc;
+  --surface-glass: rgb(255 255 255 / 84%);
+  --surface-solid: #ffffff;
+  --surface-subtle: #f8faff;
+  --surface-selected: #eef3ff;
+  --surface-info: #eef3ff;
   --surface-ai: #f0edff;
   --surface-warning: #fff7e8;
   --surface-danger: #fff0f1;
 
-  --border-subtle: 1px solid rgb(24 53 47 / 12%);
-  --border-strong: 1px solid rgb(24 53 47 / 20%);
-  --shadow-sm: 0 2px 8px rgb(25 52 45 / 8%);
-  --shadow-md: 0 12px 28px rgb(25 52 45 / 13%);
-  --shadow-focus: 0 0 0 3px rgb(40 120 212 / 22%);
+  --border-subtle: 1px solid rgb(27 49 94 / 12%);
+  --border-strong: 1px solid rgb(27 49 94 / 20%);
+  --shadow-sm: 0 2px 8px rgb(27 49 94 / 8%);
+  --shadow-md: 0 12px 28px rgb(27 49 94 / 11%);
+  --shadow-focus: 0 0 0 3px rgb(var(--color-primary-rgb) / 24%);
   --blur-glass: blur(18px) saturate(115%);
 
   --space-1: 4px;
@@ -49,10 +53,18 @@
   --transition: 180ms ease;
 
   /* Legacy aliases retained while the product moves screen by screen. */
+  --brand-primary: var(--color-primary);
+  --brand-primary-hover: var(--color-primary-hover);
+  --brand-primary-rgb: var(--color-primary-rgb);
   --brand-green: var(--color-progress);
-  --deep-teal: var(--color-green);
+  --brand-green-rgb: 34 184 121;
+  --deep-teal: var(--color-primary);
+  --deep-teal-rgb: var(--color-primary-rgb);
+  --brand-deep: var(--color-heading);
   --brand-gray: var(--color-metal);
   --text: var(--color-ink);
+  --text-main: var(--color-ink);
+  --text-strong: var(--color-heading);
   --muted: var(--color-muted);
   --text-soft: var(--color-muted);
   --glass: var(--surface-glass);

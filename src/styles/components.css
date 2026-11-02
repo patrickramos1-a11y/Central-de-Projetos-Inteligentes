@@ -33,7 +33,7 @@
   background: var(--surface-solid);
   box-shadow: none;
 }
-.step-builder-block.is-collapsed:hover { border-color: rgb(11 155 104 / 34%); box-shadow: var(--shadow-sm); }
+.step-builder-block.is-collapsed:hover { border-color: rgb(var(--color-primary-rgb) / 34%); box-shadow: var(--shadow-sm); }
 .step-builder-block.is-collapsed .block-card-heading { min-height: 46px; }
 
 .journey-command-bar, .step-auto-status { gap: var(--space-2); }

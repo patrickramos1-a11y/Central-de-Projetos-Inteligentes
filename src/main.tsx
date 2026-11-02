@@ -9,6 +9,7 @@ import "./styles/journey.css";
 import "./styles/admin.css";
 import "./styles/projects.css";
 import "./styles/workspace.css";
+import "./styles/theme-cobalt.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

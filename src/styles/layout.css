@@ -4,10 +4,7 @@ body {
   min-width: 320px;
   color: var(--color-ink);
   font-family: var(--font-ui);
-  background:
-    radial-gradient(circle at 0 0, rgb(37 213 138 / 18%), transparent 28rem),
-    radial-gradient(circle at 100% 0, rgb(40 120 212 / 10%), transparent 30rem),
-    linear-gradient(145deg, #e7eeea 0%, var(--surface-page) 42%, #c9d7d1 100%);
+  background: var(--surface-page);
 }
 
 button, input, select, textarea { font: inherit; }

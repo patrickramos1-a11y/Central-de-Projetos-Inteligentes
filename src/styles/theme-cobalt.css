@@ -1,0 +1,572 @@
+/* Brand theme layer. Imported last so legacy rules keep their structure while
+   identity colors are separated from functional success/warning/error states. */
+
+html,
+body {
+  color: var(--color-ink);
+  background: var(--surface-page);
+}
+
+body::before,
+body::after {
+  display: none;
+}
+
+a {
+  color: var(--color-primary);
+}
+
+a:hover {
+  color: var(--color-primary-hover);
+}
+
+::selection {
+  color: var(--color-heading);
+  background: rgb(var(--color-primary-rgb) / 24%);
+}
+
+::-webkit-scrollbar-thumb {
+  border-color: rgb(255 255 255 / 56%);
+  background: rgb(var(--color-primary-rgb) / 34%);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--color-primary-rgb) / 52%);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  box-shadow: var(--shadow-focus);
+}
+
+.sidebar,
+.topbar,
+.journey-context-bar {
+  border-color: rgb(27 49 94 / 12%);
+  background: rgb(255 255 255 / 86%);
+  box-shadow: 0 8px 24px rgb(27 49 94 / 9%);
+}
+
+.sidebar,
+.topbar {
+  backdrop-filter: blur(20px) saturate(112%);
+}
+
+.brand {
+  color: var(--color-heading);
+}
+
+.brand-mark {
+  width: 46px;
+  height: 46px;
+  padding: 3px;
+  overflow: hidden;
+  border: 1px solid rgb(var(--color-primary-rgb) / 16%);
+  background: #fff;
+  box-shadow: 0 8px 18px rgb(var(--color-primary-rgb) / 14%);
+}
+
+.brand-mark-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.nav-item,
+.nav-button,
+.subnav-item {
+  color: #53617a;
+}
+
+.nav-item:hover,
+.nav-button:hover,
+.subnav-item:hover {
+  color: var(--color-primary-hover);
+  background: var(--surface-selected);
+}
+
+.nav-item.active,
+.nav-button.active,
+.subnav-item.active {
+  color: var(--color-primary-hover);
+  border-color: rgb(var(--color-primary-rgb) / 22%);
+  background: var(--surface-selected);
+  box-shadow: inset 0 -2px 0 var(--color-primary);
+}
+
+.nav-item.active::before,
+.subnav-item.active::before {
+  background: var(--color-primary);
+  box-shadow: 0 0 12px rgb(var(--color-primary-rgb) / 48%);
+}
+
+.header-sync-status:not(.saving):not(.error) {
+  color: var(--color-green);
+}
+
+.topbar h1,
+.journey-title h1,
+.journey-context-copy h1,
+.user-entry-heading h1,
+.inline-title,
+.panel-heading h2,
+.form-heading h2,
+.block-heading h2,
+.work-heading h2,
+.modal-heading h2,
+.projects-page-title h1,
+.projects-portfolio-heading h2 {
+  color: var(--color-heading);
+}
+
+.topbar::before,
+.journey-header::before,
+.work-heading::before,
+.panel-heading::before,
+.form-heading::before,
+.block-heading::before,
+.modal-heading::before {
+  background: linear-gradient(90deg, transparent, rgb(var(--color-primary-rgb) / 30%), transparent);
+}
+
+.list-panel,
+.form-panel,
+.work-surface,
+.block-work-surface,
+.work-block,
+.metric-card,
+.project-card,
+.client-card,
+.template-card,
+.step-rail,
+.action-panel,
+.summary-modal,
+.empty-state,
+.empty-block-canvas,
+.block-type-menu,
+.context-compose,
+.summary-review-card,
+.summary-prompt-card,
+.stage-library-layout,
+.project-create-dialog,
+.project-create-dialog .form-panel {
+  border-color: rgb(27 49 94 / 12%);
+  background: #fff;
+  box-shadow: var(--shadow-md);
+}
+
+.metric-card,
+.project-card,
+.client-card,
+.template-card,
+.record-row,
+.config-list-item,
+.summary-item.tree-row,
+.context-mini-card,
+.material-row,
+.check-item-row,
+.phase-row,
+.prompt-card,
+.step-card,
+.user-card {
+  border-color: rgb(27 49 94 / 11%);
+  background: #fff;
+  box-shadow: 0 6px 18px rgb(27 49 94 / 7%);
+}
+
+.project-card::after,
+.template-card::after,
+.client-card::after,
+.metric-card::after {
+  background: linear-gradient(120deg, rgb(255 255 255 / 10%), transparent 50%, rgb(var(--color-primary-rgb) / 4%));
+}
+
+.metric-card:hover,
+.project-card:hover,
+.client-card:hover,
+.template-card:hover,
+.context-mini-card:hover,
+.record-row:hover,
+.summary-item.tree-row:hover,
+.user-card:hover {
+  border-color: rgb(var(--color-primary-rgb) / 28%);
+  box-shadow: 0 12px 28px rgb(27 49 94 / 11%);
+}
+
+.primary-button,
+.action-button.primary,
+.summary-composer-save-card,
+.step-builder-block.project_summary .summary-floating-composer .summary-option-card.confirm-card {
+  color: #fff;
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  box-shadow: 0 8px 18px rgb(var(--color-primary-rgb) / 22%);
+}
+
+.primary-button:hover:not(:disabled),
+.action-button.primary:hover:not(:disabled),
+.summary-composer-save-card:hover:not(:disabled) {
+  color: #fff;
+  border-color: var(--color-primary-hover);
+  background: var(--color-primary-hover);
+  box-shadow: 0 10px 22px rgb(var(--color-primary-rgb) / 28%);
+}
+
+.secondary-button,
+.ghost-button,
+.action-button,
+.row-actions button,
+.record-row.compact button,
+.icon-button,
+.icon-text-button,
+.file-upload-button,
+.chip,
+.summary-copy-chip,
+.summary-mini-chip,
+.prompt-scope-strip button,
+.prompt-pick-button,
+.block-type-menu button {
+  color: var(--color-primary-hover);
+  border-color: rgb(var(--color-primary-rgb) / 16%);
+  background: #fff;
+  box-shadow: 0 4px 12px rgb(27 49 94 / 6%);
+}
+
+.secondary-button:hover:not(:disabled),
+.ghost-button:hover:not(:disabled),
+.action-button:hover:not(:disabled),
+.row-actions button:hover:not(:disabled),
+.record-row.compact button:hover:not(:disabled),
+.icon-button:hover:not(:disabled),
+.icon-text-button:hover:not(:disabled),
+.file-upload-button:hover:not(:disabled),
+.chip:hover:not(:disabled),
+.summary-copy-chip:hover:not(:disabled),
+.prompt-scope-strip button:hover:not(:disabled),
+.prompt-pick-button:hover:not(:disabled),
+.block-type-menu button:hover:not(:disabled) {
+  color: var(--color-primary-hover);
+  border-color: rgb(var(--color-primary-rgb) / 34%);
+  background: var(--surface-selected);
+  box-shadow: 0 8px 18px rgb(var(--color-primary-rgb) / 12%);
+}
+
+.icon-button.danger,
+.danger-text-button,
+.projects-action-button.danger {
+  color: var(--color-red);
+}
+
+.primary-button:disabled,
+.secondary-button:disabled,
+.ghost-button:disabled,
+.icon-button:disabled,
+.action-button:disabled {
+  color: #8c96a8;
+  border-color: #e0e5ee;
+  background: #f2f4f8;
+  box-shadow: none;
+  opacity: 0.68;
+}
+
+.field input,
+.field textarea,
+.field select,
+.search-field input,
+.inline-form input,
+.inline-form select,
+.quick-step-form input,
+.local-prompt-form input,
+.local-prompt-form select,
+.local-prompt-form textarea,
+.context-compose input,
+.context-compose textarea,
+.compact-textarea,
+.prompt-block-compact textarea,
+.summary-title-input,
+.prompt-preview,
+.compact-select {
+  color: var(--color-ink);
+  border-color: var(--color-border);
+  background: #fff;
+  box-shadow: inset 0 1px 2px rgb(27 49 94 / 4%);
+}
+
+.field input:focus,
+.field textarea:focus,
+.field select:focus,
+.search-field input:focus,
+.inline-form input:focus,
+.inline-form select:focus,
+.quick-step-form input:focus,
+.local-prompt-form input:focus,
+.local-prompt-form select:focus,
+.local-prompt-form textarea:focus,
+.context-compose input:focus,
+.context-compose textarea:focus,
+.compact-textarea:focus,
+.prompt-block-compact textarea:focus,
+.summary-title-input:focus,
+.prompt-preview:focus,
+.compact-select:focus {
+  border-color: var(--color-primary);
+  background: #fff;
+  box-shadow: var(--shadow-focus);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--color-primary);
+}
+
+.template-section-tabs button[aria-selected="true"],
+.stage-library-status-tabs button[aria-selected="true"],
+.template-stage-picker-option:has(input:checked),
+.project-stage-option:has(input:checked),
+.stage-library-list-item.active,
+.stage-library-list-item[aria-current="true"] {
+  color: var(--color-primary-hover);
+  border-color: rgb(var(--color-primary-rgb) / 34%);
+  background: var(--surface-selected);
+}
+
+.stage-library-block-icon,
+.template-card-stage-row > span:first-child,
+.workspace-tool-toggle small {
+  color: var(--color-primary-hover);
+  background: var(--surface-selected);
+}
+
+.stage-library-blocks article {
+  border-color: var(--color-border);
+  border-left-color: var(--color-primary);
+  background: #fff;
+}
+
+.template-editor-layout {
+  border-color: var(--color-border);
+  background: #fff;
+}
+
+.template-editor-rail {
+  border-color: var(--color-border);
+  background: var(--surface-subtle);
+}
+
+.template-editor-step {
+  color: var(--color-heading);
+}
+
+.template-editor-step.active {
+  color: var(--color-primary-hover);
+  background: var(--surface-selected);
+  box-shadow: inset 3px 0 var(--color-primary);
+}
+
+.template-editor-step.workspace {
+  color: var(--color-primary-hover);
+  background: #fff;
+}
+
+.template-editor-step > button:first-child span,
+.template-editor-step.workspace span {
+  color: var(--color-primary);
+  background: var(--surface-selected);
+}
+
+.template-editor-step-heading {
+  border-color: var(--color-border);
+}
+
+.project-stage-blank,
+.workspace-prompt-shortcuts button {
+  color: var(--color-primary-hover);
+  border-color: rgb(var(--color-primary-rgb) / 24%);
+  background: var(--surface-selected);
+}
+
+.step-item.active,
+.step-rail-navigation .step-item.active,
+.collapsible-rail .step-item.active {
+  border-color: rgb(var(--color-primary-rgb) / 52%);
+  background: var(--surface-selected);
+  box-shadow: inset 3px 0 0 var(--color-primary), 0 6px 16px rgb(var(--color-primary-rgb) / 10%);
+}
+
+.step-na-summary.active {
+  color: var(--color-primary-hover);
+  border-color: rgb(var(--color-primary-rgb) / 44%);
+  background: var(--surface-selected);
+}
+
+.journey-command-bar,
+.step-auto-status,
+.workspace-reference-form,
+.workspace-context-form,
+.client-workspaces-dialog,
+.stage-library-list {
+  border-color: var(--color-border);
+  background: var(--surface-subtle);
+}
+
+.projects-page {
+  color: var(--color-ink);
+  background: transparent;
+}
+
+.projects-page > .projects-page-heading .primary-button {
+  background: var(--color-primary);
+}
+
+.projects-page > .projects-page-heading .primary-button:hover {
+  background: var(--color-primary-hover);
+}
+
+.projects-portfolio {
+  border-color: rgb(27 49 94 / 11%);
+  background: #fff;
+  box-shadow: var(--shadow-md);
+}
+
+.projects-search,
+.projects-filter select,
+.projects-segment,
+.projects-owner-segment {
+  border-color: var(--color-border);
+  background: #fff;
+}
+
+.projects-search:focus-within,
+.projects-filter select:focus-visible,
+.projects-segment button:focus-visible,
+.projects-owner-filter-button:focus-visible,
+.projects-column-sort:focus-visible,
+.projects-column-filter summary:focus-visible {
+  outline-color: var(--color-primary);
+  box-shadow: var(--shadow-focus);
+}
+
+.projects-group-segment button[aria-pressed="true"],
+.projects-segment button[aria-pressed="true"] {
+  color: var(--color-primary-hover);
+  background: var(--surface-selected);
+}
+
+/* Status choices remain semantic rather than adopting the brand color. */
+.projects-status-segment button:nth-child(2)[aria-pressed="true"] {
+  color: #76551b;
+  background: #f8e9c7;
+}
+
+.projects-status-segment button:nth-child(3)[aria-pressed="true"] {
+  color: #126044;
+  background: #d8f1e2;
+}
+
+.projects-column-head {
+  color: #526079;
+  border-color: #dfe5f0;
+  background: #f1f4f9;
+}
+
+.projects-column-sort svg,
+.projects-column-sort[aria-pressed="true"] {
+  color: var(--color-primary);
+}
+
+.projects-column-filter summary:hover,
+.projects-column-filter[open] summary,
+.projects-column-filter[data-active="true"] summary {
+  color: var(--color-primary-hover);
+  background: var(--surface-selected);
+}
+
+.projects-row,
+.projects-row:nth-child(even) {
+  border-bottom-color: #e6eaf2;
+  background: #fff;
+}
+
+.projects-row:nth-child(even) {
+  background: #fafbfe;
+}
+
+.projects-row:hover,
+.projects-row:focus-within {
+  background: var(--surface-selected);
+}
+
+.projects-project button,
+.projects-project-name {
+  color: var(--color-heading);
+}
+
+.projects-project-company,
+.projects-type {
+  color: #5b63a5;
+}
+
+.projects-action-button.edit {
+  color: var(--color-primary-hover);
+}
+
+.projects-action-button:hover:not(:disabled) {
+  color: var(--color-primary-hover);
+  border-color: rgb(var(--color-primary-rgb) / 30%);
+  background: var(--surface-selected);
+}
+
+/* Functional colors are intentionally independent from the cobalt identity. */
+.ui-progress-track > span,
+.progress-bar span,
+.summary-progress-track i,
+.projects-execution progress::-webkit-progress-value {
+  background: linear-gradient(90deg, var(--color-green), var(--color-progress));
+  box-shadow: 0 0 12px rgb(34 184 121 / 28%);
+}
+
+.projects-execution progress::-moz-progress-bar {
+  background: linear-gradient(90deg, var(--color-green), var(--color-progress));
+}
+
+.progress-ring {
+  background: conic-gradient(var(--color-progress) var(--progress), rgb(255 255 255 / 48%) 0);
+}
+
+.step-dot.concluido,
+.status-pill.concluido,
+.status-pill.ativo,
+.ui-status-badge.complete,
+.collapsed-block-status.complete,
+.prompt-attachment-requirement.complete,
+.projects-action-button.complete,
+.workspace-done {
+  color: #075c48;
+}
+
+.step-dot.concluido {
+  border-color: var(--color-green);
+  background: var(--color-progress);
+}
+
+.prompt-conditions-runtime {
+  border-left-color: var(--color-green);
+}
+
+@media (max-width: 700px) {
+  .brand-mark {
+    width: 42px;
+    height: 42px;
+  }
+
+  .sidebar,
+  .topbar {
+    background: rgb(255 255 255 / 94%);
+  }
+}
