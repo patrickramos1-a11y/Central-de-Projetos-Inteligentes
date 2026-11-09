@@ -45,6 +45,7 @@ import { connectCentralLive, isCentralLiveViewer, publishCentralLiveContext } fr
 import { resolveBoundSummary } from "../features/summary/summaryBinding";
 import { replaceSummaryState, shouldApplySummaryState, type SummaryState } from "../features/summary/summaryState";
 import { promptToneHue } from "../features/summary/promptTone";
+import { cloneSummaryMasterPromptConfig, resolveSummaryMasterPromptConfig, type SummaryPromptAddition, type SummaryPromptConfig } from "../features/summary/masterPrompt";
 import { clientKindOptions, validateClientLogo, type ClientKind } from "../features/clients/clientIdentity";
 import { ClientContextLibrary } from "../features/clients/ClientContextLibrary";
 import { ClientPortfolio } from "../features/clients/ClientPortfolio";
@@ -426,50 +427,7 @@ type GeneratedPrompt = {
 
 type GeneratedPromptWrite = Omit<GeneratedPrompt, "id" | "created_at" | "status" | "archived_at">;
 
-type SummaryPromptAddition = {
-  id: string;
-  label: string;
-  content: string;
-  enabledByDefault?: boolean;
-};
-
-type SummaryPromptConfig = {
-  // Kept only so prompt settings saved by older versions remain readable.
-  // New summary versions use their own text snapshot, never the general library.
-  basePromptId?: string | null;
-  basePromptSnapshot?: string;
-  triggerPromptSnapshot?: string;
-  additions?: SummaryPromptAddition[];
-};
-
-// Every project summary starts with the same operational composer. A version can
-// still replace any of these texts deliberately, but an empty legacy version no
-// longer loses the controls that are part of the standard Ramos workflow.
-const defaultSummaryPromptConfig: SummaryPromptConfig = {
-  basePromptId: null,
-  basePromptSnapshot: [
-    "Desenvolva os topicos selecionados do documento ambiental com clareza tecnica, coerencia e linguagem profissional.",
-    "Use {{topicos_selecionados}} como escopo obrigatorio da entrega e considere {{sumario_consolidado}} como referencia de estrutura.",
-    "Projeto: {{projeto}}. Empresa: {{empresa}}.",
-  ].join("\n\n"),
-  triggerPromptSnapshot: "Localize o arquivo de prompt gerado, aplique todas as instrucoes configuradas e execute integralmente a solicitacao para os topicos selecionados.",
-  additions: [
-    ["Tabelas", "Inclua tabelas quando ajudarem a organizar comparacoes, dados ou evidencias."],
-    ["Graficos", "Sugira ou descreva graficos quando a leitura visual melhorar a compreensao dos dados."],
-    ["Enfase visual", "Estruture a resposta para leitura visual, com destaques objetivos e boa hierarquia."],
-    ["Fluxograma", "Inclua um fluxograma textual quando houver sequencias, responsabilidades ou fluxos operacionais."],
-    ["Normas tecnicas", "Considere normas tecnicas, diretrizes e boas praticas aplicaveis ao tema."],
-    ["Legislacao", "Considere a legislacao ambiental e os requisitos regulatorios pertinentes."],
-    ["Concisao e objetividade", "Priorize uma redacao direta, evitando repeticoes e detalhes que nao apoiem a decisao."],
-    ["Aprofundamento", "Aprofunde a analise tecnica, explicando criterios, impactos e justificativas relevantes."],
-    ["Monitoramento simplificado", "Apresente medidas de monitoramento em formato simples, acionavel e verificavel."],
-    ["Acoes ambientais praticas", "Proponha acoes ambientais praticas, proporcionais e factiveis para a realidade do projeto."],
-    ["Cronograma simplificado", "Inclua um cronograma resumido com etapas, responsaveis e marcos quando fizer sentido."],
-    ["Etapas do processo", "Organize a resposta em etapas operacionais claras, indicando a sequencia recomendada."],
-    ["Impactos e controles", "Relacione impactos, riscos, medidas de controle e evidencias de verificacao."],
-    ["Indicadores simplificados", "Sugira indicadores simples para acompanhar a execucao e a conformidade."],
-  ].map(([label, content]) => ({ id: `default-summary-${normalizeSearchText(label).replace(/\s+/g, "-")}`, label, content, enabledByDefault: false })),
-};
+const defaultSummaryPromptConfig: SummaryPromptConfig = cloneSummaryMasterPromptConfig();
 
 type Client = {
   id: string;
@@ -6032,6 +5990,16 @@ function LegacySummaryOperationalBlock({
   const basePromptText = summaryPromptConfig.basePromptSnapshot?.trim() ?? "";
   const triggerPromptText = summaryPromptConfig.triggerPromptSnapshot?.trim() ?? "";
   const projectType = tables.project_types.find((item) => item.id === project.project_type_id)?.name ?? null;
+  const projectStepIds = new Set(tables.project_steps.filter((item) => item.project_id === project.id).map((item) => item.id));
+  const operationalContext = [
+    project.notes?.trim() ?? "",
+    ...tables.project_step_contexts
+      .filter((context) => projectStepIds.has(context.project_step_id) && context.status !== "arquivado")
+      .map((context) => `${context.title}: ${context.content}`.trim()),
+    ...tables.project_step_links
+      .filter((link) => projectStepIds.has(link.project_step_id))
+      .map((link) => `${link.title}: ${link.url}`),
+  ].filter(Boolean).join("\n\n") || "Nenhum contexto adicional foi cadastrado para este projeto.";
   const resolvedTriggerPromptText = triggerPromptText
     ? interpolateJourneyPrompt(triggerPromptText, {
       projectName: project.name,
@@ -6039,7 +6007,7 @@ function LegacySummaryOperationalBlock({
       projectType,
       stepName: selectedStep.name,
       responsible: getResponsibleName(project, tables.app_users),
-      context: project.notes,
+      context: operationalContext,
       summary: summary?.consolidated_text?.trim() ?? null,
     }).trim()
     : "";
@@ -6055,6 +6023,7 @@ function LegacySummaryOperationalBlock({
     items: selectedPromptItems,
     basePrompt,
     blocks: [],
+    projectContext: operationalContext,
     promptOptions: selectedPromptAdditions.map((addition) => `${addition.label}: ${addition.content}`),
   });
   const collapsibleIds = items.filter((item) => items.some((child) => child.parent_id === item.id)).map((item) => item.id);
@@ -7146,29 +7115,27 @@ function ProjectSummaryPanel({
       {activeSummary && (
         <details className="summary-prompt-settings">
           <summary>
-            <span>Configurar prompts do sumario</span>
-            <small>{promptConfig.basePromptSnapshot?.trim() ? "Prompt base configurado" : "Prompt base pendente"} · {promptConfig.triggerPromptSnapshot?.trim() ? "gatilho configurado" : "gatilho pendente"} · versao {activeSummary.version_number}</small>
+            <span>Sumario Mestre Ramos</span>
+            <small>Configuracao unica e completa aplicada a todas as versoes · versao {activeSummary.version_number}</small>
           </summary>
           <div className="summary-prompt-settings-body">
             <label className="field summary-base-prompt-field">
-              <span>Prompt base desta versao</span>
+              <span>Prompt base canonico</span>
               <textarea
                 rows={4}
                 value={promptConfig.basePromptSnapshot ?? ""}
-                onChange={(event) => updatePromptConfig({ basePromptId: null, basePromptSnapshot: event.target.value })}
-                placeholder="Escreva o prompt base e use {{topicos_selecionados}} onde os itens escolhidos devem entrar."
+                readOnly
               />
             </label>
             <label className="field summary-base-prompt-field">
-              <span>Prompt de gatilho</span>
+              <span>Gatilho canonico</span>
               <textarea
                 rows={3}
                 value={promptConfig.triggerPromptSnapshot ?? ""}
-                onChange={(event) => updatePromptConfig({ triggerPromptSnapshot: event.target.value })}
-                placeholder="Escreva a instrucao fixa que inicia a execucao do prompt salvo."
+                readOnly
               />
             </label>
-            <p className="summary-prompt-variable-help">Variaveis disponiveis: <code>{"{{projeto}}"}</code>, <code>{"{{empresa}}"}</code>, <code>{"{{sumario_consolidado}}"}</code> e <code>{"{{topicos_selecionados}}"}</code>. O prompt de gatilho e fixo; o prompt base e as instrucoes adicionais compoem o arquivo salvo.</p>
+            <p className="summary-prompt-variable-help">O prompt aplica o projeto, empresa, contexto cadastrado, sumario consolidado e topicos selecionados. Versoes e prompts antigos permanecem preservados como historico.</p>
 
             <div className="summary-additions-editor">
               <div className="summary-additions-heading"><strong>Instrucoes adicionais</strong><span>Entram na composicao quando selecionadas na execucao.</span></div>
@@ -7176,27 +7143,9 @@ function ProjectSummaryPanel({
                 {(promptConfig.additions ?? []).map((addition) => (
                   <article className="summary-addition-row" key={addition.id}>
                     <strong title={addition.content}>{addition.label}</strong>
-                    <div className="summary-addition-actions">
-                      <button className="icon-button subtle" type="button" title="Editar instrucao adicional" onClick={() => openAdditionEditor(addition)}><Pencil size={15} /></button>
-                      <button className="icon-button subtle" type="button" title="Excluir instrucao adicional" onClick={() => updatePromptConfig({ additions: (promptConfig.additions ?? []).filter((item) => item.id !== addition.id) })}><Trash2 size={15} /></button>
-                    </div>
                   </article>
                 ))}
-                {!editingAdditionId && <button className="secondary-button summary-addition-new" type="button" onClick={() => openAdditionEditor()}><Plus size={15} /> Adicionar instrucao</button>}
               </div>
-              {editingAdditionId ? (
-                <div className="summary-addition-create">
-                  <input value={additionLabel} onChange={(event) => setAdditionLabel(event.target.value)} placeholder="Nome da instrucao" />
-                  <textarea rows={3} value={additionContent} onChange={(event) => setAdditionContent(event.target.value)} placeholder="Instrucao adicional" />
-                  <div className="inline-actions">
-                    <button className="primary-button" type="button" disabled={!additionLabel.trim() || !additionContent.trim()} onClick={savePromptAddition}><Save size={15} /> Salvar</button>
-                    <button className="secondary-button" type="button" onClick={() => setEditingAdditionId(null)}>Cancelar</button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-            <div className="inline-actions summary-prompt-settings-actions">
-              <button className="primary-button" type="button" onClick={savePromptConfig}><Save size={15} /> Salvar configuracao desta versao</button>
             </div>
           </div>
         </details>
@@ -9018,19 +8967,13 @@ function mergeSummaryPromptConfig(base: SummaryPromptConfig, override: SummaryPr
 }
 
 function resolveSummaryPromptConfig(summary: ProjectSummary | null | undefined, allSummaries: ProjectSummary[]) {
-  const inherited = allSummaries
-    .map((candidate) => ({
-      config: parseSummaryPromptConfig(candidate.prompt_config_json),
-      updatedAt: candidate.updated_at ?? candidate.created_at ?? "",
-    }))
-    .filter(({ config }) => hasSummaryPromptConfig(config))
-    .sort((left, right) => {
-      const scoreDifference = summaryPromptConfigScore(right.config) - summaryPromptConfigScore(left.config);
-      return scoreDifference || right.updatedAt.localeCompare(left.updatedAt);
-    })[0]?.config;
-
-  const platformConfig = inherited ? mergeSummaryPromptConfig(defaultSummaryPromptConfig, inherited) : cloneSummaryPromptConfig(defaultSummaryPromptConfig);
-  return mergeSummaryPromptConfig(platformConfig, parseSummaryPromptConfig(summary?.prompt_config_json));
+  // Historic versions retain their prompt_config_json for audit and for every
+  // generated prompt snapshot already saved. New executions must always begin
+  // with the same complete instruction set, rather than inheriting a thin
+  // project-local configuration from another summary.
+  void summary;
+  void allSummaries;
+  return resolveSummaryMasterPromptConfig();
 }
 
 function composeGeneratedPrompt({
@@ -9041,6 +8984,7 @@ function composeGeneratedPrompt({
   items,
   basePrompt,
   blocks,
+  projectContext,
   promptOptions,
 }: {
   project: Project;
@@ -9050,6 +8994,7 @@ function composeGeneratedPrompt({
   items?: ProjectSummaryItem[];
   basePrompt: Pick<Prompt, "id" | "content" | "ai_tool_id"> | null;
   blocks: PromptBlock[];
+  projectContext?: string | null;
   promptOptions?: string[];
 }) {
   const header = [
@@ -9073,7 +9018,7 @@ function composeGeneratedPrompt({
     projectType: null,
     stepName: step.name,
     responsible: project.responsible,
-    context: project.notes,
+    context: projectContext ?? project.notes,
     summary: summary?.consolidated_text?.trim() ?? null,
   }).split("{{topicos_selecionados}}").join(selectedTopicsText);
   const summaryContext = !usesSummaryVariable && summary?.consolidated_text?.trim()
