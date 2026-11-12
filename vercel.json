@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://central-projetos-ia-api.patrickramos1-a11y.workers.dev/api/:path*"
+    }
+  ]
+}
