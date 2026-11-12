@@ -22,7 +22,7 @@ export function ClientWorkspacesDialog({ baseUrl, clientId, clientName, onClose,
     try {
       const response = await fetch(`${baseUrl}/api/clients/${encodeURIComponent(clientId)}/workspaces`, { cache: "no-store" });
       const body = await response.json() as { data?: ClientWorkspace[]; error?: string };
-      if (!response.ok || !body.data) throw new Error(body.error || "Nao foi possivel carregar os locais de trabalho.");
+      if (!response.ok || !body.data) throw new Error(body.error || "Não foi possível carregar os locais de trabalho.");
       if (requestId === sequence.current) { setItems(body.data); setError(""); }
     } catch (cause) {
       if (requestId === sequence.current) setError(cause instanceof Error ? cause.message : "Falha ao atualizar.");
@@ -50,9 +50,9 @@ export function ClientWorkspacesDialog({ baseUrl, clientId, clientName, onClose,
       {error && <p className="workspace-error" role="alert">{error}</p>}
       {loading && !items.length && <p>Carregando projetos...</p>}
       <div className="client-workspaces-list">{visible.map(({ project, workspace }) => <article className="client-workspace-project" key={project.id}>
-        <header><div><strong>{project.name}</strong><small>{project.linkType === "legacy" ? "Associacao legada por nome; revise o vinculo" : "Cliente vinculado"}</small></div><span className={`workspace-state ${workspace.status}`}>{workspaceStatusLabel(workspace.status)}</span><button className="secondary-button" type="button" onClick={() => onOpenProject(project.id)}><FolderOpen size={16} /> Abrir projeto</button></header>
+        <header><div><strong>{project.name}</strong><small>{project.linkType === "legacy" ? "Associacao legada por nome; revise o vínculo" : "Cliente vinculado"}</small></div><span className={`workspace-state ${workspace.status}`}>{workspaceStatusLabel(workspace.status)}</span><button className="secondary-button" type="button" onClick={() => onOpenProject(project.id)}><FolderOpen size={16} /> Abrir projeto</button></header>
         {workspace.references.length ? <ul>{workspace.references.map((ref) => <li key={ref.id} data-provider={workspaceProvider(ref.kind, ref.target)}><WorkspaceProviderBadge kind={ref.kind} target={ref.target} /><span className="workspace-ref-text"><strong>{ref.title}</strong><small>{ref.target}</small>{ref.origin && <small>Etapa: {ref.origin.stepName}</small>}</span><button className="icon-button" type="button" title="Copiar" onClick={() => void copyText(ref.target)}><Copy size={15} /></button>{browserAccessibleUrl(ref.target) && <a className="icon-button" title="Abrir link" href={browserAccessibleUrl(ref.target)!} target="_blank" rel="noopener noreferrer"><ExternalLink size={15} /></a>}</li>)}</ul> : <p>Nenhuma referencia cadastrada.</p>}
-        {workspace.conversationNotApplicable && <small>Conversa: nao se aplica.</small>}
+        {workspace.conversationNotApplicable && <small>Conversa: não se aplica.</small>}
       </article>)}</div>
       {!loading && visible.length === 0 && <p>Nenhum projeto encontrado para esta busca.</p>}
     </section>

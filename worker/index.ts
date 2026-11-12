@@ -3,6 +3,7 @@ import { handleJourneyDomainRequest } from "./journeyDomain";
 import { buildTableReadQuery } from "./tableRead";
 import { handleProjectWorkspaceRequest, isProjectWorkspaceOrganized, readWorkspaceOverview } from "./projectWorkspace";
 import { handleStageLibraryRequest } from "./stageLibrary";
+import { applyProjectStatusTransition, readProjectStatus } from "./projectCompletion";
 
 type Env = {
   DB: D1Database;
@@ -24,7 +25,7 @@ const tableColumns: Record<string, string[]> = {
   journey_steps: ["id", "journey_template_id", "name", "description", "step_order", "objective", "ai_tool_id", "expected_output", "checklist", "execution_instructions", "status", "created_at"],
   step_prompts: ["id", "journey_step_id", "prompt_id", "title", "content", "ai_tool_id", "prompt_status", "is_required", "placeholder_note", "prompt_order", "usage_notes", "created_at"],
   procedures: ["id", "title", "description", "content", "category", "project_type_id", "journey_step_id", "status", "created_at"],
-  projects: ["id", "name", "company", "client_id", "responsible", "responsible_user_id", "project_type_id", "project_modality_id", "journey_template_id", "status", "notes", "created_at", "updated_at"],
+  projects: ["id", "name", "company", "client_id", "responsible", "responsible_user_id", "project_type_id", "project_modality_id", "journey_template_id", "status", "notes", "completed_at", "completed_by", "completed_at_estimated", "created_at", "updated_at"],
   project_steps: ["id", "project_id", "source_journey_step_id", "name", "description", "step_order", "objective", "ai_tool_id", "expected_output", "execution_instructions", "status", "is_not_applicable", "notes", "created_at", "updated_at"],
   project_step_checklist_items: ["id", "project_step_id", "label", "is_done", "item_order", "created_at"],
   project_step_prompts: ["id", "project_step_id", "prompt_id", "title", "content", "ai_tool_id", "prompt_status", "is_required", "placeholder_note", "prompt_order", "usage_notes", "created_at"],
@@ -166,8 +167,11 @@ async function handleTableRequest(request: Request, env: Env, tableName = "", id
     if (tableName === "projects" && normalized.status === "concluido" && !(await isProjectWorkspaceOrganized(env.DB, id))) {
       return jsonError("Organize a Etapa 0 antes de concluir o projeto.", 409);
     }
+    const stepClosure = tableName === "projects"
+      ? await applyProjectStatusTransition(env.DB, id, normalized, await readProjectStatus(env.DB, id))
+      : null;
     await updateRecord(env.DB, tableName, id, normalized);
-    return json({ data: normalizeRows([await getById(env.DB, tableName, id)].filter(Boolean)) });
+    return json({ data: normalizeRows([await getById(env.DB, tableName, id)].filter(Boolean)), ...(stepClosure ? { stepClosure } : {}) });
   }
 
   if (request.method === "DELETE" && id) {

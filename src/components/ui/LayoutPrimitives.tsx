@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 export function AppShell({ children }: { children: ReactNode }) {
-  return <div className="app-shell">{children}</div>;
+  return <div className="app-shell rj-shell">{children}</div>;
 }
 
 export function JourneyContextBar({ children }: { children: ReactNode }) {

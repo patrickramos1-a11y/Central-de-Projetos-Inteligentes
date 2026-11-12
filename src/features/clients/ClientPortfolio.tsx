@@ -100,7 +100,7 @@ function ClientExpansion({ client, details, loading, onOpenClient, onOpenProject
         </div>)}</div> : !details.contextError && <p>Nenhum contexto ativo vinculado.</p>}
       </section>
       {details.workspaceError && <p className="client-detail-error" role="alert">{details.workspaceError}</p>}
-      <ReferenceTable title="Diretorios e locais" items={directories} empty="Nenhum diretorio de servidor cadastrado." onOpenProject={onOpenProject} />
+      <ReferenceTable title="Diretórios e locais" items={directories} empty="Nenhum diretorio de servidor cadastrado." onOpenProject={onOpenProject} />
       <ReferenceTable title="Links vinculados" items={links} empty="Nenhum link de conversa ou apoio cadastrado." onOpenProject={onOpenProject} />
     </div>}
   </div>;
@@ -177,13 +177,13 @@ export function ClientPortfolio({
       <div className="client-portfolio-head" role="row">
         <ColumnHeader label="Cliente" column="name" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filtrar nome" /></ColumnHeader>
         <ColumnHeader label="Tipo" column="kind" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><select value={kind} onChange={(event) => setKind(event.target.value as "all" | "AC" | "AV")}><option value="all">Todos</option><option value="AC">AC</option><option value="AV">AV</option></select></ColumnHeader>
-        <ColumnHeader label="Responsavel" column="responsible" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><select value={responsible} onChange={(event) => setResponsible(event.target.value)}><option value="all">Todos</option>{responsibleOptions.map((item) => <option key={item}>{item}</option>)}</select></ColumnHeader>
+        <ColumnHeader label="Responsável" column="responsible" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><select value={responsible} onChange={(event) => setResponsible(event.target.value)}><option value="all">Todos</option>{responsibleOptions.map((item) => <option key={item}>{item}</option>)}</select></ColumnHeader>
         <ColumnHeader label="Projetos" column="projects" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><CountFilter value={minimumProjects} onChange={setMinimumProjects} /></ColumnHeader>
         <ColumnHeader label="Contextos" column="contexts" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><CountFilter value={minimumContexts} onChange={setMinimumContexts} /></ColumnHeader>
         <ColumnHeader label="Locais" column="directories" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><CountFilter value={minimumDirectories} onChange={setMinimumDirectories} /></ColumnHeader>
         <ColumnHeader label="Links" column="links" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><CountFilter value={minimumLinks} onChange={setMinimumLinks} /></ColumnHeader>
         <ColumnHeader label="Status" column="status" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Todos</option><option value="active">Ativos</option><option value="inactive">Inativos</option>{statusOptions.map((item) => <option value={item} key={item}>{item.replace(/_/g, " ")}</option>)}</select></ColumnHeader>
-        <span>Acoes</span>
+        <span>Ações</span>
       </div>
       <div className="client-portfolio-body">{visible.map((row) => {
         const client = clients.find((item) => item.id === row.id)!;
@@ -191,8 +191,8 @@ export function ClientPortfolio({
         return <div className={`client-portfolio-entry ${isExpanded ? "expanded" : ""}`} key={row.id}>
           <div className="client-portfolio-row" role="row">
             <button className="client-primary-cell" type="button" onClick={() => toggle(row.id)} aria-expanded={isExpanded}><span className="client-expand-icon">{isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span><ClientMark client={client} /><span><strong>{row.name}</strong><small>{row.company}</small></span></button>
-            <span data-label="Tipo">{row.kind ? <span className={`client-kind-badge ${row.kind.toLowerCase()}`}>{row.kind}</span> : <small>Nao definido</small>}</span>
-            <span data-label="Responsavel" className="client-responsible"><UserRound size={14} /> {row.responsibleName}</span>
+            <span data-label="Tipo">{row.kind ? <span className={`client-kind-badge ${row.kind.toLowerCase()}`}>{row.kind}</span> : <small>Não definido</small>}</span>
+            <span data-label="Responsável" className="client-responsible"><UserRound size={14} /> {row.responsibleName}</span>
             <strong data-label="Projetos" className="client-count projects">{row.projectCount}</strong>
             <strong data-label="Contextos" className="client-count contexts">{row.contextCount}</strong>
             <strong data-label="Locais" className="client-count directories">{row.directoryCount}</strong>

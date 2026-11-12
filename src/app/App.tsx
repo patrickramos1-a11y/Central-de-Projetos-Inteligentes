@@ -87,6 +87,8 @@ import { Toast } from "../components/ui/Toast";
 import { ProgressBar } from "../components/ui/ProgressBar";
 import { StatusBadge, type StatusTone } from "../components/ui/StatusBadge";
 import { AppShell, CommandBar, JourneyContextBar, WorkCanvas } from "../components/ui/LayoutPrimitives";
+import { AppSidebar, PageHeader } from "../features/shell/AppSidebar";
+import { GlobalSearch } from "../features/shell/GlobalSearch";
 import { ProjectWorkspacePanel } from "../features/workspace/ProjectWorkspacePanel";
 import { ClientWorkspacesDialog } from "../features/workspace/ClientWorkspacesDialog";
 import { selectWorkspaceContextPrompts, WORKSPACE_STEP_ID, type ProjectWorkspace, type WorkspaceOverview } from "../features/workspace/workspaceModel";
@@ -123,7 +125,7 @@ function JourneyStepRail({ ownerType, ownerId, currentUser, steps, selectedStepI
         return { response, body };
       })
       .then(({ response, body }) => {
-        if (!response.ok) throw new Error("Nao foi possivel carregar a navegacao da jornada.");
+        if (!response.ok) throw new Error("Não foi possível carregar a navegacao da jornada.");
         setIsExpanded(Boolean(body.data?.isExpanded));
         setLoadedKey(preferenceKey);
       })
@@ -138,10 +140,10 @@ function JourneyStepRail({ ownerType, ownerId, currentUser, steps, selectedStepI
     void fetch(`${cloudflareApiUrl}/api/journey-rail-preferences/${ownerType}/${encodeURIComponent(ownerId)}`, {
       method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ userId: currentUser.id, isExpanded: next }),
     }).then(async (response) => {
-      if (!response.ok) throw new Error("Nao foi possivel salvar a navegacao da jornada.");
+      if (!response.ok) throw new Error("Não foi possível salvar a navegacao da jornada.");
     }).catch(() => {
       setIsExpanded(previous);
-      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: "Nao foi possivel salvar a visualizacao das etapas." } }));
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: "Não foi possível salvar a visualizacao das etapas." } }));
     });
   }
 
@@ -149,9 +151,9 @@ function JourneyStepRail({ ownerType, ownerId, currentUser, steps, selectedStepI
     <div className="rail-heading"><div><strong>Etapas</strong>{isExpanded && <span>{steps.filter((step) => step.status === "concluido").length} concluidas</span>}</div><div className="rail-heading-actions"><button className="icon-button rail-toggle-button" type="button" title={compactLabel} aria-label={compactLabel} onClick={toggleRail}><PanelLeft size={16} /></button>{onAdd && <button className="icon-button rail-add-button" type="button" title="Adicionar etapa" aria-label="Adicionar etapa" onClick={onAdd}><Plus size={16} /></button>}</div>{isExpanded && onOrganize && <button className="rail-edit-button" type="button" title="Organizar etapas" onClick={onOrganize}><Pencil size={14} /> Editar</button>}</div>
     <nav className="step-rail-list">{visibleSteps.map((step) => {
       const status = step.is_not_applicable ? "nao-aplicavel" : step.status;
-      const statusLabel = step.status_label ?? (step.is_not_applicable ? "Nao se aplica" : formatStepStatus(step.status));
+      const statusLabel = step.status_label ?? (step.is_not_applicable ? "Não se aplica" : formatStepStatus(step.status));
       return <button key={step.id} className={`step-item ${status} ${selectedStepId === step.id ? "active" : ""}`} type="button" title={`${step.name} - ${statusLabel}`} aria-label={`${step.name} - ${statusLabel}`} aria-current={selectedStepId === step.id ? "step" : undefined} onClick={() => onSelectStep(step.id)}><span className={`step-dot ${status}`}>{step.status === "concluido" && !step.is_not_applicable ? <Check size={13} /> : step.step_order}</span><span className="step-rail-short-label" aria-hidden="true">{step.compact_label ?? compactStepLabel(step.name)}</span><span className="step-rail-details"><strong>{step.name}</strong><small>{statusLabel}</small></span></button>;
-    })}{notApplicableSteps.length > 0 && <button className={`step-na-summary ${showNotApplicable ? "expanded" : ""} ${notApplicableSteps.some((step) => step.id === selectedStepId) ? "active" : ""}`} type="button" aria-expanded={showNotApplicable} title={showNotApplicable ? "Recolher etapas que nao se aplicam" : `Mostrar ${notApplicableSteps.length} etapa(s) que nao se aplicam`} onClick={() => setShowNotApplicable((value) => !value)}><span>{notApplicableSteps.length}</span><small>{isExpanded ? (showNotApplicable ? "Recolher N/A" : "Nao se aplicam") : "N/A"}</small><ChevronDown size={14} /></button>}</nav>
+    })}{notApplicableSteps.length > 0 && <button className={`step-na-summary ${showNotApplicable ? "expanded" : ""} ${notApplicableSteps.some((step) => step.id === selectedStepId) ? "active" : ""}`} type="button" aria-expanded={showNotApplicable} title={showNotApplicable ? "Recolher etapas que não se aplicam" : `Mostrar ${notApplicableSteps.length} etapa(s) que não se aplicam`} onClick={() => setShowNotApplicable((value) => !value)}><span>{notApplicableSteps.length}</span><small>{isExpanded ? (showNotApplicable ? "Recolher N/A" : "Não se aplicam") : "N/A"}</small><ChevronDown size={14} /></button>}</nav>
   </aside>;
 }
 
@@ -278,6 +280,9 @@ type Project = {
   journey_template_id: string | null;
   status: ProjectStatus;
   notes: string | null;
+  completed_at?: string | null;
+  completed_by?: string | null;
+  completed_at_estimated?: boolean | number | null;
   created_at: string;
   updated_at: string;
 };
@@ -566,7 +571,7 @@ const coreTableNames: Array<keyof Tables> = [
 const detailTableNames = ["project_steps", "project_summaries", "project_summary_items", "generated_prompts"] as const;
 const initialReadColumns: Partial<Record<keyof Tables, string>> = {
   app_users: "id,name,status,created_at,updated_at",
-  projects: "id,name,company,client_id,responsible,responsible_user_id,project_type_id,project_modality_id,journey_template_id,status,notes,created_at,updated_at",
+  projects: "id,name,company,client_id,responsible,responsible_user_id,project_type_id,project_modality_id,journey_template_id,status,notes,completed_at,completed_by,completed_at_estimated,created_at,updated_at",
   project_steps: "id,project_id,source_journey_step_id,name,step_order,status,is_not_applicable,created_at,updated_at",
   clients: "id,name,company,logo_url,client_kind,is_active,responsible,responsible_user_id,project_type_id,journey_template_id,entry_month,status,notes,created_at,updated_at",
   project_types: "id,name,description,status,created_at",
@@ -589,7 +594,7 @@ type Overview = { promptCount: number; summaryProjectIds: string[]; workspaces: 
 const configModules: Array<{ key: ConfigModuleKey; label: string; icon: typeof Bot; description: string }> = [
   {
     key: "app_users",
-    label: "Usuarios",
+    label: "Usuários",
     icon: Users,
     description: "Pessoas que aparecem na entrada simples do painel, sem e-mail ou senha.",
   },
@@ -603,7 +608,7 @@ const configModules: Array<{ key: ConfigModuleKey; label: string; icon: typeof B
     key: "prompt_categories",
     label: "Categorias",
     icon: Layers3,
-    description: "Organizacao da biblioteca de prompts por finalidade.",
+    description: "Organização da biblioteca de prompts por finalidade.",
   },
   {
     key: "prompts",
@@ -633,7 +638,7 @@ const configModules: Array<{ key: ConfigModuleKey; label: string; icon: typeof B
     key: "journey_steps",
     label: "Etapas de Template",
     icon: ListChecks,
-    description: "Etapas padrao usadas ao criar novos projetos.",
+    description: "Etapas padrão usadas ao criar novos projetos.",
   },
   {
     key: "procedures",
@@ -649,7 +654,7 @@ export default function App() {
   const [templateEditorTargetId, setTemplateEditorTargetId] = useState<string | null>(null);
   const [templateEditorDirty, setTemplateEditorDirty] = useState(false);
   const navigateFromTemplate = useCallback((next: ViewMode) => {
-    if (view === "projectTemplates" && templateEditorDirty && !window.confirm("Ha alteracoes nao salvas no template. Sair do editor?")) return;
+    if (view === "projectTemplates" && templateEditorDirty && !window.confirm("Ha alterações não salvas no template. Sair do editor?")) return;
     setTemplateEditorDirty(false);
     setTemplateEditorTargetId(null);
     setView(next);
@@ -698,7 +703,7 @@ export default function App() {
       if (!body.data) throw new Error("Resposta incompleta do local de trabalho.");
       if (workspaceRefreshIdsRef.current.get(projectId) === requestId) onWorkspaceChanged(body.data);
     } catch {
-      if (workspaceRefreshIdsRef.current.get(projectId) === requestId) setNotice("O link foi salvo, mas a Etapa 0 nao foi atualizada. Tente abrir o local de trabalho novamente.");
+      if (workspaceRefreshIdsRef.current.get(projectId) === requestId) setNotice("O link foi salvo, mas a Etapa 0 não foi atualizada. Tente abrir o local de trabalho novamente.");
     }
   }, [onWorkspaceChanged]);
   const coreInFlightRef = useRef<Promise<void> | null>(null);
@@ -754,6 +759,22 @@ export default function App() {
   const selectedClientStep = clientSteps.find((step) => step.id === selectedClientStepId) ?? clientSteps[0] ?? null;
   const activeUsers = tables.app_users.filter((user) => user.status === "ativo");
   const currentUser = tables.app_users.find((user) => user.id === currentUserId) ?? null;
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setIsSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  function openProjectFromSearch(id: string) {
+    setSelectedProjectId(id);
+    setSelectedStepId(WORKSPACE_STEP_ID);
+    setView("journey");
+  }
 
   const currentSecondaryReady = activeSecondaryTables(view, activeConfig, selectedStepId).every((name) => loadedSecondaryTables.has(name));
   const projectFormReady = projectFormTables.every((name) => loadedSecondaryTables.has(name));
@@ -796,7 +817,7 @@ export default function App() {
   useEffect(() => {
     const showToast = (event: Event) => {
       const detail = (event as CustomEvent<{ message?: string }>).detail;
-      setNotice(detail?.message || "Acao concluida.");
+      setNotice(detail?.message || "Ação concluida.");
     };
     window.addEventListener("ramos:toast", showToast);
     return () => window.removeEventListener("ramos:toast", showToast);
@@ -850,8 +871,8 @@ export default function App() {
       projectTemplates: "Templates",
       clients: "Clientes",
       clientJourney: selectedClient?.name ?? "Cliente",
-      management: "Gestao",
-      settings: "Configuracoes",
+      management: "Gestão",
+      settings: "Configurações",
     };
     const context = viewLabels[view] ?? "Ramos Jornadas";
     const title = context === "Projetos" ? "Ramos Jornadas" : `Ramos Jornadas · ${context}`;
@@ -1050,7 +1071,7 @@ export default function App() {
         lastReadFailedRef.current = true;
         setSyncStatus("error");
         setTableErrors((errors) => [...new Set([...errors, "sumario"])]);
-        setNotice("Falha ao atualizar o sumario. Os ultimos dados validos foram mantidos.");
+        setNotice("Falha ao atualizar o sumário. Os ultimos dados validos foram mantidos.");
         return false;
       }
     })().finally(() => {
@@ -1074,7 +1095,7 @@ export default function App() {
         else await refreshProjectDetails(selectedProjectId);
         if (!lastReadFailedRef.current) {
           setSyncStatus("updated");
-          if (announce) setNotice("Sumario atualizado.");
+          if (announce) setNotice("Sumário atualizado.");
         }
         return;
       }
@@ -1120,13 +1141,13 @@ export default function App() {
     setIsLoading(false);
 
     if (error || !data) {
-      setNotice(`Erro ao criar usuario: ${error?.message ?? "erro desconhecido"}`);
+      setNotice(`Erro ao criar usuário: ${error?.message ?? "erro desconhecido"}`);
       return;
     }
 
     setTables((current) => ({ ...current, app_users: [...current.app_users, data as AppUser] }));
     selectUser(data.id);
-    setNotice(`Usuario ${data.name} criado.`);
+    setNotice(`Usuário ${data.name} criado.`);
   }
 
   async function createProject(form: NewProjectFormState) {
@@ -1156,7 +1177,7 @@ export default function App() {
           .select("*")
           .single();
         if (modalityError || !modality) {
-          setNotice(`Nao foi possivel criar a modalidade: ${modalityError?.message ?? "erro desconhecido"}`);
+          setNotice(`Não foi possível criar a modalidade: ${modalityError?.message ?? "erro desconhecido"}`);
           setIsLoading(false);
           return;
         }
@@ -1190,7 +1211,7 @@ export default function App() {
         .single();
 
       if (clientError || !client) {
-        setNotice(`Nao foi possivel criar o cliente vinculado: ${clientError?.message ?? "erro desconhecido"}`);
+        setNotice(`Não foi possível criar o cliente vinculado: ${clientError?.message ?? "erro desconhecido"}`);
         setIsLoading(false);
         return;
       }
@@ -1219,7 +1240,7 @@ export default function App() {
       .single();
 
     if (error || !project) {
-      setNotice(`Nao foi possivel criar o projeto: ${error?.message ?? "erro desconhecido"}`);
+      setNotice(`Não foi possível criar o projeto: ${error?.message ?? "erro desconhecido"}`);
       setIsLoading(false);
       return;
     }
@@ -1342,7 +1363,7 @@ export default function App() {
     const initialized = await initializeProjectStep(String(data.id), payload.source_journey_step_id ?? undefined);
     if (payload.source_journey_step_id && !initialized) {
       await supabase.from("project_steps").delete().eq("id", data.id);
-      setNotice("Nao foi possivel importar a estrutura da etapa. Nenhuma etapa incompleta foi mantida.");
+      setNotice("Não foi possível importar a estrutura da etapa. Nenhuma etapa incompleta foi mantida.");
       return null;
     }
     return data as ProjectStep;
@@ -1385,17 +1406,27 @@ export default function App() {
       return;
     }
 
-    const { error } = await supabase.from("projects").update(normalizePayload({ ...payload, updated_at: new Date().toISOString() })).eq("id", projectId);
+    const previous = tables.projects.find((project) => project.id === projectId);
+    const isClosing = payload.status === "concluido" && previous?.status !== "concluido";
+    const isReopening = payload.status !== undefined && payload.status !== "concluido" && previous?.status === "concluido";
+    const request = { ...payload, ...(isClosing && currentUser ? { completed_by: currentUser.name } : {}), updated_at: new Date().toISOString() };
+    const { error } = await supabase.from("projects").update(normalizePayload(request)).eq("id", projectId);
 
     if (error) {
       setNotice(`Erro ao atualizar projeto: ${error.message}`);
       return;
     }
 
+    const now = new Date().toISOString();
+    const completionPatch: Partial<Project> = isClosing
+      ? { completed_at: now, completed_by: currentUser?.name ?? null, completed_at_estimated: false }
+      : isReopening ? { completed_at: null, completed_by: null, completed_at_estimated: false } : {};
     setTables((current) => ({
       ...current,
-      projects: current.projects.map((project) => (project.id === projectId ? { ...project, ...payload } : project)),
+      projects: current.projects.map((project) => (project.id === projectId ? { ...project, ...request, ...completionPatch } : project)),
     }));
+    // The Worker closes open steps on completion (started -> concluded, untouched -> not applicable).
+    if (isClosing) await refreshCore();
   }
 
   async function deleteProject(projectId: string) {
@@ -1731,7 +1762,7 @@ export default function App() {
     const parsed = parseProjectSummary({ rawText });
 
     if (parsed.items.length === 0) {
-      setNotice("Nao encontrei topicos numerados nesse sumario. Cole uma estrutura como 1, 1.1, 1.1.1.");
+      setNotice("Não encontrei topicos numerados nesse sumário. Cole uma estrutura como 1, 1.1, 1.1.1.");
       return;
     }
 
@@ -1775,14 +1806,14 @@ export default function App() {
     const { data: summary, error } = await supabase.from<ProjectSummary>("project_summaries").insert(summaryPayload).select("*").single();
 
     if (error || !summary) {
-      setNotice(`Erro ao importar sumario: ${error?.message ?? "erro desconhecido"}`);
+      setNotice(`Erro ao importar sumário: ${error?.message ?? "erro desconhecido"}`);
       return;
     }
 
     const { error: itemsError } = await supabase.from<ProjectSummaryItem>("project_summary_items").insert(itemRows);
 
     if (itemsError) {
-      setNotice(`Sumario criado, mas os topicos falharam: ${itemsError.message}`);
+      setNotice(`Sumário criado, mas os topicos falharam: ${itemsError.message}`);
       return;
     }
 
@@ -1791,7 +1822,7 @@ export default function App() {
       project_summaries: [...current.project_summaries, summary as ProjectSummary],
       project_summary_items: [...current.project_summary_items, ...(itemRows as ProjectSummaryItem[])],
     }));
-    setNotice(`Sumario analisado com ${itemRows.length} topicos. Revise e salve como consolidado.`);
+    setNotice(`Sumário analisado com ${itemRows.length} topicos. Revise e salve como consolidado.`);
   }
 
   async function updateProjectSummaryItem(itemId: string, payload: Partial<ProjectSummaryItem>) {
@@ -1815,7 +1846,7 @@ export default function App() {
     const error = updates.find((result) => result.error)?.error;
 
     if (error) {
-      setNotice(`Erro ao atualizar item do sumario: ${error.message}`);
+      setNotice(`Erro ao atualizar item do sumário: ${error.message}`);
       return;
     }
 
@@ -1842,7 +1873,7 @@ export default function App() {
       .eq("id", summaryId);
 
     if (error) {
-      setNotice(`Erro ao atualizar configuracao do sumario: ${error.message}`);
+      setNotice(`Erro ao atualizar configuracao do sumário: ${error.message}`);
       return;
     }
 
@@ -1852,7 +1883,7 @@ export default function App() {
         item.id === summaryId ? { ...item, ...payload, updated_at: updatedAt } : item
       )),
     }));
-    setNotice("Configuracao de prompt salva nesta versao do sumario.");
+    setNotice("Configuração de prompt salva nesta versão do sumário.");
   }
 
   async function setSummaryItemSelection(summaryId: string, itemId: string, isSelected: boolean) {
@@ -1966,7 +1997,7 @@ export default function App() {
     const branchIds = new Set(collectSummaryBranchIds(items, itemId));
 
     if (!item || (nextParentId && (nextParentId === itemId || branchIds.has(nextParentId)))) {
-      setNotice("Um topico nao pode ser movido para dentro dele mesmo ou de um subtópico.");
+      setNotice("Um topico não pode ser movido para dentro dele mesmo ou de um subtópico.");
       return;
     }
 
@@ -1995,7 +2026,7 @@ export default function App() {
       ...current,
       project_summary_items: current.project_summary_items.map((currentItem) => nextById.get(currentItem.id) ?? currentItem),
     }));
-    setNotice("Estrutura do sumario reorganizada e numeracao atualizada.");
+    setNotice("Estrutura do sumário reorganizada e numeracao atualizada.");
   }
 
   async function moveProjectSummaryItemToNumber(summaryId: string, itemId: string, topicNumber: string) {
@@ -2065,7 +2096,7 @@ export default function App() {
       const consolidated = await summaryApi.consolidate(summaryId, currentUser?.name ?? null) as ProjectSummary;
       if (consolidated) {
         await loadAll();
-        setNotice(`Sumario consolidado como versao ${consolidated.version_number}, com numeracao atualizada.`);
+        setNotice(`Sumário consolidado como versão ${consolidated.version_number}, com numeracao atualizada.`);
         return consolidated;
       }
     } catch {
@@ -2077,7 +2108,7 @@ export default function App() {
     const selectedItems = sourceItems.filter((item) => item.is_selected);
 
     if (!sourceSummary || selectedItems.length === 0) {
-      setNotice("Selecione pelo menos um topico antes de consolidar o sumario.");
+      setNotice("Selecione pelo menos um topico antes de consolidar o sumário.");
       return null;
     }
 
@@ -2117,14 +2148,14 @@ export default function App() {
     const { data: insertedSummary, error } = await supabase.from<ProjectSummary>("project_summaries").insert(normalizePayload(nextSummary)).select("*").single();
 
     if (error || !insertedSummary) {
-      setNotice(`Erro ao consolidar sumario: ${error?.message ?? "erro desconhecido"}`);
+      setNotice(`Erro ao consolidar sumário: ${error?.message ?? "erro desconhecido"}`);
       return null;
     }
 
     const { error: itemError } = await supabase.from<ProjectSummaryItem>("project_summary_items").insert(normalizedRows.map((row) => normalizePayload(row)));
 
     if (itemError) {
-      setNotice(`Sumario criado, mas houve erro ao criar topicos consolidados: ${itemError.message}`);
+      setNotice(`Sumário criado, mas houve erro ao criar topicos consolidados: ${itemError.message}`);
       return null;
     }
 
@@ -2136,7 +2167,7 @@ export default function App() {
       ],
       project_summary_items: [...current.project_summary_items, ...normalizedRows],
     }));
-    setNotice(`Sumario consolidado como versao ${nextVersionNumber}, com ${normalizedRows.length} topicos renumerados.`);
+    setNotice(`Sumário consolidado como versão ${nextVersionNumber}, com ${normalizedRows.length} topicos renumerados.`);
     return insertedSummary as ProjectSummary;
   }
 
@@ -2172,13 +2203,13 @@ export default function App() {
         failedPromptRef.current = null;
         setTableErrors((errors) => errors.filter((name) => name !== "sumario"));
         setSyncStatus("updated");
-        setNotice("Prompt e topicos do sumario atualizados.");
+        setNotice("Prompt e topicos do sumário atualizados.");
         return true;
       } catch (error) {
         failedPromptRef.current = payload;
         setSyncStatus("error");
         setTableErrors((errors) => [...new Set([...errors, "sumario"])]);
-        setNotice(`Erro ao salvar o prompt do sumario: ${error instanceof Error ? error.message : "tente novamente"}. Os ultimos dados validos foram mantidos.`);
+        setNotice(`Erro ao salvar o prompt do sumário: ${error instanceof Error ? error.message : "tente novamente"}. Os ultimos dados validos foram mantidos.`);
         return false;
       }
     })().finally(() => summarySavesRef.current.delete(summaryId));
@@ -2212,11 +2243,11 @@ export default function App() {
               ? { ...item, selected_blocks_json: JSON.stringify(selectedBlocks), summary_item_id: nextSummaryItemId }
               : item),
           }));
-          setNotice("Prompt removido somente deste topico. Os demais vinculos foram preservados.");
+          setNotice("Prompt removido somente deste topico. Os demais vínculos foram preservados.");
           return;
         }
       } catch (error) {
-        setNotice(`Erro ao remover o vinculo do prompt: ${error instanceof Error ? error.message : "erro desconhecido"}`);
+        setNotice(`Erro ao remover o vínculo do prompt: ${error instanceof Error ? error.message : "erro desconhecido"}`);
         return;
       }
     }
@@ -2238,7 +2269,7 @@ export default function App() {
         prompt.id === promptId ? { ...prompt, status: "arquivado", archived_at: archivedAt } : prompt
       )),
     }));
-    setNotice("Prompt arquivado. O historico foi preservado.");
+    setNotice("Prompt arquivado. O histórico foi preservado.");
   }
 
   async function addStepLink(stepId: string, title: string, url: string) {
@@ -2368,7 +2399,7 @@ export default function App() {
       setNotice(`Template "${body.data.name}" atualizado.`);
       return true;
     } catch {
-      setNotice("Nao foi possivel editar o template agora.");
+      setNotice("Não foi possível editar o template agora.");
       return false;
     }
   }
@@ -2393,7 +2424,7 @@ export default function App() {
   }
 
   async function archiveJourneyTemplateStep(step: JourneyStep): Promise<boolean> {
-    if (!window.confirm(`Retirar a etapa "${step.name}" deste template? Projetos existentes nao serao alterados.`)) return false;
+    if (!window.confirm(`Retirar a etapa "${step.name}" deste template? Projetos existentes não serão alterados.`)) return false;
     const { error } = await supabase.from("journey_steps").update({ status: "arquivado" }).eq("id", step.id);
     if (error) {
       setNotice(`Erro ao retirar etapa: ${error.message}`);
@@ -2419,7 +2450,7 @@ export default function App() {
       await loadAll();
       setNotice(`Template "${body.data?.name ?? template.name}" excluido.`);
     } catch {
-      setNotice("Nao foi possivel excluir o template agora.");
+      setNotice("Não foi possível excluir o template agora.");
     }
   }
 
@@ -2461,7 +2492,7 @@ export default function App() {
       .single();
 
     if (error || !client) {
-      setNotice(`Nao foi possivel criar o cliente: ${error?.message ?? "erro desconhecido"}`);
+      setNotice(`Não foi possível criar o cliente: ${error?.message ?? "erro desconhecido"}`);
       setIsLoading(false);
       return;
     }
@@ -2479,7 +2510,7 @@ export default function App() {
     await loadAll();
     setSelectedClientId(client.id);
     setView("clientJourney");
-    setNotice("Cliente criado. A jornada de entrada ja pode ser acompanhada.");
+    setNotice("Cliente criado. A jornada de entrada já pode ser acompanhada.");
     setIsLoading(false);
   }
 
@@ -2705,7 +2736,7 @@ export default function App() {
       .single();
 
     if (error) {
-      setNotice(`Erro ao adicionar evidencia do cliente: ${error.message}`);
+      setNotice(`Erro ao adicionar evidência do cliente: ${error.message}`);
       return;
     }
 
@@ -2738,7 +2769,7 @@ export default function App() {
       const payload = (await response.json().catch(() => ({}))) as { data?: UploadedFile; error?: string };
 
       if (!response.ok || !payload.data) {
-        setNotice(`Erro ao enviar arquivo: ${payload.error ?? "upload nao concluido"}`);
+        setNotice(`Erro ao enviar arquivo: ${payload.error ?? "upload não concluido"}`);
         return null;
       }
 
@@ -2850,66 +2881,43 @@ export default function App() {
 
   return (
     <AppShell>
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-mark">
-            <img className="brand-mark-image" src="/brand/ramos-jornadas-icon-v3.png" alt="" />
-          </span>
-          <span>Ramos Jornadas</span>
-        </div>
-
-        <nav className="nav-list">
-          <button className={`nav-item ${view === "projects" || view === "journey" ? "active" : ""}`} onClick={() => navigateFromTemplate("projects")}>
-            <PanelLeft size={18} />
-            Projetos
-          </button>
-          <button className={`nav-item ${view === "projectTemplates" ? "active" : ""}`} onClick={() => navigateFromTemplate("projectTemplates")}>
-            <Route size={18} />
-            Templates
-          </button>
-          <button className={`nav-item ${view === "clients" || view === "clientJourney" ? "active" : ""}`} onClick={() => navigateFromTemplate("clients")}>
-            <Users size={18} />
-            Clientes
-          </button>
-          <button className={`nav-item ${view === "management" ? "active" : ""}`} onClick={() => navigateFromTemplate("management")}>
-            <Layers3 size={18} />
-            Gestao
-          </button>
-          <button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => navigateFromTemplate("settings")}>
-            <Settings size={18} />
-            Configuracoes
-          </button>
-        </nav>
-
-        <div className="sidebar-user">
-          <span>Usuario atual</span>
-          <strong>{currentUser.name}</strong>
-          <button onClick={() => setCurrentUserId("")}>Trocar usuario</button>
-          <div className={`header-sync-status ${headerSyncStatus}`} role="status" aria-live="polite" title={headerSyncStatus === "saving" ? "Salvando ou atualizando dados" : headerSyncStatus === "error" ? "Falha na ultima atualizacao" : "Ultima atualizacao confirmada"}>
+      <AppSidebar
+        items={[
+          { key: "projects", label: "Projetos", icon: PanelLeft, active: view === "projects" || view === "journey", onSelect: () => navigateFromTemplate("projects") },
+          { key: "projectTemplates", label: "Templates", icon: Route, active: view === "projectTemplates", onSelect: () => navigateFromTemplate("projectTemplates") },
+          { key: "clients", label: "Clientes", icon: Users, active: view === "clients" || view === "clientJourney", onSelect: () => navigateFromTemplate("clients") },
+          { key: "management", label: "Gestão", icon: Layers3, active: view === "management", onSelect: () => navigateFromTemplate("management") },
+          { key: "settings", label: "Configurações", icon: Settings, active: view === "settings", onSelect: () => navigateFromTemplate("settings") },
+        ]}
+        subItemsFor={view === "settings" ? "settings" : undefined}
+        subItems={configModules.map((module) => ({ key: module.key, label: module.label, icon: module.icon, active: activeConfig === module.key, onSelect: () => setActiveConfig(module.key) }))}
+        userName={currentUser.name}
+        onSwitchUser={() => setCurrentUserId("")}
+        onOpenSearch={() => setIsSearchOpen(true)}
+        syncSlot={
+          <div className={`header-sync-status ${headerSyncStatus}`} role="status" aria-live="polite" title={headerSyncStatus === "saving" ? "Salvando ou atualizando dados" : headerSyncStatus === "error" ? "Falha na última atualização" : "Última atualização confirmada"}>
             {headerSyncStatus === "saving" ? <Loader2 className="spin" size={15} /> : headerSyncStatus === "error" ? <X size={15} /> : <CheckCircle2 size={15} />}
             <span>{headerSyncStatus === "saving" ? "Salvando" : headerSyncStatus === "error" ? "Erro" : "Atualizado"}</span>
             {headerSyncStatus === "error" && <button type="button" title="Tentar novamente" aria-label="Tentar novamente" onClick={() => void (failedPromptRef.current && failedPromptRef.current.project_id === selectedProjectIdRef.current ? saveGeneratedPrompt(failedPromptRef.current) : loadAll())}><RefreshCw size={14} /></button>}
           </div>
-        </div>
-
-        {view === "settings" && (
-          <div className="subnav">
-            {configModules.map((module) => {
-              const Icon = module.icon;
-
-              return (
-                <button key={module.key} className={`subnav-item ${activeConfig === module.key ? "active" : ""}`} onClick={() => setActiveConfig(module.key)}>
-                  <Icon size={16} />
-                  {module.label}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </aside>
+        }
+      />
+      {isSearchOpen && (
+        <GlobalSearch
+          projects={tables.projects}
+          clients={tables.clients}
+          templates={tables.journey_templates}
+          prompts={tables.prompts}
+          onClose={() => setIsSearchOpen(false)}
+          onOpenProject={(id) => { setIsSearchOpen(false); openProjectFromSearch(id); }}
+          onOpenClient={() => { setIsSearchOpen(false); navigateFromTemplate("clients"); }}
+          onOpenTemplate={() => { setIsSearchOpen(false); navigateFromTemplate("projectTemplates"); }}
+          onOpenPrompt={() => { setIsSearchOpen(false); navigateFromTemplate("settings"); setActiveConfig("prompts" as ConfigModuleKey); }}
+        />
+      )}
 
       <main className="workspace">
-        {notice && <div className="ui-toast-stack"><Toast message={notice} tone={notice.startsWith("Erro") || notice.startsWith("Falha") || notice.startsWith("Nao foi") ? "error" : "success"} onDismiss={() => setNotice(null)} /></div>}
+        {notice && <div className="ui-toast-stack"><Toast message={notice} tone={notice.startsWith("Erro") || notice.startsWith("Falha") || notice.startsWith("Não foi") || notice.startsWith("Nao foi") ? "error" : "success"} onDismiss={() => setNotice(null)} /></div>}
 
         {view === "projects" && (
           <ProjectsView
@@ -2958,7 +2966,7 @@ export default function App() {
         {view === "journey" && selectedStepId === WORKSPACE_STEP_ID && selectedProject && <>
           <section className="journey-hero journey-context-bar"><button className="ghost-button" type="button" onClick={() => setView("projects")}><PanelLeft size={17} /> Projetos</button><div className="journey-context-copy"><span className="eyebrow">Ramos Jornadas</span><h1>{selectedProject.name}</h1><p>{selectedProject.company || "Projeto sem empresa definida"}</p></div></section>
           <section className="journey-layout block-journey-layout">
-            <JourneyStepRail ownerType="project" ownerId={selectedProject.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "concluido" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "em_andamento" : "pendente", status_label: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "Organizado" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "Parcial" : "Nao iniciado" }, ...projectSteps]} selectedStepId={WORKSPACE_STEP_ID} onSelectStep={setSelectedStepId} onAdd={() => setStagePickerProjectId(selectedProject.id)} />
+            <JourneyStepRail ownerType="project" ownerId={selectedProject.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "concluido" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "em_andamento" : "pendente", status_label: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "Organizado" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "Parcial" : "Não iniciado" }, ...projectSteps]} selectedStepId={WORKSPACE_STEP_ID} onSelectStep={setSelectedStepId} onAdd={() => setStagePickerProjectId(selectedProject.id)} />
             <section className="work-surface block-work-surface"><ProjectWorkspacePanel key={selectedProject.id} baseUrl={cloudflareApiUrl} projectId={selectedProject.id} contextPrompts={selectWorkspaceContextPrompts(tables.prompts)} currentUser={currentUser} onChanged={onWorkspaceChanged} onOpenStep={setSelectedStepId} /></section>
           </section>
         </>}
@@ -3084,7 +3092,7 @@ function ProjectStagePicker({ baseUrl, project, onClose, onCreateBlank, onImport
     void fetch(`${baseUrl.replace(/\/$/, "")}/api/stage-library?scope=available&clientId=${encodeURIComponent(project?.client_id ?? "")}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         const body = await response.json() as { data?: StageLibraryItem[]; error?: string };
-        if (!response.ok || !body.data) throw new Error(body.error || "Nao foi possivel carregar as etapas.");
+        if (!response.ok || !body.data) throw new Error(body.error || "Não foi possível carregar as etapas.");
         setItems(body.data.filter((item) => item.status === "active"));
       })
       .catch((failure) => { if (failure instanceof DOMException && failure.name === "AbortError") return; setError(failure instanceof Error ? failure.message : "Falha ao carregar etapas."); })
@@ -3106,7 +3114,7 @@ function ProjectStagePicker({ baseUrl, project, onClose, onCreateBlank, onImport
     if (!selections.length) return;
     setBusy(true); setError("");
     const completed = await onImport(selections);
-    if (!completed) setError("A importacao nao foi concluida por inteiro. As etapas confirmadas foram mantidas.");
+    if (!completed) setError("A importacao não foi concluida por inteiro. As etapas confirmadas foram mantidas.");
     setBusy(false);
   }
 
@@ -3121,7 +3129,7 @@ function ProjectStagePicker({ baseUrl, project, onClose, onCreateBlank, onImport
         {!loading && visible.map((item) => { const presentation = stagePresentation(item); const Icon = presentation.Icon; const source = sourceFor(item); return <label className={`project-stage-option ${source ? "" : "unavailable"}`} key={item.id}>
           <input type="checkbox" disabled={!source || busy} checked={selectedIds.includes(item.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} />
           <span className="stage-library-item-icon"><Icon size={18} /></span>
-          <span><strong>{presentation.title}</strong><small>{item.description || "Sem descricao"}</small><em>{source ? `Origem: ${source.templateName} · ${item.document.blocks.length} blocos` : "Disponivel depois de vincular a etapa a um template"}</em></span>
+          <span><strong>{presentation.title}</strong><small>{item.description || "Sem descrição"}</small><em>{source ? `Origem: ${source.templateName} · ${item.document.blocks.length} blocos` : "Disponível depois de vincular a etapa a um template"}</em></span>
         </label>; })}
         {!loading && !visible.length && <p className="workspace-empty">Nenhuma etapa encontrada.</p>}
       </div>
@@ -3132,7 +3140,7 @@ function ProjectStagePicker({ baseUrl, project, onClose, onCreateBlank, onImport
 
 function DataAreaLoading({ loading, error, onRetry }: { loading: boolean; error?: string; onRetry: () => void }) {
   return <section className="data-area-loading" role="status">
-    {loading ? <><Loader2 className="spin" size={22} /> Carregando dados desta area...</> : <><span>{error ?? "Nao foi possivel atualizar esta area."}</span><button className="secondary-button" onClick={onRetry}><RefreshCw size={16} /> Tentar novamente</button></>}
+    {loading ? <><Loader2 className="spin" size={22} /> Carregando dados desta área...</> : <><span>{error ?? "Não foi possível atualizar esta área."}</span><button className="secondary-button" onClick={onRetry}><RefreshCw size={16} /> Tentar novamente</button></>}
   </section>;
 }
 
@@ -3166,9 +3174,9 @@ const projectColumns: { key: ProjectSortColumn; label: string }[] = [
   { key: "client", label: "Cliente" },
   { key: "name", label: "Projeto" },
   { key: "template", label: "Template" },
-  { key: "responsible", label: "Responsavel" },
+  { key: "responsible", label: "Responsável" },
   { key: "age", label: "Tempo" },
-  { key: "progress", label: "Execucao" },
+  { key: "progress", label: "Execução" },
   { key: "status", label: "Status" },
 ];
 
@@ -3268,11 +3276,11 @@ function ProjectsView({
     if (column === "client") return <select aria-label="Filtrar por cliente" value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}><option value="todos">Todos os clientes</option>{clientOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>;
     if (column === "template") return <select aria-label="Filtrar por template" value={templateFilter} onChange={(event) => setTemplateFilter(event.target.value)}><option value="todos">Todos os templates</option>{templateOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>;
     if (column === "responsible") return <select aria-label="Filtrar por responsavel" value={responsibleFilter} onChange={(event) => setResponsibleFilter(event.target.value)}><option value="todos">Todos os responsaveis</option>{responsibleOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>;
-    if (column === "progress") return <select aria-label="Filtrar por execucao" value={progressBand} onChange={(event) => setProgressBand(event.target.value as ProjectProgressBand)}><option value="todos">Qualquer progresso</option><option value="0">0%</option><option value="1-49">1-49%</option><option value="50-99">50-99%</option><option value="100">100%</option></select>;
+    if (column === "progress") return <select aria-label="Filtrar por execução" value={progressBand} onChange={(event) => setProgressBand(event.target.value as ProjectProgressBand)}><option value="todos">Qualquer progresso</option><option value="0">0%</option><option value="1-49">1-49%</option><option value="50-99">50-99%</option><option value="100">100%</option></select>;
     if (column === "age") return <select aria-label="Filtrar por tempo" value={ageBand} onChange={(event) => setAgeBand(event.target.value as ProjectAgeBand)}><option value="todos">Qualquer tempo</option><option value="0-7">Ate 7 dias</option><option value="8-30">8 a 30 dias</option><option value="31+">Mais de 30 dias</option><option value="unknown">Sem tempo registrado</option></select>;
     return <div className="projects-status-filter-fields">
-      <select aria-label="Filtrar por status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ProjectListStatusFilter)}><option value="todos">Todos os status</option><option value="em_andamento">Em andamento</option><option value="concluido">Concluidos</option></select>
-      <select aria-label="Filtrar pendencias do local de trabalho" value={workspaceGapFilter} onChange={(event) => setWorkspaceGapFilter(event.target.value as ProjectWorkspaceGap)}><option value="todos">Qualquer situacao</option><option value="directory">Diretorio pendente</option><option value="conversation">Conversa pendente</option><option value="both">Diretorio e conversa pendentes</option><option value="organized">Local organizado</option></select>
+      <select aria-label="Filtrar por status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ProjectListStatusFilter)}><option value="todos">Todos os status</option><option value="em_andamento">Em andamento</option><option value="concluido">Concluídos</option></select>
+      <select aria-label="Filtrar pendencias do local de trabalho" value={workspaceGapFilter} onChange={(event) => setWorkspaceGapFilter(event.target.value as ProjectWorkspaceGap)}><option value="todos">Qualquer situação</option><option value="directory">Diretório pendente</option><option value="conversation">Conversa pendente</option><option value="both">Diretório e conversa pendentes</option><option value="organized">Local organizado</option></select>
     </div>;
   }
 
@@ -3300,7 +3308,7 @@ function ProjectsView({
       return;
     }
     const unfinished = row.totalSteps - row.completedSteps;
-    if (unfinished > 0 && !window.confirm(`Concluir o projeto "${row.name}" com ${unfinished} etapa(s) ainda nao concluida(s)? As etapas permanecerao como estao.`)) return;
+    if (unfinished > 0 && !window.confirm(`Concluir o projeto "${row.name}"?\n\n${unfinished} etapa(s) ainda estão abertas:\n• as que já foram iniciadas serão marcadas como concluídas;\n• as que nem começaram passarão para "Não se aplica".`)) return;
     onUpdate(row.id, { status: "concluido" });
   }
 
@@ -3359,11 +3367,11 @@ function ProjectsView({
             <div className="projects-segment projects-status-segment" role="group" aria-label="Filtrar projetos por status">
               <button type="button" aria-pressed={statusFilter === "todos"} aria-label="Todos os projetos" title="Todos os projetos" onClick={() => setStatusFilter("todos")}><ListChecks size={15} aria-hidden="true" /><span>Todos</span></button>
               <button type="button" aria-pressed={statusFilter === "em_andamento"} aria-label="Projetos em andamento" title="Em andamento, incluindo planejados e bloqueados" onClick={() => setStatusFilter("em_andamento")}><RefreshCw size={15} aria-hidden="true" /><span>Em andamento</span></button>
-              <button type="button" aria-pressed={statusFilter === "concluido"} aria-label="Projetos concluidos" title="Projetos concluidos" onClick={() => setStatusFilter("concluido")}><CheckCircle2 size={15} aria-hidden="true" /><span>Concluidos</span></button>
+              <button type="button" aria-pressed={statusFilter === "concluido"} aria-label="Projetos concluidos" title="Projetos concluidos" onClick={() => setStatusFilter("concluido")}><CheckCircle2 size={15} aria-hidden="true" /><span>Concluídos</span></button>
             </div>
           </div>
           <div className="projects-segment-field projects-owner-filter">
-            <span>Responsavel</span>
+            <span>Responsável</span>
             <div className="projects-owner-segment" role="group" aria-label="Filtrar por responsavel">
               <button className="projects-owner-filter-button all" type="button" aria-label="Todos os responsaveis" title="Todos os responsaveis" aria-pressed={responsibleFilter === "todos"} onClick={() => setResponsibleFilter("todos")}>
                 <Users size={14} aria-hidden="true" />
@@ -3396,7 +3404,7 @@ function ProjectsView({
               if (event.target.value === "recent") { setSortColumn(null); return; }
               const [column, direction] = event.target.value.split(":") as [ProjectSortColumn, ProjectSortDirection];
               setSortColumn(column); setSortDirection(direction);
-            }}><option value="recent">Atualizacao recente</option>{projectColumns.flatMap(({ key, label }) => [<option key={`${key}:asc`} value={`${key}:asc`}>{label} crescente</option>, <option key={`${key}:desc`} value={`${key}:desc`}>{label} decrescente</option>])}</select></label>
+            }}><option value="recent">Atualização recente</option>{projectColumns.flatMap(({ key, label }) => [<option key={`${key}:asc`} value={`${key}:asc`}>{label} crescente</option>, <option key={`${key}:desc`} value={`${key}:desc`}>{label} decrescente</option>])}</select></label>
             <details className="projects-mobile-filters"><summary><Filter size={15} /> Filtros das colunas</summary><div>{projectColumns.map(({ key, label }) => <div className="projects-mobile-filter-field" key={key}><span>{label}</span>{columnFilterControl(key)}</div>)}</div></details>
           </div>
         </div>
@@ -3406,7 +3414,7 @@ function ProjectsView({
             <button className="projects-column-sort" type="button" aria-label={`Ordenar por ${label.toLowerCase()}${sortColumn === key ? `, ordem ${sortDirection === "asc" ? "crescente" : "decrescente"}` : ""}`} aria-pressed={sortColumn === key} onClick={() => toggleSort(key)}><span>{label}</span>{sortColumn !== key ? <ArrowUpDown size={13} /> : sortDirection === "asc" ? <ArrowUp size={13} /> : <ArrowDown size={13} />}</button>
             <details className="projects-column-filter" data-active={columnFilterActive(key)}><summary title={`Filtrar ${label.toLowerCase()}`} aria-label={`Filtrar ${label.toLowerCase()}`}><Filter size={13} /></summary><div className="projects-column-filter-menu"><strong>{label}</strong>{columnFilterControl(key)}</div></details>
           </div>)}
-          <span>Acoes</span>
+          <span>Ações</span>
         </div>
         {groupedRows.map((group) => {
           const isCollapsed = groupBy !== "none" && !expandedGroups.has(group.key);
@@ -3466,13 +3474,13 @@ function ProjectsView({
               <Field label="Nome do projeto" value={projectNameDraft} onChange={setProjectNameDraft} />
               <ClientSearchSelect label="Cliente vinculado" value={projectClientDraft} clients={tables.clients} onChange={(value) => { setProjectClientDraft(value); const client = tables.clients.find((item) => item.id === value); if (client) setProjectCompanyDraft(client.name); }} />
               {!projectClientDraft && <Field label="Empresa legada" value={projectCompanyDraft} onChange={setProjectCompanyDraft} />}
-              <SelectField label="Responsavel" value={projectResponsibleUserDraft} onChange={setProjectResponsibleUserDraft} options={activeUsers.map(toOption)} />
+              <SelectField label="Responsável" value={projectResponsibleUserDraft} onChange={setProjectResponsibleUserDraft} options={activeUsers.map(toOption)} />
               <SelectField label="Tipo de projeto" value={projectTypeDraft} onChange={(value) => { setProjectTypeDraft(value); setProjectModalityDraft(""); }} options={tables.project_types.filter((item) => item.status === "ativo").map(toOption)} />
               <SelectField label="Modalidade" value={projectModalityDraft} onChange={setProjectModalityDraft} options={tables.project_modalities.filter((item) => item.status === "ativo" && item.project_type_id === projectTypeDraft).map(toOption)} />
             </div>
             <div className="inline-actions project-editor-actions">
               <button className="secondary-button" type="button" onClick={() => setEditingProject(null)}>Cancelar</button>
-              <button className="primary-button" type="submit"><Save size={16} /> Salvar alteracoes</button>
+              <button className="primary-button" type="submit"><Save size={16} /> Salvar alterações</button>
             </div>
           </form>
         </div>
@@ -3507,9 +3515,9 @@ function ProjectPortfolioRow({ row, client, workspace, onOpen, onShare, onEdit, 
     : "?";
   const age = getProjectAge(row);
   const workspaceGapLabel = {
-    directory: "Diretorio pendente",
+    directory: "Diretório pendente",
     conversation: "Link de conversa pendente",
-    both: "Diretorio e link pendentes",
+    both: "Diretório e link pendentes",
     organized: "Local organizado",
     unknown: "",
   }[row.workspaceGap];
@@ -3517,7 +3525,7 @@ function ProjectPortfolioRow({ row, client, workspace, onOpen, onShare, onEdit, 
   const primaryAction = projectPrimaryAction(row, workspace);
   const primaryActionLabel = primaryAction === "workspace"
     ? `Completar local de trabalho de ${row.name}${workspaceGapLabel ? `: ${workspaceGapLabel.toLowerCase()}` : ""}`
-    : primaryAction === "reopen" ? `Reabrir ${row.name}` : primaryAction === "disabled" ? "Projeto ja concluido ou arquivado" : `Concluir ${row.name}`;
+    : primaryAction === "reopen" ? `Reabrir ${row.name}` : primaryAction === "disabled" ? "Projeto já concluido ou arquivado" : `Concluir ${row.name}`;
   const clientNameParts = row.clientName.trim().split(/\s+/);
   const clientFirstLine = clientNameParts.shift() ?? row.clientName;
   const clientSecondLine = clientNameParts.join(" ");
@@ -3539,14 +3547,14 @@ function ProjectPortfolioRow({ row, client, workspace, onOpen, onShare, onEdit, 
       </div>
       <span className="projects-cell projects-type" title={row.templateName}>{row.templateName}</span>
       <span className="projects-cell projects-owner">
-        <span className="projects-owner-tag" data-tone={projectOwnerTone(ownerName)} title={`Responsavel: ${ownerName}`}>
+        <span className="projects-owner-tag" data-tone={projectOwnerTone(ownerName)} title={`Responsável: ${ownerName}`}>
           <span className="projects-owner-initials" aria-hidden="true">{ownerInitials}</span>{ownerName}
         </span>
       </span>
       <span className={`projects-cell projects-age ${age.available ? "" : "unavailable"}`} title={age.title} aria-label={age.title}>
         <strong>{age.label}</strong><small>{age.detail}</small>
       </span>
-      <span className="projects-cell projects-execution" aria-label={`${row.completedSteps} de ${row.totalSteps} etapas concluidas; ${row.progress}% do projeto`}>
+      <span className="projects-cell projects-execution" aria-label={`${row.completedSteps} de ${row.totalSteps} etapas concluídas; ${row.progress}% do projeto`}>
         <strong>{row.totalSteps ? `${row.completedSteps}/${row.totalSteps}` : "Sem etapas"}</strong>
         <progress value={row.progress} max={100} aria-label={`Progresso de ${row.name}`} />
         <span>{row.progress}%</span>
@@ -3636,7 +3644,7 @@ function ProjectTemplatesView({
     try {
       const response = await fetch(`${cloudflareApiUrl}/api/journey-templates`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Novo template" }) });
       const body = await response.json() as { data?: { data?: { id: string } } | { id: string }; error?: string };
-      if (!response.ok || !body.data) throw new Error(body.error ?? "Nao foi possivel criar o template.");
+      if (!response.ok || !body.data) throw new Error(body.error ?? "Não foi possível criar o template.");
       const result = (body.data as { data?: { id: string } }).data ?? body.data as { id: string };
       if (!result?.id) throw new Error("Resposta incompleta ao criar o template.");
       await onRefresh(); setEditingTemplateId(result.id);
@@ -3656,7 +3664,7 @@ function ProjectTemplatesView({
       </section>
       {createError && <p role="alert" className="form-error">{createError}</p>}
 
-      <div className="template-section-tabs" role="tablist" aria-label="Organizacao dos modelos"><button type="button" role="tab" aria-selected={templateSection === "templates"} onClick={() => setTemplateSection("templates")}><Route size={16} /> Templates</button><button type="button" role="tab" aria-selected={templateSection === "stages"} onClick={() => setTemplateSection("stages")}><Layers3 size={16} /> Etapas salvas</button><button type="button" role="tab" aria-selected={templateSection === "clientStages"} onClick={() => setTemplateSection("clientStages")}><Users size={16} /> Etapas dos clientes</button></div>
+      <div className="template-section-tabs" role="tablist" aria-label="Organização dos modelos"><button type="button" role="tab" aria-selected={templateSection === "templates"} onClick={() => setTemplateSection("templates")}><Route size={16} /> Templates</button><button type="button" role="tab" aria-selected={templateSection === "stages"} onClick={() => setTemplateSection("stages")}><Layers3 size={16} /> Etapas salvas</button><button type="button" role="tab" aria-selected={templateSection === "clientStages"} onClick={() => setTemplateSection("clientStages")}><Users size={16} /> Etapas dos clientes</button></div>
 
       {templateSection === "stages" ? <StageLibraryPanel baseUrl={cloudflareApiUrl} scope="global" currentUserName={currentUserName} onChanged={onRefresh} /> : templateSection === "clientStages" ? <StageLibraryPanel baseUrl={cloudflareApiUrl} scope="client" clients={tables.clients.map((client) => ({ id: client.id, name: client.name }))} currentUserName={currentUserName} onChanged={onRefresh} /> : <>
 
@@ -3701,7 +3709,7 @@ function ProjectTemplatesView({
                   <strong>{template.name}</strong>
                   <StatusPill status={template.status} />
                 </div>
-                <p>{template.description || "Template sem descricao."}</p>
+                <p>{template.description || "Template sem descrição."}</p>
                 <div className="template-meta">
                   <span className="template-type-chip">{templateTypeName(template, tables.project_types)}</span>
                   {template.project_modality_id && <span className="template-type-chip">{tables.project_modalities.find((item) => item.id === template.project_modality_id)?.name ?? "Modalidade indisponivel"}</span>}
@@ -3720,7 +3728,7 @@ function ProjectTemplatesView({
                       <button className="icon-button" type="submit" title="Salvar nome" disabled={stepBusyId === step.id}><Check size={15} /></button>
                       <button className="icon-button" type="button" title="Cancelar" onClick={() => setEditingStepId(null)}><X size={15} /></button>
                     </form> : <strong>{step.name}</strong>}
-                    <small>{step.description || "Sem descricao"}</small>
+                    <small>{step.description || "Sem descrição"}</small>
                     <span className="template-stage-inline-actions">
                       <button className="icon-button" type="button" title={`Renomear ${step.name}`} onClick={(event) => { event.stopPropagation(); setEditingStepId(step.id); setEditingStepName(step.name); }}><Pencil size={14} /></button>
                       <button className="icon-button danger" type="button" title={`Retirar ${step.name} deste template`} disabled={stepBusyId === step.id} onClick={(event) => { event.stopPropagation(); setStepBusyId(step.id); void onRemoveStep(step).finally(() => setStepBusyId(null)); }}><Trash2 size={14} /></button>
@@ -3792,7 +3800,7 @@ function NewProjectPanel({ tables, currentUser, onCreate, onClose }: { tables: T
         />
         {form.client_id === "__new" && <Field label="Novo cliente" value={form.new_client_name} onChange={(value) => setForm({ ...form, new_client_name: value, company: value })} />}
         {!form.client_id && <Field label="Empresa / cliente legado" value={form.company} onChange={(value) => setForm({ ...form, company: value })} />}
-        <SelectField label="Responsavel" value={form.responsible_user_id} onChange={(value) => setForm({ ...form, responsible_user_id: value })} options={activeUsers.map(toOption)} />
+        <SelectField label="Responsável" value={form.responsible_user_id} onChange={(value) => setForm({ ...form, responsible_user_id: value })} options={activeUsers.map(toOption)} />
         <SelectField label="Tipo de projeto" value={form.project_type_id} onChange={(value) => setForm((current) => ({ ...current, project_type_id: value, project_modality_id: "", new_project_modality_name: "", journey_template_id: templateAfterTypeChange(current.journey_template_id, value, "", tables.journey_templates) }))} options={tables.project_types.filter((type) => type.status === "ativo" || type.id === form.project_type_id).map(toOption)} />
         <ModalitySearchSelect
           value={form.project_modality_id}
@@ -3811,7 +3819,7 @@ function NewProjectPanel({ tables, currentUser, onCreate, onClose }: { tables: T
           options={projectTemplates.map((template) => ({ value: template.id, label: `${template.name} · ${templateTypeName(template, tables.project_types)}` }))}
           emptyLabel="Comecar vazio"
         />
-        <TextArea label="Observacoes iniciais" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
+        <TextArea label="Observações iniciais" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
       </div>
       <div className="project-create-footer">
         <button className="secondary-button" type="button" onClick={onClose}>Cancelar</button>
@@ -3873,7 +3881,7 @@ function ManagementView({
     <>
       <section className="topbar">
         <div>
-          <h1>Gestao</h1>
+          <h1>Gestão</h1>
           <p>Visao consolidada para acompanhar projetos, clientes, responsaveis e tipos de entrega.</p>
         </div>
       </section>
@@ -3907,7 +3915,7 @@ function ManagementView({
       </div>
 
       {view === "attention" && <section className="list-panel management-panel management-attention">
-        <div className="panel-heading"><div><h2>Fila de atencao</h2><p>Bloqueios e vinculos a revisar; conclusoes manuais ficam em uma revisao separada.</p></div></div>
+        <div className="panel-heading"><div><h2>Fila de atencao</h2><p>Bloqueios e vínculos a revisar; conclusoes manuais ficam em uma revisao separada.</p></div></div>
         <div className="management-attention-filters" role="group" aria-label="Filtrar motivos de atencao">
           <button type="button" aria-pressed={attentionFilter === "ativos"} onClick={() => setAttentionFilter("ativos")}>Projetos ativos <span>{filteredAttentionRows.filter((row) => row.status !== "concluido").length}</span></button>
           {attentionKinds.map((kind) => <button type="button" key={kind} aria-pressed={attentionFilter === kind} onClick={() => setAttentionFilter(kind)}>{managementAttentionLabels[kind]} <span>{filteredAttentionRows.filter((row) => row.reasons.includes(kind)).length}</span></button>)}
@@ -3919,13 +3927,13 @@ function ManagementView({
             <span className="management-attention-progress">{row.completedSteps}/{row.totalSteps} etapas</span>
             <button type="button" className="secondary-button" onClick={() => onOpenProject(row.id)}>Abrir <ChevronRight size={15} /></button>
           </div>)}
-          {attentionRows.length === 0 && <div className="empty-state"><CheckCircle2 size={28} /><strong>Nenhum projeto nesta fila</strong><span>Os filtros atuais nao mostram pendencias de cadastro ou bloqueios.</span></div>}
+          {attentionRows.length === 0 && <div className="empty-state"><CheckCircle2 size={28} /><strong>Nenhum projeto nesta fila</strong><span>Os filtros atuais não mostram pendencias de cadastro ou bloqueios.</span></div>}
         </div>
         <div className="management-execution-heading"><h3>Projetos abertos</h3><span>{visibleActiveProjects.length} projeto(s)</span></div>
         <div className="management-attention-list">
           {visibleActiveProjects.map((row) => <div className="management-attention-item" key={row.id}>
             <div className="management-attention-identity"><button type="button" className="management-link" onClick={() => onOpenProject(row.id)}>{row.name}</button><small>{row.clientName} | {row.responsibleName || "Sem responsavel"}</small></div>
-            <span className="management-next-step">{row.nextStepName ? `Proxima etapa: ${row.nextStepName}` : "Sem proxima etapa registrada"}</span>
+            <span className="management-next-step">{row.nextStepName ? `Próxima etapa: ${row.nextStepName}` : "Sem próxima etapa registrada"}</span>
             <span className="management-attention-progress">{row.completedSteps}/{row.totalSteps} etapas</span>
             <button type="button" className="secondary-button" onClick={() => onOpenProject(row.id)}>Abrir <ChevronRight size={15} /></button>
           </div>)}
@@ -3956,7 +3964,7 @@ function ManagementView({
               <option value="todos">Todos status</option>
               <option value="planejado">Planejado</option>
               <option value="em_andamento">Em andamento</option>
-              <option value="concluido">Concluido</option>
+              <option value="concluido">Concluído</option>
               <option value="bloqueado">Bloqueado</option>
               <option value="arquivado">Arquivado</option>
             </select>
@@ -3968,7 +3976,7 @@ function ManagementView({
             <span>Projeto</span>
             <span>Cliente</span>
             <span>Tipo</span>
-            <span>Responsavel</span>
+            <span>Responsável</span>
             <span>Status</span>
             <span>Progresso</span>
           </div>
@@ -4089,7 +4097,7 @@ function ClientsView({
           <strong>{averageProgress}%</strong>
         </article>
         <article className="metric-card">
-          <span>Etapas concluidas</span>
+          <span>Etapas concluídas</span>
           <strong>{doneSteps}</strong>
         </article>
         <article className="metric-card">
@@ -4165,8 +4173,8 @@ function NewClientPanel({ tables, currentUser, onCreate }: { tables: Tables; cur
         <Field label="Nome do cliente" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
         <Field label="Empresa / unidade" value={form.company} onChange={(value) => setForm({ ...form, company: value })} />
         <ClientLogoPicker name={form.name} logoUrl={form.logo_url} file={form.logo_file} onFile={(file) => setForm((current) => ({ ...current, logo_file: file }))} onRemove={() => setForm((current) => ({ ...current, logo_file: null, logo_url: "" }))} />
-        <SelectField label="Categoria do cliente" value={form.client_kind} onChange={(value) => setForm({ ...form, client_kind: value as ClientKind | "" })} options={clientKindOptions} emptyLabel="Nao definida" />
-        <SelectField label="Responsavel interno" value={form.responsible_user_id} onChange={(value) => setForm({ ...form, responsible_user_id: value })} options={activeUsers.map(toOption)} />
+        <SelectField label="Categoria do cliente" value={form.client_kind} onChange={(value) => setForm({ ...form, client_kind: value as ClientKind | "" })} options={clientKindOptions} emptyLabel="Não definida" />
+        <SelectField label="Responsável interno" value={form.responsible_user_id} onChange={(value) => setForm({ ...form, responsible_user_id: value })} options={activeUsers.map(toOption)} />
         <Field label="Mes de entrada" value={form.entry_month} onChange={(value) => setForm({ ...form, entry_month: value })} />
         <SelectField label="Produto / tipo" value={form.project_type_id} onChange={(value) => setForm({ ...form, project_type_id: value })} options={tables.project_types.map(toOption)} />
         <SelectField
@@ -4176,7 +4184,7 @@ function NewClientPanel({ tables, currentUser, onCreate }: { tables: Tables; cur
           options={clientTemplates.map(toOption)}
           emptyLabel="Comecar vazio"
         />
-        <TextArea label="Observacoes iniciais" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
+        <TextArea label="Observações iniciais" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
       </div>
     </section>
   );
@@ -4211,7 +4219,7 @@ function ClientProfileDialog({ client, users, onClose, onSave }: {
     }, logoFile);
     setSaving(false);
     if (saved) onClose();
-    else setError("Nao foi possivel salvar. Confira a mensagem acima e tente novamente.");
+    else setError("Não foi possível salvar. Confira a mensagem acima e tente novamente.");
   }
 
   return <div className="modal-backdrop" role="presentation" onClick={onClose}>
@@ -4221,8 +4229,8 @@ function ClientProfileDialog({ client, users, onClose, onSave }: {
         <Field label="Nome do cliente" value={name} onChange={setName} />
         <Field label="Empresa / unidade" value={company} onChange={setCompany} />
         <ClientLogoPicker name={name} logoUrl={logoUrl} file={logoFile} onFile={setLogoFile} onRemove={() => { setLogoFile(null); setLogoUrl(""); }} />
-        <SelectField label="Categoria do cliente" value={clientKind} onChange={(value) => setClientKind(value as ClientKind | "")} options={clientKindOptions} emptyLabel="Nao definida" />
-        <SelectField label="Responsavel interno" value={responsibleUserId} onChange={setResponsibleUserId} options={users.filter((user) => user.status === "ativo").map(toOption)} emptyLabel="Sem responsavel" />
+        <SelectField label="Categoria do cliente" value={clientKind} onChange={(value) => setClientKind(value as ClientKind | "")} options={clientKindOptions} emptyLabel="Não definida" />
+        <SelectField label="Responsável interno" value={responsibleUserId} onChange={setResponsibleUserId} options={users.filter((user) => user.status === "ativo").map(toOption)} emptyLabel="Sem responsavel" />
         <label className="client-active-field"><input type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} /> Cliente ativo na lista</label>
       </div>
       {error && <p className="form-error" role="alert">{error}</p>}
@@ -4362,8 +4370,8 @@ function ClientJourneyView({
 
           <div className="editor-grid">
             <TextArea label="Objetivo da etapa" value={selectedStep.objective} onChange={() => undefined} onBlur={(value) => onUpdateStep(selectedStep.id, { objective: value })} />
-            <TextArea label="Pre-requisito / evidencia para concluir" value={selectedStep.required_evidence_label} onChange={() => undefined} onBlur={(value) => onUpdateStep(selectedStep.id, { required_evidence_label: value })} />
-            <TextArea label="Observacoes da etapa" value={selectedStep.notes} onChange={() => undefined} onBlur={(value) => onUpdateStep(selectedStep.id, { notes: value })} />
+            <TextArea label="Pre-requisito / evidência para concluir" value={selectedStep.required_evidence_label} onChange={() => undefined} onBlur={(value) => onUpdateStep(selectedStep.id, { required_evidence_label: value })} />
+            <TextArea label="Observações da etapa" value={selectedStep.notes} onChange={() => undefined} onBlur={(value) => onUpdateStep(selectedStep.id, { notes: value })} />
             <Field label="Prazo" type="date" value={selectedStep.due_date ?? ""} onChange={(value) => onUpdateStep(selectedStep.id, { due_date: value })} />
           </div>
 
@@ -4388,7 +4396,7 @@ function ClientJourneyView({
             options={[
               { value: "em_implantacao", label: "Em implantacao" },
               { value: "ativo", label: "Ativo" },
-              { value: "concluido", label: "Concluido" },
+              { value: "concluido", label: "Concluído" },
               { value: "bloqueado", label: "Bloqueado" },
               { value: "arquivado", label: "Arquivado" },
             ]}
@@ -4447,7 +4455,7 @@ function ClientBlockJourneyView({
     const payload = (body.data && typeof body.data === "object" && "data" in body.data
       ? body.data.data
       : body.data) as StepBuilderPayload | undefined;
-    if (!response.ok || !payload) throw new Error(body.error ?? "Nao foi possivel atualizar a etapa do cliente.");
+    if (!response.ok || !payload) throw new Error(body.error ?? "Não foi possível atualizar a etapa do cliente.");
     return payload;
   }
 
@@ -4459,7 +4467,7 @@ function ClientBlockJourneyView({
       const payload = (body.data && typeof body.data === "object" && "data" in body.data
         ? body.data.data
         : body.data) as StepBuilderPayload | undefined;
-      if (!response.ok || !payload) throw new Error(body.error ?? "Nao foi possivel carregar a jornada.");
+      if (!response.ok || !payload) throw new Error(body.error ?? "Não foi possível carregar a jornada.");
       setPayload(payload);
       setCollapsedBlockIds(new Set(payload.presentation?.collapsedBlockIds ?? []));
     } catch (error) {
@@ -4495,7 +4503,7 @@ function ClientBlockJourneyView({
       onUpdateStep(selectedStep.id, { status: "concluido" });
       window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: forcePending ? "Blocos pendentes concluidos e etapa finalizada." : "Etapa concluida." } }));
     } catch (error) {
-      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Nao foi possivel concluir a etapa." } }));
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Não foi possível concluir a etapa." } }));
     }
   }
 
@@ -4515,7 +4523,7 @@ function ClientBlockJourneyView({
         })
         .catch((error) => {
           setCollapsedBlockIds(previous);
-          window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Nao foi possivel salvar a visualizacao da etapa." } }));
+          window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Não foi possível salvar a visualizacao da etapa." } }));
         });
       return next;
     });
@@ -4551,11 +4559,11 @@ function ClientBlockJourneyView({
             <div className="journey-mode-switch"><button className={mode === "execute" ? "active" : ""} onClick={() => setMode("execute")}><CheckCircle2 size={15} /> Executar</button><button className={mode === "edit" ? "active" : ""} onClick={() => setMode("edit")}><Pencil size={15} /> Editar estrutura</button></div>
             <div className="journey-block-view-actions" role="group" aria-label="Visibilidade dos blocos"><button className="secondary-button" type="button" onClick={() => updatePresentation(() => new Set())}><ChevronDown size={16} /> Abrir todos</button><button className="secondary-button" type="button" onClick={() => updatePresentation(() => collapseAllBlockIds(blocks.map((block) => block.id)))}><ChevronUp size={16} /> Recolher todos</button><button className="ghost-button" type="button" onClick={() => updatePresentation(() => new Set(), true)} title="Abrir todos e esquecer esta preferencia"><RefreshCw size={15} /> Restaurar</button></div>
             <button className="secondary-button" type="button" disabled={!payload} title={payload?.completion.canComplete ? "Concluir etapa" : "Concluir os blocos pendentes e finalizar a etapa"} onClick={() => void completeCurrentStep()}><CheckCircle2 size={16} /> Concluir</button>
-            {mode === "edit" && <><form className="quick-step-form" onSubmit={(event) => { event.preventDefault(); onAddNextStep(client.id, newStepName || "Nova etapa"); setNewStepName(""); }}><input value={newStepName} onChange={(event) => setNewStepName(event.target.value)} placeholder="Nova etapa" /><button className="secondary-button"><Plus size={16} /> Adicionar etapa</button></form><div className="block-add-wrap"><button className="primary-button" onClick={() => setIsAdding((open) => !open)}><Plus size={17} /> Adicionar bloco</button>{isAdding && <BlockTypeMenu onSelect={addBlock} />}</div><button className="secondary-button" type="button" onClick={() => { const next = { ...templatePresentationDefaults, [selectedStep.id]: [...collapsedBlockIds] }; setTemplatePresentationDefaults(next); window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: "Visual inicial desta etapa sera salvo no template." } })); }}><PanelTop size={16} /> Salvar visual inicial</button><button className="secondary-button" onClick={() => onSaveTemplate(client, { presentationDefaults: templatePresentationDefaults })}><Save size={16} /> Salvar template</button></>}
+            {mode === "edit" && <><form className="quick-step-form" onSubmit={(event) => { event.preventDefault(); onAddNextStep(client.id, newStepName || "Nova etapa"); setNewStepName(""); }}><input value={newStepName} onChange={(event) => setNewStepName(event.target.value)} placeholder="Nova etapa" /><button className="secondary-button"><Plus size={16} /> Adicionar etapa</button></form><div className="block-add-wrap"><button className="primary-button" onClick={() => setIsAdding((open) => !open)}><Plus size={17} /> Adicionar bloco</button>{isAdding && <BlockTypeMenu onSelect={addBlock} />}</div><button className="secondary-button" type="button" onClick={() => { const next = { ...templatePresentationDefaults, [selectedStep.id]: [...collapsedBlockIds] }; setTemplatePresentationDefaults(next); window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: "Visual inicial desta etapa será salvo no template." } })); }}><PanelTop size={16} /> Salvar visual inicial</button><button className="secondary-button" onClick={() => onSaveTemplate(client, { presentationDefaults: templatePresentationDefaults })}><Save size={16} /> Salvar template</button></>}
           </div>
           <div className="step-auto-status"><span className={`chip active ${payload?.completion.status ?? selectedStep.status}`}>{formatStepStatus(payload?.completion.status ?? selectedStep.status)}</span><span>{payload ? `${payload.completion.completedBlocks}/${payload.completion.totalBlocks} blocos completos` : "Carregando blocos"}</span><div className="progress-bar"><span style={{ width: `${payload?.completion.progress ?? 0}%` }} /></div></div>
           {!payload && <div className="empty-state compact"><Loader2 className="spin" size={23} /> Carregando jornada...</div>}
-          {payload && !blocks.length && <div className="empty-block-canvas"><Sparkles size={30} /><strong>Etapa limpa</strong><span>{mode === "edit" ? "Adicione apenas os blocos necessarios." : "Esta etapa ainda nao possui conteudo para executar."}</span>{mode === "edit" && <button className="primary-button" onClick={() => setIsAdding(true)}><Plus size={16} /> Adicionar primeiro bloco</button>}</div>}
+          {payload && !blocks.length && <div className="empty-block-canvas"><Sparkles size={30} /><strong>Etapa limpa</strong><span>{mode === "edit" ? "Adicione apenas os blocos necessarios." : "Esta etapa ainda não possui conteúdo para executar."}</span>{mode === "edit" && <button className="primary-button" onClick={() => setIsAdding(true)}><Plus size={16} /> Adicionar primeiro bloco</button>}</div>}
           <div className="block-canvas">{blocks.map((block, index) => <StepBuilderBlockCard key={block.id} block={block} index={index} total={blocks.length} value={payload?.values.find((value) => value.block_id === block.id)?.value} tables={tables} summaries={[]} summaryItems={[]} generatedPrompts={[]} project={projectLike} selectedStep={stepLike} currentUser={currentUser} onUpdateSummaryItem={() => undefined} onSetSummaryItemSelection={() => undefined} onDeleteSummaryItem={() => undefined} onSaveGeneratedPrompt={async () => false} onArchiveGeneratedPrompt={() => undefined} onCreatePromptFromBlock={onCreatePromptFromBlock} mode={mode} isEditing={mode === "edit" && editingBlockId === block.id} isCollapsed={collapsedBlockIds.has(block.id)} onToggleCollapse={() => updatePresentation((current) => toggleCollapsedBlockIds(current, block.id))} onDuplicate={() => void addBlock(block.type)} onEdit={() => setEditingBlockId((current) => current === block.id ? null : block.id)} onUpdate={(patch) => void updateBlock(block.id, patch)} onDelete={() => void request(`/blocks/${encodeURIComponent(block.id)}`, { method: "DELETE" }).then(setPayload)} onMove={move} onSaveValue={(value) => void saveValue(block.id, value)} onOpenSummary={() => undefined} ownerType="client" />)}</div>
         </section>
       </section>
@@ -4631,7 +4639,7 @@ function ClientLinksPanel({
   return (
     <section className="work-block">
       <div className="block-heading">
-        <h2>Evidencias e arquivos</h2>
+        <h2>Evidências e arquivos</h2>
         <form
           className="inline-form"
           onSubmit={(event) => {
@@ -4663,7 +4671,7 @@ function ClientLinksPanel({
             </button>
           </div>
         ))}
-        {links.length === 0 && <span className="muted">Nenhuma evidencia vinculada.</span>}
+        {links.length === 0 && <span className="muted">Nenhuma evidência vinculada.</span>}
       </div>
     </section>
   );
@@ -4707,9 +4715,9 @@ const blockCatalog: BlockCatalogItem[] = [
   { key: "checklist", type: "checklist", label: "Checklist", icon: ListChecks },
   { key: "prompt", type: "prompt", label: "Prompt", icon: Clipboard },
   { key: "context", type: "context", label: "Contexto", icon: Copy },
-  { key: "project_summary", type: "project_summary", label: "Sumario", icon: GitBranch },
+  { key: "project_summary", type: "project_summary", label: "Sumário", icon: GitBranch },
   { key: "materials", type: "materials", label: "Links e materiais", icon: Link2, title: "Links e materiais", config: { links: [] } },
-  { key: "evidence", type: "file_upload", label: "Evidencia / envio", icon: Upload, title: "Evidencias", config: { fileMode: "evidence", acceptedFileTypes: [], allowMultipleFiles: true } },
+  { key: "evidence", type: "file_upload", label: "Evidência / envio", icon: Upload, title: "Evidências", config: { fileMode: "evidence", acceptedFileTypes: [], allowMultipleFiles: true } },
   { key: "resource_pack", type: "file_upload", label: "Arquivos e modelos", icon: Download, title: "Arquivos e modelos", config: { fileMode: "resource_pack", acceptedFileTypes: [], allowMultipleFiles: true } },
   { key: "comment", type: "comment", label: "Comentario", icon: FileText },
 ];
@@ -4932,7 +4940,7 @@ function JourneyView({
       onUpdateStep(selectedStep.id, { status: "concluido" });
       window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: forcePending ? "Blocos pendentes concluidos e etapa finalizada." : "Etapa concluida." } }));
     } catch (error) {
-      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Nao foi possivel concluir a etapa." } }));
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Não foi possível concluir a etapa." } }));
     }
   }
 
@@ -4952,7 +4960,7 @@ function JourneyView({
         })
         .catch((error) => {
           setCollapsedBlockIds(previous);
-          window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Nao foi possivel salvar a visualizacao da etapa." } }));
+          window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Não foi possível salvar a visualizacao da etapa." } }));
         });
       return next;
     });
@@ -5013,7 +5021,7 @@ function JourneyView({
       </section>
 
       <section className="journey-layout block-journey-layout">
-        <JourneyStepRail ownerType="project" ownerId={project.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: workspace?.status === "organizado" ? "concluido" : workspace?.status === "parcial" ? "em_andamento" : "pendente", status_label: workspace?.status === "organizado" ? "Organizado" : workspace?.status === "parcial" ? "Parcial" : "Nao iniciado" }, ...steps]} selectedStepId={selectedStepId} onSelectStep={onSelectStep} onAdd={onOpenStagePicker} onOrganize={() => setIsStepManagerOpen(true)} />
+        <JourneyStepRail ownerType="project" ownerId={project.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: workspace?.status === "organizado" ? "concluido" : workspace?.status === "parcial" ? "em_andamento" : "pendente", status_label: workspace?.status === "organizado" ? "Organizado" : workspace?.status === "parcial" ? "Parcial" : "Não iniciado" }, ...steps]} selectedStepId={selectedStepId} onSelectStep={onSelectStep} onAdd={onOpenStagePicker} onOrganize={() => setIsStepManagerOpen(true)} />
 
         <section className="work-surface block-work-surface">
           <CommandBar mode={journeyMode}>
@@ -5034,8 +5042,8 @@ function JourneyView({
               <button className="secondary-button" type="button" onClick={() => updatePresentation(() => collapseAllBlockIds(blocks.map((block) => block.id)))} title="Recolher todos os blocos desta etapa"><ChevronUp size={16} /> Recolher todos</button>
               <button className="ghost-button" type="button" onClick={() => updatePresentation(() => new Set(), true)} title="Restaurar o visual padrão e abrir todos os blocos"><RefreshCw size={16} /> Restaurar</button>
             </div>
-            <button className={`secondary-button ${selectedStep.is_not_applicable ? "is-not-applicable" : ""}`} type="button" onClick={() => onUpdateStep(selectedStep.id, { is_not_applicable: !selectedStep.is_not_applicable })}>{selectedStep.is_not_applicable ? <RefreshCw size={16} /> : <X size={16} />}{selectedStep.is_not_applicable ? " Aplicar etapa" : " Nao se aplica"}</button>
-            <button className="secondary-button" type="button" disabled={Boolean(selectedStep.is_not_applicable) || !completion} title={selectedStep.is_not_applicable ? "Esta etapa foi marcada como nao aplicavel" : completion?.canComplete ? "Concluir etapa" : "Concluir os blocos pendentes e finalizar a etapa"} onClick={() => void completeCurrentStep()}><CheckCircle2 size={17} /> Concluir</button>
+            <button className={`secondary-button ${selectedStep.is_not_applicable ? "is-not-applicable" : ""}`} type="button" onClick={() => onUpdateStep(selectedStep.id, { is_not_applicable: !selectedStep.is_not_applicable })}>{selectedStep.is_not_applicable ? <RefreshCw size={16} /> : <X size={16} />}{selectedStep.is_not_applicable ? " Aplicar etapa" : " Não se aplica"}</button>
+            <button className="secondary-button" type="button" disabled={Boolean(selectedStep.is_not_applicable) || !completion} title={selectedStep.is_not_applicable ? "Esta etapa foi marcada como não aplicavel" : completion?.canComplete ? "Concluir etapa" : "Concluir os blocos pendentes e finalizar a etapa"} onClick={() => void completeCurrentStep()}><CheckCircle2 size={17} /> Concluir</button>
             {journeyMode === "edit" && (
               <>
                 <form className="quick-step-form" onSubmit={(event) => { event.preventDefault(); onAddNextStep(project.id, newStepName || "Nova etapa"); setNewStepName(""); }}>
@@ -5048,14 +5056,14 @@ function JourneyView({
                 </div>
                 <button className="secondary-button" type="button" onClick={() => {
                   setTemplatePresentationDefaults((current) => ({ ...current, [selectedStep.id]: [...collapsedBlockIds] }));
-                  window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: "Visual inicial desta etapa sera salvo com o template." } }));
+                  window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: "Visual inicial desta etapa será salvo com o template." } }));
                 }}><PanelTop size={17} /> Salvar visual inicial</button>
                 <button className="secondary-button" type="button" onClick={openTemplateSave}><Save size={17} /> Salvar template</button>
               </>
             )}
           </CommandBar>
           <div className="step-auto-status">
-            <StatusBadge tone={selectedStep.is_not_applicable ? "pending" : statusTone(completion?.status ?? selectedStep.status)}>{selectedStep.is_not_applicable ? "Nao se aplica" : formatStepStatus(completion?.status ?? selectedStep.status)}</StatusBadge>
+            <StatusBadge tone={selectedStep.is_not_applicable ? "pending" : statusTone(completion?.status ?? selectedStep.status)}>{selectedStep.is_not_applicable ? "Não se aplica" : formatStepStatus(completion?.status ?? selectedStep.status)}</StatusBadge>
             <span>{completion ? `${completion.completedBlocks}/${completion.totalBlocks} blocos completos` : "Carregando blocos"}</span>
             <ProgressBar value={completion?.progress ?? 0} />
           </div>
@@ -5069,7 +5077,7 @@ function JourneyView({
             <div className="empty-block-canvas">
               <Sparkles size={34} />
               <strong>Etapa limpa</strong>
-              <span>{journeyMode === "edit" ? "Adicione apenas os blocos que fazem sentido para esta etapa." : "Esta etapa ainda nao possui conteudo para executar."}</span>
+              <span>{journeyMode === "edit" ? "Adicione apenas os blocos que fazem sentido para esta etapa." : "Esta etapa ainda não possui conteúdo para executar."}</span>
               {journeyMode === "edit" ? (
                 <button className="primary-button" onClick={() => setIsAddMenuOpen(true)}><Plus size={17} /> Adicionar primeiro bloco</button>
               ) : (
@@ -5124,7 +5132,7 @@ function JourneyView({
         <div className="modal-backdrop" role="dialog" aria-modal="true">
           <div className="summary-modal glass-panel">
             <div className="modal-heading">
-              <div><span className="eyebrow">Editor dedicado</span><h2>Sumario inteligente</h2></div>
+              <div><span className="eyebrow">Editor dedicado</span><h2>Sumário inteligente</h2></div>
               <button className="icon-button" onClick={() => setSummaryEditorOpen(false)}>×</button>
             </div>
             <ProjectSummaryPanel
@@ -5170,7 +5178,7 @@ function JourneyView({
         <div className="modal-backdrop step-manager-backdrop" role="dialog" aria-modal="true" aria-label="Organizar etapas da jornada">
           <div className="step-manager-modal glass-panel">
             <div className="modal-heading">
-              <div><span className="eyebrow">Organizacao da jornada</span><h2>Etapas do projeto</h2></div>
+              <div><span className="eyebrow">Organização da jornada</span><h2>Etapas do projeto</h2></div>
               <button className="icon-button" type="button" title="Fechar" onClick={() => setIsStepManagerOpen(false)}><X size={17} /></button>
             </div>
             <form className="step-manager-add" onSubmit={(event) => { event.preventDefault(); onAddNextStep(project.id, newStepName || "Nova etapa"); setNewStepName(""); }}>
@@ -5182,7 +5190,7 @@ function JourneyView({
                 <article className={`step-manager-row ${step.is_not_applicable ? "nao-aplicavel" : ""} ${step.id === selectedStepId ? "active" : ""}`} key={step.id}>
                   <button className="step-manager-select" type="button" onClick={() => { onSelectStep(step.id); setIsStepManagerOpen(false); }}>
                     <span className={`step-dot ${step.is_not_applicable ? "nao-aplicavel" : step.status}`}>{step.status === "concluido" && !step.is_not_applicable ? <Check size={13} /> : index + 1}</span>
-                    <span><strong>{step.name}</strong><small>{step.is_not_applicable ? "Nao se aplica" : formatStepStatus(step.status)}</small></span>
+                    <span><strong>{step.name}</strong><small>{step.is_not_applicable ? "Não se aplica" : formatStepStatus(step.status)}</small></span>
                   </button>
                   <div className="step-manager-actions">
                     <button className="icon-button subtle" type="button" title="Subir etapa" disabled={index === 0} onClick={() => moveJourneyStep(step.id, -1)}>↑</button>
@@ -5283,7 +5291,7 @@ function StepBuilderBlockCard({
   return (
     <article className={`step-builder-block ${block.type}${parentClass} ${isCollapsed ? "is-collapsed" : ""}`}>
       <div className="block-card-heading">
-        <div><Icon size={18} /><div><strong>{block.title}</strong>{(blockDetail || block.required) && <span>{blockDetail}{block.required ? `${blockDetail ? " - " : ""}obrigatorio` : ""}</span>}{isCollapsed && blockState.label && <div className="collapsed-block-state"><span className={`collapsed-block-status ${blockState.tone}`}>{blockState.label}</span>{blockState.detail && <span className="collapsed-block-detail">{blockState.detail}</span>}</div>}</div></div>
+        <div><Icon size={18} /><div><strong>{block.title}</strong>{(blockDetail || block.required) && <span>{blockDetail}{block.required ? `${blockDetail ? " - " : ""}obrigatório` : ""}</span>}{isCollapsed && blockState.label && <div className="collapsed-block-state"><span className={`collapsed-block-status ${blockState.tone}`}>{blockState.label}</span>{blockState.detail && <span className="collapsed-block-detail">{blockState.detail}</span>}</div>}</div></div>
         <div className="block-card-actions">
           <button className="icon-button block-collapse-button" type="button" title={isCollapsed ? "Expandir bloco" : "Recolher bloco"} aria-label={isCollapsed ? "Expandir bloco" : "Recolher bloco"} onClick={onToggleCollapse}>{isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}</button>
           {mode === "edit" && (
@@ -5309,7 +5317,7 @@ function getCollapsedBlockState(block: StepBuilderBlock, value: any, summaries: 
   const pending = (label: string, detail = "") => ({ tone: "pending", label, detail });
   const active = (label: string, detail = "") => ({ tone: "active", label, detail });
 
-  if (value?.forceCompleted) return complete("Concluido", "Confirmado ao finalizar a etapa");
+  if (value?.forceCompleted) return complete("Concluído", "Confirmado ao finalizar a etapa");
 
   if (block.type === "checklist") {
     const items = Array.isArray(block.config.items) ? block.config.items as Array<any> : [];
@@ -5325,7 +5333,7 @@ function getCollapsedBlockState(block: StepBuilderBlock, value: any, summaries: 
     const attachmentDetail = Boolean(block.config.attachmentsRequired) ? ` - ${attachmentCount} arquivo(s)` : "";
     if (value?.applied) return complete("Aplicado", `${copies ? `${copies} copia(s)` : "Confirmado"}${attachmentDetail}`);
     if (copies) return active("Copiado", `${copies} copia(s)${attachmentDetail}`);
-    return block.required ? pending("Pendente", "Ainda nao copiado") : { tone: "", label: "", detail: "" };
+    return block.required ? pending("Pendente", "Ainda não copiado") : { tone: "", label: "", detail: "" };
   }
 
   if (block.type === "context") {
@@ -5344,7 +5352,7 @@ function getCollapsedBlockState(block: StepBuilderBlock, value: any, summaries: 
 
   if (block.type === "file_upload") {
     const attached = files.filter((file) => file.block_id === block.id);
-    if (block.config.fileMode === "resource_pack") return complete("Materiais de apoio", attached.length ? `${attached.length} arquivo(s)` : "Disponivel no template");
+    if (block.config.fileMode === "resource_pack") return complete("Materiais de apoio", attached.length ? `${attached.length} arquivo(s)` : "Disponível no template");
     return attached.length ? complete("Arquivo anexado", `${attached.length} arquivo(s)`) : block.required ? pending("Aguardando arquivo") : { tone: "", label: "", detail: "" };
   }
 
@@ -5352,14 +5360,14 @@ function getCollapsedBlockState(block: StepBuilderBlock, value: any, summaries: 
     const summary = resolveBoundSummary(summaries, String(block.config.summaryId ?? ""));
     const items = summary ? summaryItems.filter((item) => item.summary_id === summary.id && item.is_selected) : [];
     const done = items.filter((item) => item.status === "concluido").length;
-    if (!summary) return pending("Sem sumario vinculado");
-    return items.length && done === items.length ? complete("Sumario concluido", `${done}/${items.length} topicos`) : active("Sumario em andamento", `${done}/${items.length} topicos`);
+    if (!summary) return pending("Sem sumário vinculado");
+    return items.length && done === items.length ? complete("Sumário concluido", `${done}/${items.length} topicos`) : active("Sumário em andamento", `${done}/${items.length} topicos`);
   }
 
   if (block.type === "short_answer" || block.type === "long_answer") return String(value ?? "").trim() ? complete("Respondido") : pending("Aguardando resposta");
-  if (block.type === "short_text" || block.type === "long_text") return String(block.config.content ?? "").trim() ? complete("Orientacao disponivel") : { tone: "", label: "", detail: "" };
+  if (block.type === "short_text" || block.type === "long_text") return String(block.config.content ?? "").trim() ? complete("Orientação disponível") : { tone: "", label: "", detail: "" };
   if (block.type === "phase") return block.config.status === "concluido" ? complete("Fase concluida") : { tone: "", label: "", detail: "" };
-  return block.required ? pending("Obrigatorio") : { tone: "", label: "", detail: "" };
+  return block.required ? pending("Obrigatório") : { tone: "", label: "", detail: "" };
 }
 
 function BlockSettings({ block, tables, onUpdate, onCreatePromptFromBlock }: { block: StepBuilderBlock; tables: Tables; onUpdate: (patch: Partial<StepBuilderBlock>) => void; onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null> }) {
@@ -5385,17 +5393,17 @@ function BlockSettings({ block, tables, onUpdate, onCreatePromptFromBlock }: { b
   return (
     <div className="block-settings">
       <label className="field">
-        <span>Titulo do bloco</span>
+        <span>Título do bloco</span>
         <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} onBlur={saveTitle} />
       </label>
-      <label className="checkline"><input type="checkbox" checked={block.required} onChange={(event) => onUpdate({ required: event.target.checked })} /> Obrigatorio para concluir</label>
+      <label className="checkline"><input type="checkbox" checked={block.required} onChange={(event) => onUpdate({ required: event.target.checked })} /> Obrigatório para concluir</label>
       {(block.type === "short_text" || block.type === "long_text") && (
         <label className="field text-block-config">
           <span>Texto informativo</span>
           <textarea
             value={draftInfoText}
             rows={block.type === "long_text" ? 5 : 2}
-            placeholder="Escreva a orientacao que deve aparecer na jornada"
+            placeholder="Escreva a orientação que deve aparecer na jornada"
             onChange={(event) => setDraftInfoText(event.target.value)}
             onBlur={saveInfoText}
           />
@@ -5403,7 +5411,7 @@ function BlockSettings({ block, tables, onUpdate, onCreatePromptFromBlock }: { b
       )}
       {block.type === "prompt" && <PromptBlockSettings block={block} tables={tables} onUpdate={onUpdate} onCreatePromptFromBlock={onCreatePromptFromBlock} />}
       {block.type === "file_upload" && <FileUploadBlockSettings block={block} onUpdate={onUpdate} />}
-      {block.type === "project_summary" && <SelectField label="Versao do sumario" value={String(block.config.summaryId ?? "")} onChange={(summaryId) => onUpdate({ config: { summaryId } })} options={tables.project_summaries.map((summary) => ({ value: summary.id, label: `Versao ${summary.version_number} - ${summary.status}` }))} emptyLabel="Nao vinculado" />}
+      {block.type === "project_summary" && <SelectField label="Versão do sumário" value={String(block.config.summaryId ?? "")} onChange={(summaryId) => onUpdate({ config: { summaryId } })} options={tables.project_summaries.map((summary) => ({ value: summary.id, label: `Versão ${summary.version_number} - ${summary.status}` }))} emptyLabel="Não vinculado" />}
     </div>
   );
 }
@@ -5419,17 +5427,17 @@ function FileUploadBlockSettings({ block, onUpdate }: { block: StepBuilderBlock;
     <section className="file-block-settings">
       <div className="block-settings-heading">
         <strong>Uso dos arquivos</strong>
-        <span>Defina se este bloco recebe evidencias da execucao ou arquivos-modelo do template.</span>
+        <span>Defina se este bloco recebe evidências da execução ou arquivos-modelo do template.</span>
       </div>
       <div className="file-mode-options">
         <button className={`file-mode-option ${fileMode === "evidence" ? "active" : ""}`} type="button" onClick={() => onUpdate({ config: { fileMode: "evidence" } })}>
-          <Upload size={16} /><span><strong>Evidencias</strong><small>Arquivos enviados durante a execucao.</small></span>
+          <Upload size={16} /><span><strong>Evidências</strong><small>Arquivos enviados durante a execução.</small></span>
         </button>
         <button className={`file-mode-option ${fileMode === "resource_pack" ? "active" : ""}`} type="button" onClick={() => onUpdate({ config: { fileMode: "resource_pack" } })}>
           <Download size={16} /><span><strong>Arquivos e modelos</strong><small>Conjunto salvo no template para baixar na jornada.</small></span>
         </button>
       </div>
-      {fileMode === "resource_pack" && <p className="file-mode-help">Adicione os arquivos abaixo. Ao salvar ou atualizar o template, este conjunto sera disponibilizado nas novas jornadas criadas a partir dele.</p>}
+      {fileMode === "resource_pack" && <p className="file-mode-help">Adicione os arquivos abaixo. Ao salvar ou atualizar o template, este conjunto será disponibilizado nas novas jornadas criadas a partir dele.</p>}
       <div className="file-limit-grid">
         <label className="field"><span>Quantidade minima</span><input type="number" min="1" max={maxFiles} value={minFiles} onChange={(event) => onUpdate({ config: { minFiles: Math.min(maxFiles, Math.max(1, Number(event.target.value) || 1)) } })} /></label>
         <label className="field"><span>Quantidade maxima</span><input type="number" min="1" max="100" value={maxFiles} onChange={(event) => onUpdate({ config: { maxFiles: Math.max(1, Number(event.target.value) || 1) } })} /></label>
@@ -5532,14 +5540,14 @@ function BlockBody({
     const content = String(block.config.content ?? "").trim();
     return mode === "edit"
       ? <textarea className="compact-textarea" value={content} placeholder="Comentario pequeno" onChange={(event) => onUpdate({ config: { content: event.target.value } })} />
-      : <div className="informative-text-block comment">{content || <span>Comentario ainda nao configurado.</span>}</div>;
+      : <div className="informative-text-block comment">{content || <span>Comentario ainda não configurado.</span>}</div>;
   }
 
   if (block.type === "short_text" || block.type === "long_text") {
     const content = String(block.config.content ?? block.config.placeholder ?? "").trim();
     return (
       <div className={`informative-text-block ${block.type}`}>
-        {content ? <p>{content}</p> : <span>Edite este bloco para escrever a orientacao.</span>}
+        {content ? <p>{content}</p> : <span>Edite este bloco para escrever a orientação.</span>}
       </div>
     );
   }
@@ -5550,8 +5558,8 @@ function BlockBody({
 
   const content = String(block.config.content ?? value ?? "");
   return mode === "edit"
-    ? <textarea className="compact-textarea" value={content} placeholder="Digite o conteudo" onChange={(event) => onUpdate({ config: { content: event.target.value } })} onBlur={() => onSaveValue(content)} />
-    : <div className="informative-text-block"><p>{content || "Bloco ainda nao configurado."}</p></div>;
+    ? <textarea className="compact-textarea" value={content} placeholder="Digite o conteúdo" onChange={(event) => onUpdate({ config: { content: event.target.value } })} onBlur={() => onSaveValue(content)} />
+    : <div className="informative-text-block"><p>{content || "Bloco ainda não configurado."}</p></div>;
 }
 
 function AnswerBlock({ block, value, onSaveValue }: { block: StepBuilderBlock; value: unknown; onSaveValue: (value: unknown) => void }) {
@@ -5573,7 +5581,7 @@ function AnswerBlock({ block, value, onSaveValue }: { block: StepBuilderBlock; v
 
 type JourneyRuntimeFile = JourneyFile;
 
-function FileRuntimeBlock({ block, stepId, currentUser, ownerType, label = "Anexar evidencia", onFilesChange, isStructureEditing = false }: { block: StepBuilderBlock; stepId: string; currentUser: AppUser | null; ownerType: "project" | "client"; label?: string; onFilesChange?: (files: JourneyRuntimeFile[]) => void; isStructureEditing?: boolean }) {
+function FileRuntimeBlock({ block, stepId, currentUser, ownerType, label = "Anexar evidência", onFilesChange, isStructureEditing = false }: { block: StepBuilderBlock; stepId: string; currentUser: AppUser | null; ownerType: "project" | "client"; label?: string; onFilesChange?: (files: JourneyRuntimeFile[]) => void; isStructureEditing?: boolean }) {
   const [files, setFiles] = useState<JourneyRuntimeFile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -5588,7 +5596,7 @@ function FileRuntimeBlock({ block, stepId, currentUser, ownerType, label = "Anex
       setFiles(nextFiles);
       onFilesChange?.(nextFiles);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Nao foi possivel carregar os arquivos.");
+      setMessage(error instanceof Error ? error.message : "Não foi possível carregar os arquivos.");
     }
   };
 
@@ -5607,7 +5615,7 @@ function FileRuntimeBlock({ block, stepId, currentUser, ownerType, label = "Anex
       const description = uploaded.length === 1 ? `${uploaded[0].name} anexado com sucesso.` : `${uploaded.length} arquivos anexados com sucesso.`;
       window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: description } }));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Upload nao concluido.");
+      setMessage(error instanceof Error ? error.message : "Upload não concluido.");
     } finally {
       setIsLoading(false);
     }
@@ -5618,7 +5626,7 @@ function FileRuntimeBlock({ block, stepId, currentUser, ownerType, label = "Anex
       await journeyApi.deleteFile(ownerType, stepId, block.id, fileId);
       setFiles((current) => current.filter((file) => file.id !== fileId));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Nao foi possivel remover o arquivo.");
+      setMessage(error instanceof Error ? error.message : "Não foi possível remover o arquivo.");
     }
   }
 
@@ -5655,7 +5663,7 @@ function FileRuntimeBlock({ block, stepId, currentUser, ownerType, label = "Anex
       {message && <span className="field-error">{message}</span>}
       <div className="runtime-file-list">
         {files.map((file) => <div key={file.id} className="runtime-file-row"><a href={file.url ?? `/api/files/${encodeURIComponent(file.r2_key ?? "")}`} target="_blank" rel="noreferrer"><FileText size={15} /> {file.name}</a><span>{Math.max(1, Math.ceil(file.size_bytes / 1024))} KB</span>{canManageFiles && <button className="icon-button danger" type="button" onClick={() => void remove(file.id)} title="Remover arquivo"><Trash2 size={14} /></button>}</div>)}
-        {!files.length && <span className="muted">{isResourcePack ? "Nenhum arquivo de modelo configurado." : "Nenhuma evidencia anexada."}</span>}
+        {!files.length && <span className="muted">{isResourcePack ? "Nenhum arquivo de modelo configurado." : "Nenhuma evidência anexada."}</span>}
       </div>
     </div>
   );
@@ -5785,7 +5793,7 @@ function PromptBlockSettings({
         value={String(block.config.promptId ?? "")}
         onChange={linkPrompt}
         options={tables.prompts.filter((prompt) => prompt.status !== "arquivado").map((prompt) => ({ value: prompt.id, label: prompt.title }))}
-        emptyLabel="Prompt avulso / nao vinculado"
+        emptyLabel="Prompt avulso / não vinculado"
       />
       {selectedPrompt && <div className="prompt-library-link-note"><span>Este texto acompanha automaticamente as atualizações da biblioteca.</span><button className="secondary-button" type="button" onClick={unlinkPrompt}>Desvincular para personalizar</button></div>}
       {!selectedPrompt && sourcePrompt && <div className="prompt-library-link-note"><span>Personalizado a partir de {sourcePrompt.title}. Alterações da biblioteca não são aplicadas enquanto estiver desvinculado.</span><button className="secondary-button" type="button" onClick={() => linkPrompt(sourcePrompt.id)}>Restaurar vínculo</button></div>}
@@ -5802,10 +5810,10 @@ function PromptBlockSettings({
         </label>)}
       </section>
       <label className="field prompt-content-config">
-        <span>Orientacao breve</span>
+        <span>Orientação breve</span>
         <input value={draftDescription} placeholder="Ex.: envie este prompt junto com o projeto consolidado" onChange={(event) => setDraftDescription(event.target.value)} onBlur={savePromptDraft} />
       </label>
-      <SelectField label="Ferramenta" value={toolId} onChange={(nextToolId) => onUpdate({ config: { toolId: nextToolId, contentSnapshot: draftPromptText, description: draftDescription, expectedOutput: draftExpectedOutput, promptId: block.config.promptId ?? null } })} options={tables.ai_tools.map((tool) => ({ value: tool.id, label: tool.name }))} emptyLabel="Nao vinculado" />
+      <SelectField label="Ferramenta" value={toolId} onChange={(nextToolId) => onUpdate({ config: { toolId: nextToolId, contentSnapshot: draftPromptText, description: draftDescription, expectedOutput: draftExpectedOutput, promptId: block.config.promptId ?? null } })} options={tables.ai_tools.map((tool) => ({ value: tool.id, label: tool.name }))} emptyLabel="Não vinculado" />
       <label className="field prompt-content-config">
         <span>Texto do prompt</span>
         <textarea value={draftPromptText} rows={6} placeholder="Cole o prompt ou selecione um da biblioteca" disabled={Boolean(selectedPrompt)} onChange={(event) => setDraftPromptText(event.target.value)} onBlur={savePromptDraft} />
@@ -5845,7 +5853,7 @@ function PromptBlockSettings({
         <div className="inline-form prompt-condition-add"><input value={draftCondition} placeholder="Ex.: envio junto com o projeto consolidado" onChange={(event) => setDraftCondition(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addApplicationCondition(); } }} /><button className="secondary-button" type="button" onClick={addApplicationCondition}><Plus size={15} /> Condição</button></div>
       </section>
       <div className="inline-actions prompt-settings-actions">
-        <button className="secondary-button" type="button" onClick={savePromptDraft}><Save size={15} /> Salvar alteracoes</button>
+        <button className="secondary-button" type="button" onClick={savePromptDraft}><Save size={15} /> Salvar alterações</button>
         <button className="secondary-button" type="button" disabled={!canSaveToLibrary} onClick={() => void saveToLibrary()}><Save size={15} /> Salvar na biblioteca e vincular</button>
       </div>
     </div>
@@ -5914,7 +5922,7 @@ function PromptExecutionBlock({ block, value, tables, stepId, currentUser, owner
     return (
       <div className="prompt-execution-card empty">
         <div>
-          <strong>Prompt ainda nao configurado</strong>
+          <strong>Prompt ainda não configurado</strong>
           <span>Abra o lapis do bloco para escolher um prompt da biblioteca ou colar um prompt avulso.</span>
         </div>
       </div>
@@ -5926,7 +5934,7 @@ function PromptExecutionBlock({ block, value, tables, stepId, currentUser, owner
       <div className="prompt-execution-main">
         <div>
           <strong>{linkedPrompt?.title ?? block.title}</strong>
-          <span>{tool?.name ?? "Ferramenta nao vinculada"}{expectedOutput ? ` - ${expectedOutput}` : ""}</span>
+          <span>{tool?.name ?? "Ferramenta não vinculada"}{expectedOutput ? ` - ${expectedOutput}` : ""}</span>
         </div>
         <div className="prompt-execution-stats">
           <span>{copyCount} copia(s)</span>
@@ -5936,7 +5944,7 @@ function PromptExecutionBlock({ block, value, tables, stepId, currentUser, owner
       <div className="prompt-execution-actions">
         <button className={`primary-button copy-feedback-button ${copyFeedback ? "copied" : ""}`} type="button" onClick={copyPrompt}><Copy size={15} /> {copyFeedback ? "Copiado!" : "Copiar prompt"}</button>
         <button className={`secondary-button ${isApplied ? "is-applied" : ""}`} type="button" disabled={!isApplied && !canConfirm} onClick={toggleApplied}><CheckCircle2 size={15} /> {isApplied ? "Aplicado" : "Confirmar aplicação"}</button>
-        {isStructureEditing && <button className="icon-button subtle" type="button" title="Atualizar titulo pelo prompt vinculado" disabled={!linkedPrompt} onClick={() => linkedPrompt && onUpdate({ title: linkedPrompt.title })}><RefreshCw size={14} /></button>}
+        {isStructureEditing && <button className="icon-button subtle" type="button" title="Atualizar título pelo prompt vinculado" disabled={!linkedPrompt} onClick={() => linkedPrompt && onUpdate({ title: linkedPrompt.title })}><RefreshCw size={14} /></button>}
       </div>
       {isStructureEditing && rawPromptText && <details className="prompt-interpolation-preview"><summary>Previa com dados da jornada</summary><pre>{promptText}</pre></details>}
       {hasConditions && !isApplied && (
@@ -6038,7 +6046,7 @@ function LegacySummaryOperationalBlock({
     }).trim()
     : "";
   const basePrompt = basePromptText
-    ? { id: "", content: basePromptText, ai_tool_id: null, title: "Prompt base desta versao" } as Pick<Prompt, "id" | "content" | "ai_tool_id" | "title">
+    ? { id: "", content: basePromptText, ai_tool_id: null, title: "Prompt base desta versão" } as Pick<Prompt, "id" | "content" | "ai_tool_id" | "title">
     : null;
   const selectedPromptAdditions = promptAdditions.filter((addition) => selectedPromptOptions.includes(addition.id));
   const finalPrompt = composeGeneratedPrompt({
@@ -6054,8 +6062,8 @@ function LegacySummaryOperationalBlock({
   });
   const collapsibleIds = items.filter((item) => items.some((child) => child.parent_id === item.id)).map((item) => item.id);
   const allCollapsed = collapsibleIds.length > 0 && collapsibleIds.every((id) => collapsedTopicIds.includes(id));
-  const versionStateLabel = summary?.status === "active" ? "Versao em uso" : "Versao em edicao";
-  const versionStateHelp = summary?.status === "active" ? "Esta e a versao aplicada na jornada." : "Rascunho para revisar antes de ativar.";
+  const versionStateLabel = summary?.status === "active" ? "Versão em uso" : "Versão em edicao";
+  const versionStateHelp = summary?.status === "active" ? "Esta e a versão aplicada na jornada." : "Rascunho para revisar antes de ativar.";
 
   useEffect(() => {
     if (!summary || initializedSummaryId.current === summary.id) return;
@@ -6102,7 +6110,7 @@ function LegacySummaryOperationalBlock({
         base_prompt_snapshot: basePrompt.content,
         selected_blocks_json: JSON.stringify({ schemaVersion: 1, summaryItemIds, promptOptions: selectedPromptAdditions, promptBlocks: [] }),
         final_prompt: finalPrompt,
-        notes: summaryItemIds.length > 1 ? `${summaryItemIds.length} topicos selecionados` : selectedPromptItems[0] ? `Topico ${selectedPromptItems[0].topic_number} - ${selectedPromptItems[0].title}` : "Prompt geral do sumario",
+        notes: summaryItemIds.length > 1 ? `${summaryItemIds.length} topicos selecionados` : selectedPromptItems[0] ? `Topico ${selectedPromptItems[0].topic_number} - ${selectedPromptItems[0].title}` : "Prompt geral do sumário",
         ai_tool_id: null,
         created_by: currentUser?.name ?? null,
       });
@@ -6126,7 +6134,7 @@ function LegacySummaryOperationalBlock({
   async function saveSummaryToTemplate() {
     if (!summary) return;
     if (!project.journey_template_id) {
-      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: "Salve a jornada como template antes de salvar o sumario." } }));
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: "Salve a jornada como template antes de salvar o sumário." } }));
       return;
     }
     setIsSavingTemplate(true);
@@ -6137,10 +6145,10 @@ function LegacySummaryOperationalBlock({
         body: JSON.stringify({ stepId: selectedStep.id, blockId: block.id, summaryId: summary.id, createdBy: currentUser?.name ?? null }),
       });
       const body = await response.json() as { data?: { itemCount?: number }; error?: string };
-      if (!response.ok) throw new Error(body.error ?? "Nao foi possivel salvar o sumario no template.");
-      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: `Sumario salvo no template com ${body.data?.itemCount ?? 0} topico(s) e configuracoes de prompt.` } }));
+      if (!response.ok) throw new Error(body.error ?? "Não foi possível salvar o sumário no template.");
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: `Sumário salvo no template com ${body.data?.itemCount ?? 0} topico(s) e configurações de prompt.` } }));
     } catch (error) {
-      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Nao foi possivel salvar o sumario no template." } }));
+      window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: error instanceof Error ? error.message : "Não foi possível salvar o sumário no template." } }));
     } finally {
       setIsSavingTemplate(false);
     }
@@ -6151,9 +6159,9 @@ function LegacySummaryOperationalBlock({
       <div className="summary-operational-block empty-summary-operational">
         <div className="empty-state compact">
           <GitBranch size={28} />
-          <strong>Nenhum sumario vinculado</strong>
-          <span>Abra o editor para importar e selecionar a estrutura do sumario.</span>
-          <button className="primary-button" type="button" onClick={onOpenSummary}>Editar estrutura do sumario</button>
+          <strong>Nenhum sumário vinculado</strong>
+          <span>Abra o editor para importar e selecionar a estrutura do sumário.</span>
+          <button className="primary-button" type="button" onClick={onOpenSummary}>Editar estrutura do sumário</button>
         </div>
       </div>
     );
@@ -6168,15 +6176,15 @@ function LegacySummaryOperationalBlock({
           <span>{versionStateHelp} {selectedItems.length}/{items.length} topicos no sumario · {coveredSelectedCount} topico(s) com prompt.</span>
         </div>
         <div className="inline-actions">
-          {isStructureEditing && <button className="secondary-button" type="button" disabled={isSavingTemplate} onClick={() => void saveSummaryToTemplate()} title="Salva a estrutura, selecao e configuracao de prompts deste sumario no template vinculado"><Save size={15} /> {isSavingTemplate ? "Salvando..." : "Salvar sumario no template"}</button>}
-          <button className="secondary-button" type="button" disabled={!summary.consolidated_text} onClick={() => void copyToClipboard(summary.consolidated_text ?? "", "Sumario consolidado")}><Copy size={15} /> Copiar sumario</button>
-          <button className="secondary-button" type="button" disabled={!resolvedTriggerPromptText} title={resolvedTriggerPromptText ? "Copiar prompt de gatilho do sumario" : "Configure o prompt de gatilho no editor"} onClick={() => void copyToClipboard(resolvedTriggerPromptText, "Prompt de gatilho")}><Copy size={15} /> Copiar gatilho</button>
-          <button className={`secondary-button ${value?.completed ? "is-applied" : ""}`} type="button" disabled={selectedItems.length === 0 || !selectedItems.every((item) => item.status === "concluido")} onClick={() => onSaveValue({ ...(value && typeof value === "object" ? value : {}), completed: true, summaryId: summary.id, summaryVersion: summary.version_number, completedAt: new Date().toISOString() })}><CheckCircle2 size={15} /> {value?.completed ? "Sumario concluido" : "Concluir sumario"}</button>
-          <button className="primary-button" type="button" onClick={onOpenSummary}><GitBranch size={15} /> Editar estrutura do sumario</button>
+          {isStructureEditing && <button className="secondary-button" type="button" disabled={isSavingTemplate} onClick={() => void saveSummaryToTemplate()} title="Salva a estrutura, seleção e configuracao de prompts deste sumário no template vinculado"><Save size={15} /> {isSavingTemplate ? "Salvando..." : "Salvar sumário no template"}</button>}
+          <button className="secondary-button" type="button" disabled={!summary.consolidated_text} onClick={() => void copyToClipboard(summary.consolidated_text ?? "", "Sumário consolidado")}><Copy size={15} /> Copiar sumário</button>
+          <button className="secondary-button" type="button" disabled={!resolvedTriggerPromptText} title={resolvedTriggerPromptText ? "Copiar prompt de gatilho do sumário" : "Configure o prompt de gatilho no editor"} onClick={() => void copyToClipboard(resolvedTriggerPromptText, "Prompt de gatilho")}><Copy size={15} /> Copiar gatilho</button>
+          <button className={`secondary-button ${value?.completed ? "is-applied" : ""}`} type="button" disabled={selectedItems.length === 0 || !selectedItems.every((item) => item.status === "concluido")} onClick={() => onSaveValue({ ...(value && typeof value === "object" ? value : {}), completed: true, summaryId: summary.id, summaryVersion: summary.version_number, completedAt: new Date().toISOString() })}><CheckCircle2 size={15} /> {value?.completed ? "Sumário concluido" : "Concluir sumário"}</button>
+          <button className="primary-button" type="button" onClick={onOpenSummary}><GitBranch size={15} /> Editar estrutura do sumário</button>
         </div>
       </div>
 
-      <div className="summary-operational-metrics" aria-label="Resumo operacional do sumario">
+      <div className="summary-operational-metrics" aria-label="Resumo operacional do sumário">
         <div><strong>{selectedItems.length}/{items.length}</strong><span>Selecionados</span></div>
         <div><strong>{completedSelectedCount}</strong><span>Finalizados</span></div>
         <div><strong>{reviewSelectedCount}</strong><span>Em revisao</span></div>
@@ -6192,13 +6200,13 @@ function LegacySummaryOperationalBlock({
         <button className="secondary-button" type="button" disabled={!allCollapsed && collapsedTopicIds.length === 0} onClick={() => setCollapsedTopicIds([])}>Ver tudo</button>
         <button className="secondary-button summary-bulk-complete" type="button" disabled={promptScopeIds.length === 0} onClick={completeSelectedTopics}><CheckCircle2 size={15} /> Concluir selecionados</button>
         <button className="secondary-button" type="button" disabled={allCollapsed} onClick={() => setCollapsedTopicIds(collapsibleIds)}>So capitulos</button>
-        <button className="secondary-button" type="button" disabled={items.length === 0} onClick={() => selectPromptScope(items.map((item) => item.id))}>Selecionar sumario inteiro</button>
+        <button className="secondary-button" type="button" disabled={items.length === 0} onClick={() => selectPromptScope(items.map((item) => item.id))}>Selecionar sumário inteiro</button>
         <button className="secondary-button" type="button" disabled={promptScopeIds.length === 0} onClick={() => setPromptScopeIds([])}>Limpar prompt</button>
       </div>
 
       {promptScopeIds.length > 0 && (
         <div className="summary-floating-composer">
-          <div className="summary-composer-selection"><strong>{promptScopeIds.length} topico(s) selecionado(s)</strong><span>Estes itens vao compor o prompt desta versao.</span></div>
+          <div className="summary-composer-selection"><strong>{promptScopeIds.length} topico(s) selecionado(s)</strong><span>Estes itens vao compor o prompt desta versão.</span></div>
           <div className="prompt-option-grid mini-options">
             {promptAdditions.length ? promptAdditions.map((addition, index) => {
               const AdditionIcon = summaryAdditionIcon(addition.label);
@@ -6214,10 +6222,10 @@ function LegacySummaryOperationalBlock({
                   <span>{addition.label}</span>
                 </label>
               );
-            }) : <span className="summary-additions-empty">Configure adicionais no editor do sumario.</span>}
+            }) : <span className="summary-additions-empty">Configure adicionais no editor do sumário.</span>}
           </div>
           <button className="summary-composer-save-card primary-button" type="button" disabled={!basePrompt || isSavingPrompt} onClick={() => void saveComposedPrompt()}>{isSavingPrompt ? <Loader2 className="spin" size={15} /> : <Save size={15} />} {isSavingPrompt ? "Salvando" : "Salvar prompt"}</button>
-          <button className="summary-composer-trigger-card secondary-button" type="button" disabled={!resolvedTriggerPromptText} title={resolvedTriggerPromptText ? "Copiar prompt fixo para iniciar a execucao" : "Configure o prompt de gatilho no editor"} onClick={() => void copyToClipboard(resolvedTriggerPromptText, "Prompt de gatilho")}><Copy size={15} /> Copiar gatilho</button>
+          <button className="summary-composer-trigger-card secondary-button" type="button" disabled={!resolvedTriggerPromptText} title={resolvedTriggerPromptText ? "Copiar prompt fixo para iniciar a execução" : "Configure o prompt de gatilho no editor"} onClick={() => void copyToClipboard(resolvedTriggerPromptText, "Prompt de gatilho")}><Copy size={15} /> Copiar gatilho</button>
         </div>
       )}
 
@@ -6235,7 +6243,7 @@ function LegacySummaryOperationalBlock({
             <article className={`summary-item tree-row operational-row level-${Math.min(item.level, 4)} ${item.is_selected ? "selected" : "excluded"} ${isPromptScope ? "prompt-scope" : ""} ${statusMenuItemId === item.id ? "status-menu-open" : ""}`} key={item.id} style={{ "--tree-level": Math.max(0, item.level - 1) } as CSSProperties}>
               <button className="summary-expand-button" disabled={childCount === 0} onClick={() => toggleCollapsedTopic(item.id)} title={collapsedTopicIds.includes(item.id) ? "Expandir topico" : "Recolher topico"}>{childCount > 0 ? (collapsedTopicIds.includes(item.id) ? "+" : "-") : ""}</button>
               {isStructureEditing ? (
-                <button className={`checkbox ${item.is_selected ? "checked" : ""}`} onClick={() => onSetSelection(summary.id, item.id, !item.is_selected)} title="Entrar no sumario consolidado">{item.is_selected && <Check size={14} />}</button>
+                <button className={`checkbox ${item.is_selected ? "checked" : ""}`} onClick={() => onSetSelection(summary.id, item.id, !item.is_selected)} title="Entrar no sumário consolidado">{item.is_selected && <Check size={14} />}</button>
               ) : <button
                 className={`checkbox prompt-scope-checkbox ${isPromptScope ? "checked" : ""} ${isPromptScopePartial ? "partial" : ""}`}
                 onClick={() => togglePromptScopeBranch(branchIds)}
@@ -6318,7 +6326,7 @@ function SummaryTechnicalExecutionBlock({
   const [promptScopeIds, setPromptScopeIds] = useState<string[]>([]);
   const [focusedTopicId, setFocusedTopicId] = useState<string | null>(null);
   const [basePromptId, setBasePromptId] = useState("");
-  const [selectedPromptOptions, setSelectedPromptOptions] = useState<string[]>(["Mais tecnico", "Formato Word"]);
+  const [selectedPromptOptions, setSelectedPromptOptions] = useState<string[]>(["Mais técnico", "Formato Word"]);
 
   const summary = resolveBoundSummary(summaries, String(block.config.summaryId ?? ""));
   const items = summary ? summaryItems.filter((item) => item.summary_id === summary.id).sort(byOrder) : [];
@@ -6334,7 +6342,7 @@ function SummaryTechnicalExecutionBlock({
   const allCollapsed = collapsibleIds.length > 0 && collapsibleIds.every((id) => collapsedTopicIds.includes(id));
   const completedCount = selectedItems.filter((item) => item.status === "concluido" || item.status === "desenvolvido").length;
   const coveredSelectedCount = selectedItems.filter((item) => promptCoveredItemIds.has(item.id)).length;
-  const versionStateLabel = summary?.status === "active" ? "Versao em uso" : "Versao em edicao";
+  const versionStateLabel = summary?.status === "active" ? "Versão em uso" : "Versão em edicao";
   const versionStateHelp = summary?.status === "active" ? "Aplicada nesta jornada." : "Rascunho para revisar antes de ativar.";
   const finalPrompt = composeGeneratedPrompt({
     project,
@@ -6383,7 +6391,7 @@ function SummaryTechnicalExecutionBlock({
       base_prompt_snapshot: basePrompt?.content ?? null,
       selected_blocks_json: JSON.stringify({ schemaVersion: 1, summaryItemIds, promptOptions: selectedPromptOptions, promptBlocks: [] }),
       final_prompt: finalPrompt,
-      notes: summaryItemIds.length > 1 ? `${summaryItemIds.length} topicos selecionados` : selectedPromptItems[0] ? `Topico ${selectedPromptItems[0].topic_number} - ${selectedPromptItems[0].title}` : "Prompt geral do sumario",
+      notes: summaryItemIds.length > 1 ? `${summaryItemIds.length} topicos selecionados` : selectedPromptItems[0] ? `Topico ${selectedPromptItems[0].topic_number} - ${selectedPromptItems[0].title}` : "Prompt geral do sumário",
       ai_tool_id: basePrompt?.ai_tool_id ?? null,
       created_by: currentUser?.name ?? null,
     });
@@ -6393,9 +6401,9 @@ function SummaryTechnicalExecutionBlock({
     return (
       <div className="summary-technical-empty">
         <GitBranch size={26} />
-        <strong>Nenhum sumario vinculado</strong>
+        <strong>Nenhum sumário vinculado</strong>
         <span>Abra o editor para importar e consolidar a estrutura do projeto.</span>
-        <button className="primary-button" type="button" onClick={onOpenSummary}><GitBranch size={15} /> Editar estrutura do sumario</button>
+        <button className="primary-button" type="button" onClick={onOpenSummary}><GitBranch size={15} /> Editar estrutura do sumário</button>
       </div>
     );
   }
@@ -6408,13 +6416,13 @@ function SummaryTechnicalExecutionBlock({
           <strong>Versao {summary.version_number}</strong>
           <span>{isStructureEditing ? "Os topicos sao editados no editor dedicado." : versionStateHelp}</span>
         </div>
-        <div className="summary-technical-progress" aria-label="Progresso do sumario">
+        <div className="summary-technical-progress" aria-label="Progresso do sumário">
           <span><b>{selectedItems.length}</b> topicos</span>
           <span><b>{completedCount}</b> finalizados</span>
           <span><b>{coveredSelectedCount}</b> com prompt</span>
         </div>
         <div className="summary-technical-actions">
-          <button className="icon-button summary-copy-summary" type="button" disabled={!summary.consolidated_text} onClick={() => void copyToClipboard(summary.consolidated_text ?? "", "Sumario consolidado")} title="Copiar sumario consolidado"><Copy size={15} /></button>
+          <button className="icon-button summary-copy-summary" type="button" disabled={!summary.consolidated_text} onClick={() => void copyToClipboard(summary.consolidated_text ?? "", "Sumário consolidado")} title="Copiar sumário consolidado"><Copy size={15} /></button>
           <button className="secondary-button summary-editor-trigger" type="button" onClick={onOpenSummary}><GitBranch size={15} /> Editar estrutura</button>
         </div>
       </header>
@@ -6430,7 +6438,7 @@ function SummaryTechnicalExecutionBlock({
           <button className="primary-button summary-compose-trigger" type="button" onClick={() => setViewMode("compose")}><Sparkles size={15} /> Compor prompt</button>
         ) : (
           <>
-            <button className="secondary-button" type="button" onClick={() => selectPromptScope(items.filter((item) => item.is_selected).map((item) => item.id))}>Selecionar sumario</button>
+            <button className="secondary-button" type="button" onClick={() => selectPromptScope(items.filter((item) => item.is_selected).map((item) => item.id))}>Selecionar sumário</button>
             <button className="secondary-button" type="button" disabled={promptScopeIds.length === 0} onClick={() => setPromptScopeIds([])}>Limpar</button>
             <button className="secondary-button" type="button" onClick={exitComposeMode}><X size={15} /> Sair da composicao</button>
           </>
@@ -6562,7 +6570,7 @@ function SummaryComposerTray({ count, basePromptId, promptOptions, prompts, onBa
   onCancel: () => void;
   onCopy: () => void;
 }) {
-  const options = ["Mais tecnico", "Mais direto", "Incluir tabelas", "Considerar legislacao", "Apontar pendencias", "Formato Word"];
+  const options = ["Mais técnico", "Mais direto", "Incluir tabelas", "Considerar legislacao", "Apontar pendencias", "Formato Word"];
   return (
     <footer className="summary-composer-tray" aria-label="Compor prompt">
       <div className="summary-composer-count"><span>Compor prompt</span><strong>{count} topico(s) selecionado(s)</strong></div>
@@ -6571,7 +6579,7 @@ function SummaryComposerTray({ count, basePromptId, promptOptions, prompts, onBa
         {options.map((option) => <label key={option}><input type="checkbox" checked={promptOptions.includes(option)} onChange={() => onToggleOption(option)} />{option}</label>)}
       </div>
       <div className="summary-composer-actions">
-        <button className="icon-button" type="button" onClick={onClear} disabled={count === 0} title="Limpar selecao"><X size={15} /></button>
+        <button className="icon-button" type="button" onClick={onClear} disabled={count === 0} title="Limpar seleção"><X size={15} /></button>
         <button className="secondary-button" type="button" onClick={onCancel}>Cancelar</button>
         <button className="primary-button" type="button" onClick={onCopy} disabled={count === 0}><Copy size={15} /> Copiar e salvar</button>
       </div>
@@ -6627,7 +6635,7 @@ function ChecklistBlock({ block, value, isStructureEditing, onSaveValue, onUpdat
         try {
           await Promise.resolve(onSaveValueRef.current({ ...(value && typeof value === "object" ? value : {}), checked }));
         } catch (error) {
-          console.error("Nao foi possivel salvar o checklist.", error);
+          console.error("Não foi possível salvar o checklist.", error);
           if (changeId === latestChangeRef.current) {
             latestCheckedRef.current = latestPersistedRef.current;
             setOptimisticChecked(latestPersistedRef.current);
@@ -6835,7 +6843,7 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue,
     const nextItem: ContextCard = {
       ...original,
       id: editingId && editingId !== "new" && editingId !== "legacy-context" ? editingId : crypto.randomUUID(),
-      title: draftTitle.trim() || "Contexto sem titulo",
+      title: draftTitle.trim() || "Contexto sem título",
       content: draftContent.trim(),
       color: draftColor,
       pinned: draftPinned,
@@ -6906,12 +6914,12 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue,
         <button className="secondary-button" type="button" onClick={startNew}><Plus size={15} /> Adicionar contexto</button>
       </div>
       {contextError && <p className="form-error" role="alert">{contextError}</p>}
-      {ownerType === "project" && clientId && runtimeContexts.some((item) => !item.sourceContextId) && <div className="context-associate-review"><strong>Contextos locais para revisar</strong><p>Este projeto foi vinculado a um cliente. Selecione os textos que devem entrar na biblioteca; nada sera movido automaticamente.</p>{runtimeContexts.filter((item) => !item.sourceContextId).map((item) => <label key={item.id}><input type="checkbox" checked={selectedLocalIds.includes(item.id)} onChange={(event) => setSelectedLocalIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /> {item.title}</label>)}<button className="secondary-button" type="button" disabled={saving || !selectedLocalIds.length} onClick={() => void associateSelected()}>Associar selecionados ({selectedLocalIds.length})</button></div>}
+      {ownerType === "project" && clientId && runtimeContexts.some((item) => !item.sourceContextId) && <div className="context-associate-review"><strong>Contextos locais para revisar</strong><p>Este projeto foi vinculado a um cliente. Selecione os textos que devem entrar na biblioteca; nada será movido automaticamente.</p>{runtimeContexts.filter((item) => !item.sourceContextId).map((item) => <label key={item.id}><input type="checkbox" checked={selectedLocalIds.includes(item.id)} onChange={(event) => setSelectedLocalIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /> {item.title}</label>)}<button className="secondary-button" type="button" disabled={saving || !selectedLocalIds.length} onClick={() => void associateSelected()}>Associar selecionados ({selectedLocalIds.length})</button></div>}
       {showImport && <div className="context-import-panel"><label className="search-field"><Search size={15} /><input value={librarySearch} onChange={(event) => { setLibrarySearch(event.target.value); setLibraryOffset(0); }} placeholder="Buscar na biblioteca do cliente" /></label><div className="context-import-list">{libraryLoading && <p role="status"><Loader2 className="spin" size={15} /> Buscando contextos...</p>}{libraryResults.map((item) => <label key={item.id}><input type="checkbox" checked={selectedLibraryIds.includes(item.id)} onChange={(event) => setSelectedLibraryIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span><strong>{item.title}</strong></span></label>)}{libraryHasMore && <button className="secondary-button" type="button" disabled={libraryLoading} onClick={() => setLibraryOffset((current) => current + 100)}>Carregar mais</button>}</div><div className="inline-actions"><button className="secondary-button" type="button" onClick={() => setShowImport(false)}>Cancelar</button><button className="primary-button" type="button" disabled={saving || selectedLibraryIds.length === 0} onClick={() => void importSelected()}>Importar selecionados ({selectedLibraryIds.length})</button></div></div>}
 
       {isWriting && (
         <div className="context-compose compact-context-compose">
-          <input value={draftTitle} onChange={(event) => updateDraftTitle(event.target.value)} onPaste={pasteContextIntoTitle} placeholder="Titulo do contexto" />
+          <input value={draftTitle} onChange={(event) => updateDraftTitle(event.target.value)} onPaste={pasteContextIntoTitle} placeholder="Título do contexto" />
           <textarea value={draftContent} onChange={(event) => updateDraftContent(event.target.value)} placeholder="Cole aqui o contexto" rows={5} />
           <div className="context-form-row">
             <div className="context-color-picker">
@@ -6931,7 +6939,7 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue,
         {contexts.map((item) => (
           <article className={`context-mini-card compact-context-card ${item.color || "mint"} ${item.pinned ? "pinned" : ""}`} key={item.id} onClick={() => void copyToClipboard(item.content, "Contexto")} title="Clique para copiar o contexto">
             <strong>{item.title}</strong>
-            {item.sourceContextId && <small className="context-source-version">v{item.sourceVersion ?? 1}{library.find((source) => source.id === item.sourceContextId && source.version > Number(item.sourceVersion ?? 0)) ? " · Atualizacao disponivel" : ""}</small>}
+            {item.sourceContextId && <small className="context-source-version">v{item.sourceVersion ?? 1}{library.find((source) => source.id === item.sourceContextId && source.version > Number(item.sourceVersion ?? 0)) ? " · Atualização disponível" : ""}</small>}
             {item.pinned && <span className="context-pin-label" aria-label="Conteúdo do template" title="Conteúdo do template">T</span>}
             {isStructureEditing && <div className="context-mini-actions" onClick={(event) => event.stopPropagation()}>
               <button className={`icon-button ${item.pinned ? "active" : ""}`} type="button" title="Salvar no template" onClick={() => patchContext(item.id, { pinned: !item.pinned })}><Save size={14} /></button>
@@ -6939,7 +6947,7 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue,
               <button className="icon-button" type="button" title="Editar contexto" onClick={() => startEdit(item)}><Pencil size={14} /></button>
               <button className="icon-button danger" type="button" title="Excluir contexto" onClick={() => removeContext(item.id)}><Trash2 size={14} /></button>
             </div>}
-            {!isStructureEditing && !item.pinned && <div className="context-mini-actions" onClick={(event) => event.stopPropagation()}><button className="icon-button" type="button" title="Editar apenas aqui" onClick={() => startEdit(item)}><Pencil size={14} /></button>{library.find((source) => source.id === item.sourceContextId && source.version > Number(item.sourceVersion ?? 0)) && <button className="icon-button" type="button" title="Atualizar copia da biblioteca" onClick={() => { const source = library.find((candidate) => candidate.id === item.sourceContextId); if (source && window.confirm("Atualizar esta copia para a versao atual da biblioteca?")) void onSaveValue({ contexts: runtimeContexts.map((candidate) => candidate.id === item.id ? { ...candidate, title: source.title, content: source.content, sourceVersion: source.version } : candidate) }); }}><RefreshCw size={14} /></button>}<button className="icon-button" type="button" title="Copiar contexto" onClick={() => void copyToClipboard(item.content, "Contexto")}><Copy size={14} /></button><button className="icon-button danger" type="button" title="Retirar deste projeto" onClick={() => removeContext(item.id)}><Trash2 size={14} /></button></div>}
+            {!isStructureEditing && !item.pinned && <div className="context-mini-actions" onClick={(event) => event.stopPropagation()}><button className="icon-button" type="button" title="Editar apenas aqui" onClick={() => startEdit(item)}><Pencil size={14} /></button>{library.find((source) => source.id === item.sourceContextId && source.version > Number(item.sourceVersion ?? 0)) && <button className="icon-button" type="button" title="Atualizar copia da biblioteca" onClick={() => { const source = library.find((candidate) => candidate.id === item.sourceContextId); if (source && window.confirm("Atualizar esta copia para a versão atual da biblioteca?")) void onSaveValue({ contexts: runtimeContexts.map((candidate) => candidate.id === item.id ? { ...candidate, title: source.title, content: source.content, sourceVersion: source.version } : candidate) }); }}><RefreshCw size={14} /></button>}<button className="icon-button" type="button" title="Copiar contexto" onClick={() => void copyToClipboard(item.content, "Contexto")}><Copy size={14} /></button><button className="icon-button danger" type="button" title="Retirar deste projeto" onClick={() => removeContext(item.id)}><Trash2 size={14} /></button></div>}
           </article>
         ))}
       </div>
@@ -7092,14 +7100,14 @@ function ProjectSummaryPanel({
     <section className="work-block summary-panel compact-summary-panel">
       <div className="block-heading summary-heading">
         <div>
-          <h2>Sumario inteligente</h2>
+          <h2>Sumário inteligente</h2>
           <span className="pending-summary">
-            {activeSummary ? `${selectedItems.length}/${summaryItems.length} topicos selecionados para esta versao` : "Importe ou cole o sumario do projeto"}
+            {activeSummary ? `${selectedItems.length}/${summaryItems.length} topicos selecionados para esta versão` : "Importe ou cole o sumário do projeto"}
           </span>
         </div>
         {activeSummary && (
           <div className="summary-heading-actions">
-            <button className="secondary-button" disabled={!activeSummary.consolidated_text} onClick={() => void copyToClipboard(activeSummary.consolidated_text ?? "", "Sumario consolidado")}>
+            <button className="secondary-button" disabled={!activeSummary.consolidated_text} onClick={() => void copyToClipboard(activeSummary.consolidated_text ?? "", "Sumário consolidado")}>
               <Copy size={16} />
               Copiar consolidado
             </button>
@@ -7113,12 +7121,12 @@ function ProjectSummaryPanel({
 
       <details className="summary-import-drawer glass-panel">
         <summary>
-          <span>Importar ou analisar sumario bruto</span>
+          <span>Importar ou analisar sumário bruto</span>
           <small>Abra apenas quando precisar colar uma nova estrutura numerada.</small>
         </summary>
         <div className="summary-import-grid">
           <label className="field">
-            <span>Colar sumario bruto</span>
+            <span>Colar sumário bruto</span>
             <textarea rows={7} value={rawText} onChange={(event) => setRawText(event.target.value)} placeholder="Cole aqui uma estrutura numerada: 1, 1.1, 1.1.1..." />
           </label>
           <div className="summary-import-actions">
@@ -7141,7 +7149,7 @@ function ProjectSummaryPanel({
       {activeSummary && (
         <details className="summary-prompt-settings">
           <summary>
-            <span>Sumario Mestre Ramos</span>
+            <span>Sumário Mestre Ramos</span>
             <small>Configuracao unica e completa aplicada a todas as versoes · versao {activeSummary.version_number}</small>
           </summary>
           <div className="summary-prompt-settings-body">
@@ -7161,10 +7169,10 @@ function ProjectSummaryPanel({
                 readOnly
               />
             </label>
-            <p className="summary-prompt-variable-help">O prompt aplica o projeto, empresa, contexto cadastrado, sumario consolidado e topicos selecionados. Versoes e prompts antigos permanecem preservados como historico.</p>
+            <p className="summary-prompt-variable-help">O prompt aplica o projeto, empresa, contexto cadastrado, sumário consolidado e topicos selecionados. Versoes e prompts antigos permanecem preservados como histórico.</p>
 
             <div className="summary-additions-editor">
-              <div className="summary-additions-heading"><strong>Instrucoes adicionais</strong><span>Entram na composicao quando selecionadas na execucao.</span></div>
+              <div className="summary-additions-heading"><strong>Instrucoes adicionais</strong><span>Entram na composicao quando selecionadas na execução.</span></div>
               <div className="summary-addition-card-grid">
                 {(promptConfig.additions ?? []).map((addition) => (
                   <article className="summary-addition-row" key={addition.id}>
@@ -7182,10 +7190,10 @@ function ProjectSummaryPanel({
           <div className="summary-review-card summary-tree-card">
             <div className="summary-toolbar compact-tree-toolbar">
               <SelectField
-                label="Versao"
+                label="Versão"
                 value={activeSummary.id}
                 onChange={setSummaryId}
-                options={sortedSummaries.map((summary) => ({ value: summary.id, label: `Versao ${summary.version_number} - ${formatStatus(summary.status)}` }))}
+                options={sortedSummaries.map((summary) => ({ value: summary.id, label: `Versão ${summary.version_number} - ${formatStatus(summary.status)}` }))}
               />
               <div className="summary-meta">
                 <StatusPill status={activeSummary.status} />
@@ -7195,7 +7203,7 @@ function ProjectSummaryPanel({
 
             <div className="summary-progress-grid summary-structure-progress">
               <div>
-                <span>Selecao do sumario</span>
+                <span>Seleção do sumário</span>
                 <strong>{selectedItems.length}/{summaryItems.length}</strong>
                 <div className="summary-progress-track"><i style={{ width: `${selectionPercent}%` }} /></div>
               </div>
@@ -7231,7 +7239,7 @@ function ProjectSummaryPanel({
                       <button className="summary-expand-button" disabled={childCount === 0} onClick={() => toggleCollapsedTopic(item.id)} title={collapsedTopicIds.includes(item.id) ? "Expandir topico" : "Recolher topico"}>
                         {childCount > 0 ? (collapsedTopicIds.includes(item.id) ? "+" : "-") : ""}
                       </button>
-                      <button className={`checkbox ${item.is_selected ? "checked" : ""}`} onClick={() => onSetSelection(activeSummary.id, item.id, !item.is_selected)} title="Entrar no sumario consolidado">
+                      <button className={`checkbox ${item.is_selected ? "checked" : ""}`} onClick={() => onSetSelection(activeSummary.id, item.id, !item.is_selected)} title="Entrar no sumário consolidado">
                         {item.is_selected && <Check size={14} />}
                       </button>
                       <div className="summary-topic-hierarchy">
@@ -7304,8 +7312,8 @@ function ProjectSummaryPanel({
       ) : (
         <div className="empty-state compact">
           <Clipboard size={30} />
-          <strong>Nenhum sumario importado</strong>
-          <span>Cole o sumario do projeto para revisar topicos e gerar prompts por item.</span>
+          <strong>Nenhum sumário importado</strong>
+          <span>Cole o sumário do projeto para revisar topicos e gerar prompts por item.</span>
         </div>
       )}
     </section>
@@ -7447,7 +7455,7 @@ function UserEntryScreen({
         </div>
 
         <div className="user-entry-heading">
-          <h1>Escolha o usuario</h1>
+          <h1>Escolha o usuário</h1>
           <p>Entrada simples para identificar quem esta usando o painel nesta fase.</p>
         </div>
 
@@ -7458,7 +7466,7 @@ function UserEntryScreen({
               <strong>{user.name}</strong>
             </button>
           ))}
-          {users.length === 0 && <span className="muted">Nenhum usuario ativo encontrado.</span>}
+          {users.length === 0 && <span className="muted">Nenhum usuário ativo encontrado.</span>}
         </div>
 
         <form
@@ -7469,7 +7477,7 @@ function UserEntryScreen({
             setName("");
           }}
         >
-          <Field label="Novo usuario" value={name} onChange={setName} />
+          <Field label="Novo usuário" value={name} onChange={setName} />
           <button className="primary-button" type="submit" disabled={!name.trim() || isLoading}>
             <Plus size={16} />
             Criar e entrar
@@ -7597,7 +7605,7 @@ function PromptsPanel({
             ) : (
               <div className="prompt-placeholder">
                 <strong>Falta preencher este prompt.</strong>
-                <span>{prompt.placeholder_note || "Edite este prompt na etapa ou em Configuracoes antes de usar."}</span>
+                <span>{prompt.placeholder_note || "Edite este prompt na etapa ou em Configurações antes de usar."}</span>
               </div>
             )}
             <div className="row-actions">
@@ -7615,7 +7623,7 @@ function PromptsPanel({
       <div className="local-prompt-form">
         <Field label="Prompt rapido da etapa" value={title} onChange={setTitle} />
         <SelectField label="Ferramenta" value={aiToolId} onChange={setAiToolId} options={tables.ai_tools.map(toOption)} />
-        <TextArea label="Conteudo" value={content} onChange={setContent} rows={5} />
+        <TextArea label="Conteúdo" value={content} onChange={setContent} rows={5} />
         <button
           className="secondary-button"
           onClick={() => {
@@ -7652,7 +7660,7 @@ function PhasePanel({
       <div className="block-heading">
         <div>
           <h2>Fases da etapa</h2>
-          <span className="pending-summary">{phases.length ? `${doneCount}/${phases.length} fase(s) concluidas` : "Organize a etapa em fases menores"}</span>
+          <span className="pending-summary">{phases.length ? `${doneCount}/${phases.length} fase(s) concluídas` : "Organize a etapa em fases menores"}</span>
         </div>
         <form
           className="inline-form"
@@ -7686,8 +7694,8 @@ function PhasePanel({
 
               {blockingPhase && <span className="phase-warning">Depende de: {blockingPhase.title}</span>}
 
-              <TextArea label="Descricao / criterio" value={phase.description} rows={2} onChange={() => undefined} onBlur={(value) => onUpdate(phase.id, { description: value })} />
-              <TextArea label="Condicao de conclusao" value={phase.completion_condition} rows={2} onChange={() => undefined} onBlur={(value) => onUpdate(phase.id, { completion_condition: value })} />
+              <TextArea label="Descrição / criterio" value={phase.description} rows={2} onChange={() => undefined} onBlur={(value) => onUpdate(phase.id, { description: value })} />
+              <TextArea label="Condicao de conclusão" value={phase.completion_condition} rows={2} onChange={() => undefined} onBlur={(value) => onUpdate(phase.id, { completion_condition: value })} />
 
               <div className="status-actions phase-status-actions">
                 {(["pendente", "em_andamento", "concluido", "bloqueado"] as StepStatus[]).map((status) => (
@@ -7763,7 +7771,7 @@ function ContextPanel({
       </div>
 
       <div className="context-form">
-        <Field label="Titulo do contexto" value={title} onChange={setTitle} />
+        <Field label="Título do contexto" value={title} onChange={setTitle} />
         <SelectField label="Fase vinculada" value={phaseId} onChange={setPhaseId} options={phases.map((phase) => ({ value: phase.id, label: phase.title }))} emptyLabel="Contexto geral da etapa" />
         <TextArea label="Texto do contexto" value={content} onChange={setContent} rows={5} />
         <button
@@ -7807,7 +7815,7 @@ function ContextPanel({
               </div>
 
               <SelectField label="Fase" value={context.phase_id} onChange={(value) => onUpdate(context.id, { phase_id: value || null })} options={phases.map((item) => ({ value: item.id, label: item.title }))} emptyLabel="Contexto geral" />
-              <TextArea label="Conteudo" value={context.content} rows={5} onChange={() => undefined} onBlur={(value) => onUpdate(context.id, { content: value })} />
+              <TextArea label="Conteúdo" value={context.content} rows={5} onChange={() => undefined} onBlur={(value) => onUpdate(context.id, { content: value })} />
             </article>
           );
         })}
@@ -7883,7 +7891,7 @@ function QuickAddStep({ onAdd }: { onAdd: (name: string) => void }) {
         setName("");
       }}
     >
-      <Field label="Adicionar proxima etapa" value={name} onChange={setName} />
+      <Field label="Adicionar próxima etapa" value={name} onChange={setName} />
       <button className="primary-button" type="submit">
         <Plus size={16} />
         Adicionar etapa
@@ -7895,6 +7903,7 @@ function QuickAddStep({ onAdd }: { onAdd: (name: string) => void }) {
 function SettingsView({
   tables,
   activeConfig,
+  setActiveConfig,
   query,
   setQuery,
   onRefresh,
@@ -7914,12 +7923,14 @@ function SettingsView({
 
   return (
     <>
-      <section className="topbar">
-        <div>
-          <h1>Configuracoes</h1>
-          <p>Cadastros de apoio para alimentar a execucao dos projetos.</p>
-        </div>
-      </section>
+      <PageHeader title={`Configurações · ${module.label}`} subtitle={module.description}>
+        <label className="rj-config-mobile-select">
+          <span>Seção</span>
+          <select value={activeConfig} onChange={(event) => setActiveConfig(event.target.value as ConfigModuleKey)}>
+            {configModules.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
+          </select>
+        </label>
+      </PageHeader>
       <ConfigCrud module={module} tables={tables} query={query} setQuery={setQuery} onRefresh={onRefresh} onNotice={onNotice} onTables={onTables} />
     </>
   );
@@ -8092,7 +8103,7 @@ function ConfigForm({
     return (
       <div className="form-grid">
         <Field label="Nome" value={value.name} onChange={(next) => onChange("name", next)} />
-        <TextArea label="Descricao" value={value.description} onChange={(next) => onChange("description", next)} />
+        <TextArea label="Descrição" value={value.description} onChange={(next) => onChange("description", next)} />
         <Field label="Logo URL" value={value.logo_url} onChange={(next) => onChange("logo_url", next)} />
         <Field label="URL de acesso" value={value.access_url} onChange={(next) => onChange("access_url", next)} />
         <TextArea label="Como usar" value={value.usage_instructions} onChange={(next) => onChange("usage_instructions", next)} />
@@ -8114,7 +8125,7 @@ function ConfigForm({
     return (
       <div className="form-grid">
         <Field label="Nome" value={value.name} onChange={(next) => onChange("name", next)} />
-        <TextArea label="Descricao" value={value.description} onChange={(next) => onChange("description", next)} />
+        <TextArea label="Descrição" value={value.description} onChange={(next) => onChange("description", next)} />
         <ConfigStatusField value={value.status} onChange={(next) => onChange("status", next)} />
       </div>
     );
@@ -8124,23 +8135,23 @@ function ConfigForm({
     return (
       <div className="form-grid prompt-config-form">
         <div className="prompt-config-section main">
-          <span className="section-kicker">Identificacao</span>
-          <Field label="Titulo do prompt" value={value.title} onChange={(next) => onChange("title", next)} />
-          <Field label="Descricao curta" value={value.short_description} onChange={(next) => onChange("short_description", next)} />
+          <span className="section-kicker">Identificação</span>
+          <Field label="Título do prompt" value={value.title} onChange={(next) => onChange("title", next)} />
+          <Field label="Descrição curta" value={value.short_description} onChange={(next) => onChange("short_description", next)} />
         </div>
 
         <div className="prompt-config-section prompt-editor-section">
-          <span className="section-kicker">Conteudo reutilizavel</span>
-          <TextArea label="Conteudo do prompt" value={value.content} onChange={(next) => onChange("content", next)} rows={10} />
+          <span className="section-kicker">Conteúdo reutilizavel</span>
+          <TextArea label="Conteúdo do prompt" value={value.content} onChange={(next) => onChange("content", next)} rows={10} />
           <PromptVariablesEditor value={String(value.variables ?? "")} onChange={(next) => onChange("variables", next)} />
         </div>
 
         <div className="prompt-config-section side">
-          <span className="section-kicker">Organizacao</span>
+          <span className="section-kicker">Organização</span>
           <SelectField label="Categoria" value={value.category_id} onChange={(next) => onChange("category_id", next)} options={tables.prompt_categories.map(toOption)} />
           <SelectField label="Ferramenta" value={value.ai_tool_id} onChange={(next) => onChange("ai_tool_id", next)} options={tables.ai_tools.map(toOption)} />
           <SelectField label="Tipo de projeto" value={value.project_type_id} onChange={(next) => onChange("project_type_id", next)} options={tables.project_types.map(toOption)} />
-          <Field label="Versao" value={value.version} onChange={(next) => onChange("version", next)} />
+          <Field label="Versão" value={value.version} onChange={(next) => onChange("version", next)} />
           <ConfigStatusField value={value.status} onChange={(next) => onChange("status", next)} includeDraft />
         </div>
       </div>
@@ -8151,7 +8162,7 @@ function ConfigForm({
     return (
       <div className="form-grid">
         <Field label="Nome do template" value={value.name} onChange={(next) => onChange("name", next)} />
-        <TextArea label="Descricao" value={value.description} onChange={(next) => onChange("description", next)} />
+        <TextArea label="Descrição" value={value.description} onChange={(next) => onChange("description", next)} />
         <SelectField label="Tipo de projeto" value={value.project_type_id} onChange={(next) => onChange("project_type_id", next)} options={tables.project_types.map(toOption)} />
         <SelectField
           label="Uso do template"
@@ -8187,10 +8198,10 @@ function ConfigForm({
   if (moduleKey === "prompt_blocks") {
     return (
       <div className="form-grid">
-        <Field label="Titulo" value={value.title} onChange={(next) => onChange("title", next)} />
+        <Field label="Título" value={value.title} onChange={(next) => onChange("title", next)} />
         <Field label="Categoria" value={value.category} onChange={(next) => onChange("category", next)} />
-        <TextArea label="Descricao" value={value.description} onChange={(next) => onChange("description", next)} />
-        <TextArea label="Conteudo do complemento" value={value.content} onChange={(next) => onChange("content", next)} rows={7} />
+        <TextArea label="Descrição" value={value.description} onChange={(next) => onChange("description", next)} />
+        <TextArea label="Conteúdo do complemento" value={value.content} onChange={(next) => onChange("content", next)} rows={7} />
         <SelectField label="Ferramenta" value={value.ai_tool_id} onChange={(next) => onChange("ai_tool_id", next)} options={tables.ai_tools.map(toOption)} />
         <SelectField label="Tipo de projeto" value={value.project_type_id} onChange={(next) => onChange("project_type_id", next)} options={tables.project_types.map(toOption)} />
         <SelectField label="Etapa relacionada" value={value.journey_step_id} onChange={(next) => onChange("journey_step_id", next)} options={tables.journey_steps.map(toOption)} />
@@ -8201,10 +8212,10 @@ function ConfigForm({
 
   return (
     <div className="form-grid">
-      <Field label="Titulo" value={value.title} onChange={(next) => onChange("title", next)} />
+      <Field label="Título" value={value.title} onChange={(next) => onChange("title", next)} />
       <Field label="Categoria" value={value.category} onChange={(next) => onChange("category", next)} />
-      <TextArea label="Descricao" value={value.description} onChange={(next) => onChange("description", next)} />
-      <TextArea label="Conteudo" value={value.content} onChange={(next) => onChange("content", next)} rows={7} />
+      <TextArea label="Descrição" value={value.description} onChange={(next) => onChange("description", next)} />
+      <TextArea label="Conteúdo" value={value.content} onChange={(next) => onChange("content", next)} rows={7} />
       <SelectField label="Tipo de projeto" value={value.project_type_id} onChange={(next) => onChange("project_type_id", next)} options={tables.project_types.map(toOption)} />
       <SelectField label="Etapa relacionada" value={value.journey_step_id} onChange={(next) => onChange("journey_step_id", next)} options={tables.journey_steps.map(toOption)} />
       <ConfigStatusField value={value.status} onChange={(next) => onChange("status", next)} />
@@ -8228,14 +8239,14 @@ function PromptVariablesEditor({ value, onChange }: { value: string; onChange: (
   return (
     <div className="prompt-variable-editor">
       <label className="field">
-        <span>Variaveis usadas no prompt</span>
+        <span>Variáveis usadas no prompt</span>
         <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="{{empresa}}, {{projeto}}, {{contexto}}" />
       </label>
       <div className="variable-chip-row">
         {suggestions.map((item) => <button className="variable-chip" type="button" key={item} onClick={() => addVariable(item)}>{item}</button>)}
       </div>
       {variables.length > 0 && (
-        <div className="variable-selected-row" aria-label="Variaveis cadastradas">
+        <div className="variable-selected-row" aria-label="Variáveis cadastradas">
           {variables.map((item) => <button type="button" key={item} onClick={() => removeVariable(item)}>{item} x</button>)}
         </div>
       )}
@@ -8261,7 +8272,7 @@ function EmptyClientJourney({ client, onBack, onCreateStep }: { client: Client |
       {client ? <ClientLogo client={client} large /> : <Users size={42} />}
       <strong>{client?.name ?? "Nenhum cliente aberto"}</strong>
       {client?.client_kind && <span className="client-kind-badge">{client.client_kind}</span>}
-      <span>{client ? "Este cliente ainda nao tem etapas de jornada." : "Crie ou selecione um cliente para acompanhar a jornada."}</span>
+      <span>{client ? "Este cliente ainda não tem etapas de jornada." : "Crie ou selecione um cliente para acompanhar a jornada."}</span>
       {client && <button className="secondary-button" onClick={() => onCreateStep(client.id)}><Plus size={16} /> Criar primeira etapa</button>}
       <button className="primary-button" onClick={onBack}>
         Voltar para clientes
@@ -8451,7 +8462,7 @@ function SelectField({
   label,
   value,
   options,
-  emptyLabel = "Nao vinculado",
+  emptyLabel = "Não vinculado",
   onChange,
 }: {
   label: string;
@@ -8656,7 +8667,7 @@ function getOrderColumn(tableName: keyof Tables) {
 }
 
 function getRecordTitle(record: Record<string, unknown>) {
-  return String(record.name ?? record.title ?? "Sem titulo");
+  return String(record.name ?? record.title ?? "Sem título");
 }
 
 function getRecordSubtitle(record: Record<string, unknown>, tables: Tables) {
@@ -8676,7 +8687,7 @@ function getRecordSubtitle(record: Record<string, unknown>, tables: Tables) {
     return String(record.category);
   }
 
-  return "Cadastro de apoio da operacao";
+  return "Cadastro de apoio da operação";
 }
 
 function findName(records: Array<{ id: string; name: string }>, id: string | null) {
@@ -8720,7 +8731,7 @@ function getResponsibleName(owner: ResponsibleOwner, users: AppUser[]) {
 }
 
 function toOption(record: { id: string; name?: string; title?: string }) {
-  return { value: record.id, label: record.name ?? record.title ?? "Sem titulo" };
+  return { value: record.id, label: record.name ?? record.title ?? "Sem título" };
 }
 
 function formatStatus(status: string) {
@@ -8732,7 +8743,7 @@ function formatStatus(status: string) {
     draft: "Rascunho",
     active: "Ativo",
     archived: "Arquivado",
-    not_analyzed: "Nao analisado",
+    not_analyzed: "Não analisado",
     analyzed: "Analisado",
     needs_review: "Precisa revisar",
     reviewed: "Revisado",
@@ -8740,7 +8751,7 @@ function formatStatus(status: string) {
     em_implantacao: "Em implantacao",
     em_andamento: "Em andamento",
     regularizacao_pendente: "Regularizacao pendente",
-    concluido: "Concluido",
+    concluido: "Concluído",
     desenvolvido: "Desenvolvido",
     em_revisao: "Em revisao",
     bloqueado: "Bloqueado",
@@ -8762,7 +8773,7 @@ function statusTone(status: string): StatusTone {
 
 function formatPromptStatus(status: ProjectStepPrompt["prompt_status"], content: string) {
   if (status === "nao_aplicavel") {
-    return "Nao aplicavel";
+    return "Não aplicavel";
   }
 
   if (status === "pendente" || !content.trim()) {
@@ -9028,12 +9039,12 @@ function composeGeneratedPrompt({
     `Projeto: ${project.name}`,
     project.company ? `Empresa: ${project.company}` : "",
     `Etapa atual: ${step.name}`,
-    summary ? `Sumario: versao ${summary.version_number} (${formatStatus(summary.status)})` : "",
+    summary ? `Sumário: versão ${summary.version_number} (${formatStatus(summary.status)})` : "",
   ].filter(Boolean);
   const scopedItems = items?.length ? [...items].sort(byOrder) : item ? [item] : [];
   const selectedTopicsText = scopedItems.length
     ? scopedItems.map((summaryItem) => `${summaryItem.topic_number} ${summaryItem.title}${summaryItem.notes ? `\nNotas internas: ${summaryItem.notes}` : ""}`).join("\n")
-    : "Use o sumario consolidado do projeto como referencia geral.";
+    : "Use o sumário consolidado do projeto como referencia geral.";
   const rawBasePrompt = basePrompt?.content?.trim() ?? "";
   if (!rawBasePrompt) return "";
   const usesSummaryVariable = rawBasePrompt.includes("{{sumario_consolidado}}");
@@ -9048,7 +9059,7 @@ function composeGeneratedPrompt({
     summary: summary?.consolidated_text?.trim() ?? null,
   }).split("{{topicos_selecionados}}").join(selectedTopicsText);
   const summaryContext = !usesSummaryVariable && summary?.consolidated_text?.trim()
-    ? ["## Sumario consolidado", summary.consolidated_text.trim()]
+    ? ["## Sumário consolidado", summary.consolidated_text.trim()]
     : [];
   const topic = !usesTopicsVariable ? ["## Topicos que devem ser desenvolvidos", selectedTopicsText] : [];
   const base = ["## Prompt base", resolvedBasePrompt];
@@ -9062,7 +9073,7 @@ function composeGeneratedPrompt({
   ]);
   const instruction = [
     "## Formato de saida esperado",
-    "Entregue o conteudo ja estruturado para uso em documento tecnico, evitando comentarios sobre o processo e apontando pendencias quando faltarem dados.",
+    "Entregue o conteúdo já estruturado para uso em documento técnico, evitando comentarios sobre o processo e apontando pendencias quando faltarem dados.",
   ];
 
   return [...header, "", ...base, "", ...summaryContext, "", ...topic, "", ...optionLines, "", ...complements, "", ...instruction]
@@ -9073,7 +9084,7 @@ function composeGeneratedPrompt({
 
 function formatSummaryParseStatus(status: ProjectSummary["parse_status"]) {
   const labels: Record<ProjectSummary["parse_status"], string> = {
-    not_analyzed: "Nao analisado",
+    not_analyzed: "Não analisado",
     analyzed: "Analisado",
     needs_review: "Precisa revisar",
     reviewed: "Revisado",

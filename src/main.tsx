@@ -10,6 +10,7 @@ import "./styles/admin.css";
 import "./styles/projects.css";
 import "./styles/workspace.css";
 import "./styles/theme-cobalt.css";
+import "./styles/shell.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

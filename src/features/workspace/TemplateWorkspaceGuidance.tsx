@@ -12,7 +12,7 @@ export function TemplateWorkspaceGuidance({ baseUrl, templateId }: { baseUrl: st
     fetch(`${baseUrl}/api/journey-templates/${encodeURIComponent(templateId)}/workspace-guidance`)
       .then(async (response) => {
         const body = await response.json() as { data?: { guidance: string }; error?: string };
-        if (!response.ok || !body.data) throw new Error(body.error || "Falha ao carregar orientacao.");
+        if (!response.ok || !body.data) throw new Error(body.error || "Falha ao carregar orientação.");
         if (active) { setGuidance(body.data.guidance); setMessage(""); }
       }).catch((error) => { if (active) setMessage(error instanceof Error ? error.message : "Falha ao carregar."); })
       .finally(() => { if (active) setLoading(false); });
@@ -27,12 +27,12 @@ export function TemplateWorkspaceGuidance({ baseUrl, templateId }: { baseUrl: st
         method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ guidance }),
       });
       const body = await response.json() as { data?: { guidance: string }; error?: string };
-      if (!response.ok || !body.data) throw new Error(body.error || "Falha ao salvar orientacao.");
+      if (!response.ok || !body.data) throw new Error(body.error || "Falha ao salvar orientação.");
       setGuidance(body.data.guidance);
-      setMessage("Orientacao salva.");
+      setMessage("Orientação salva.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao salvar."); }
     finally { setSaving(false); }
   }
 
-  return <section className="template-workspace-guidance"><h3>Etapa 0: Local de trabalho</h3><p>Obrigatoria em todos os projetos. Personalize apenas a orientacao, sem cadastrar caminhos do projeto no template.</p><label>Orientacao do template<textarea rows={3} maxLength={4000} value={guidance} disabled={loading} onChange={(event) => setGuidance(event.target.value)} /></label><div className="inline-actions"><button className="secondary-button" type="button" disabled={loading || saving} onClick={() => void save()}><Save size={16} /> {saving ? "Salvando..." : "Salvar orientacao"}</button>{message && <span role="status">{message}</span>}</div></section>;
+  return <section className="template-workspace-guidance"><h3>Etapa 0: Local de trabalho</h3><p>Obrigatoria em todos os projetos. Personalize apenas a orientação, sem cadastrar caminhos do projeto no template.</p><label>Orientação do template<textarea rows={3} maxLength={4000} value={guidance} disabled={loading} onChange={(event) => setGuidance(event.target.value)} /></label><div className="inline-actions"><button className="secondary-button" type="button" disabled={loading || saving} onClick={() => void save()}><Save size={16} /> {saving ? "Salvando..." : "Salvar orientação"}</button>{message && <span role="status">{message}</span>}</div></section>;
 }

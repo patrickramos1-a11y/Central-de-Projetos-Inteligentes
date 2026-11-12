@@ -7,12 +7,12 @@ import { WorkspaceProviderBadge } from "./WorkspaceProviderBadge";
 
 type Draft = { id: string; kind: WorkspaceKind; title: string; target: string; notes: string };
 const emptyDraft = (kind: WorkspaceKind): Draft => ({ id: crypto.randomUUID(), kind, title: "", target: "", notes: "" });
-const kindLabels: Record<WorkspaceKind, string> = { directory: "Diretorios do servidor", conversation: "Conversas", support: "Links de apoio" };
+const kindLabels: Record<WorkspaceKind, string> = { directory: "Diretórios do servidor", conversation: "Conversas", support: "Links de apoio" };
 
 async function getWorkspace(baseUrl: string, projectId: string): Promise<ProjectWorkspace> {
   const response = await fetch(`${baseUrl}/api/projects/${encodeURIComponent(projectId)}/workspace`, { cache: "no-store" });
   const body = await response.json() as { data?: ProjectWorkspace; error?: string };
-  if (!response.ok || !body.data) throw new Error(body.error || "Nao foi possivel carregar o local de trabalho.");
+  if (!response.ok || !body.data) throw new Error(body.error || "Não foi possível carregar o local de trabalho.");
   return body.data;
 }
 
@@ -26,7 +26,7 @@ function workspaceReferenceUpdateParts(reference: WorkspaceReference): { date: s
   return {
     date: new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(timestamp),
     time: new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(timestamp),
-    actor: reference.updated_by_name || "Perfil nao registrado",
+    actor: reference.updated_by_name || "Perfil não registrado",
   };
 }
 
@@ -95,7 +95,7 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, curr
         body: JSON.stringify({ expectedRevision: workspace.revision, conversationNotApplicable, references, updatedByUserId: currentUser?.id ?? null }),
       });
       const body = await response.json() as { data?: ProjectWorkspace; error?: string };
-      if (!response.ok || !body.data) throw new Error(body.error || "Nao foi possivel salvar.");
+      if (!response.ok || !body.data) throw new Error(body.error || "Não foi possível salvar.");
       if (requestId !== sequence.current) return;
       setWorkspace(body.data);
       onChanged(body.data);
@@ -148,7 +148,7 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, curr
         body: body === undefined ? undefined : JSON.stringify(body),
       });
       const result = await response.json() as { data?: ProjectWorkspace; error?: string };
-      if (!response.ok || !result.data) throw new Error(result.error || "Nao foi possivel salvar.");
+      if (!response.ok || !result.data) throw new Error(result.error || "Não foi possível salvar.");
       if (requestId !== sequence.current) return;
       setWorkspace(result.data); onChanged(result.data);
       return true;
@@ -169,7 +169,7 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, curr
   }
 
   async function addContext() {
-    if (!contextDraft.title.trim() || !contextDraft.content.trim()) { setError("Informe titulo e conteudo do contexto."); return; }
+    if (!contextDraft.title.trim() || !contextDraft.content.trim()) { setError("Informe título e conteúdo do contexto."); return; }
     if (await mutateWorkspace("contexts", "POST", { ...contextDraft, category: null })) {
       setContextDraft({ title: "", content: "" });
       setContextTitleEdited(false);
@@ -188,16 +188,16 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, curr
       <div className="workspace-stage-actions"><button className="secondary-button" type="button" onClick={() => void copyText(buildJourneyLink(projectId), "Link da jornada")}><Link2 size={15} /> Compartilhar</button><span className={`workspace-state ${workspace.status}`}>{workspaceStatusLabel(workspace.status)}</span></div>
     </div>
     {missing.length > 0 && <p className="workspace-missing">Falta {missing.join(" e ")}.</p>}
-    {workspace.status === "organizado" && <p className="workspace-done"><CheckCircle2 size={17} /> Referencias essenciais organizadas.</p>}
+    {workspace.status === "organizado" && <p className="workspace-done"><CheckCircle2 size={17} /> Referências essenciais organizadas.</p>}
     {error && <p className="workspace-error" role="alert">{error} <button type="button" onClick={() => void refresh(true)}>Atualizar dados</button></p>}
     {(["directory", "conversation", "support"] as WorkspaceKind[]).map((kind) => {
       const refs = workspace.references.filter((ref) => ref.kind === kind);
       return <section className="workspace-reference-section" key={kind} aria-label={kindLabels[kind]}>
         <header><h3>{kindLabels[kind]}</h3><div className="workspace-header-actions">
-          {kind === "conversation" && refs.length === 0 && <button className="secondary-button workspace-na-button" type="button" aria-pressed={workspace.conversationNotApplicable} disabled={saving} onClick={() => void save(workspace.manualReferences, !workspace.conversationNotApplicable, () => setDraft(null))}>{workspace.conversationNotApplicable ? <RefreshCw size={15} /> : <X size={15} />}{workspace.conversationNotApplicable ? "Reativar" : "Nao se aplica"}</button>}
+          {kind === "conversation" && refs.length === 0 && <button className="secondary-button workspace-na-button" type="button" aria-pressed={workspace.conversationNotApplicable} disabled={saving} onClick={() => void save(workspace.manualReferences, !workspace.conversationNotApplicable, () => setDraft(null))}>{workspace.conversationNotApplicable ? <RefreshCw size={15} /> : <X size={15} />}{workspace.conversationNotApplicable ? "Reativar" : "Não se aplica"}</button>}
           <button className="secondary-button" type="button" disabled={saving || (kind === "conversation" && workspace.conversationNotApplicable)} onClick={() => { setDraft(emptyDraft(kind)); setError(""); }}><Plus size={15} /> Adicionar</button>
         </div></header>
-        {refs.length === 0 && <p className="workspace-empty">{kind === "support" ? "Nenhum link de apoio cadastrado." : kind === "conversation" && workspace.conversationNotApplicable ? "Conversa marcada como nao aplicavel." : "Nenhuma referencia cadastrada."}</p>}
+        {refs.length === 0 && <p className="workspace-empty">{kind === "support" ? "Nenhum link de apoio cadastrado." : kind === "conversation" && workspace.conversationNotApplicable ? "Conversa marcada como não aplicavel." : "Nenhuma referencia cadastrada."}</p>}
         <div className="workspace-reference-list">{refs.map((ref) => {
           const accessible = browserAccessibleUrl(ref.target);
           const manualKind = workspace.manualReferences.filter((item) => item.kind === kind);
@@ -246,7 +246,7 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, curr
       </header>
       {contextsOpen && <div className="workspace-tool-body">
         {contextPrompts.length > 0 && <div className="workspace-prompt-shortcuts" aria-label="Prompts de contexto">{contextPrompts.slice(0, 3).map((prompt) => <button type="button" key={prompt.id} title={prompt.name} onClick={() => void copyText(prompt.content, prompt.name)}><Copy size={14} /><span>{prompt.name}</span></button>)}</div>}
-        <div className="workspace-context-form"><input value={contextDraft.title} maxLength={160} placeholder="Titulo do contexto" onChange={(event) => { setContextTitleEdited(true); setContextDraft({ ...contextDraft, title: event.target.value }); }} /><textarea value={contextDraft.content} maxLength={20000} placeholder="Cole ou escreva o contexto" onChange={(event) => { const content = event.target.value; setContextDraft((current) => ({ ...current, content, title: contextTitleEdited ? current.title : contextTitleFromContent(content) })); }} /><button className="primary-button compact" type="button" disabled={saving || !contextDraft.title.trim() || !contextDraft.content.trim()} onClick={() => void addContext()}><Save size={15} /> Salvar contexto</button></div>
+        <div className="workspace-context-form"><input value={contextDraft.title} maxLength={160} placeholder="Título do contexto" onChange={(event) => { setContextTitleEdited(true); setContextDraft({ ...contextDraft, title: event.target.value }); }} /><textarea value={contextDraft.content} maxLength={20000} placeholder="Cole ou escreva o contexto" onChange={(event) => { const content = event.target.value; setContextDraft((current) => ({ ...current, content, title: contextTitleEdited ? current.title : contextTitleFromContent(content) })); }} /><button className="primary-button compact" type="button" disabled={saving || !contextDraft.title.trim() || !contextDraft.content.trim()} onClick={() => void addContext()}><Save size={15} /> Salvar contexto</button></div>
         <div className="workspace-context-list">{workspace.contexts.map((context) => <article key={context.id}><div><strong>{context.title}</strong>{context.category && <small>{context.category}</small>}<p>{context.content}</p>{context.source_client_context_id && <small>Disponivel na biblioteca do cliente · versao {context.source_version}</small>}</div><button className="icon-button danger" type="button" title="Retirar contexto deste projeto" onClick={() => void mutateWorkspace(`contexts/${encodeURIComponent(context.id)}`, "DELETE")}><Trash2 size={15} /></button></article>)}</div>
         {!workspace.contexts.length && <p className="workspace-empty">Nenhum contexto cadastrado nesta Etapa 0.</p>}
       </div>}
