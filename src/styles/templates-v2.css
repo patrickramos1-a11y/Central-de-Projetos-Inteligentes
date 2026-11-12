@@ -116,3 +116,37 @@
   .rj-context-editor { grid-template-columns: 1fr auto; }
   .rj-context-editor textarea { grid-column: 1 / 2; }
 }
+
+/* Carteira de clientes sem Responsável/Status; página do cliente */
+.rj-shell .client-portfolio-head,
+.rj-shell .client-portfolio-row { grid-template-columns: minmax(260px, 2.4fr) 70px repeat(4, 84px) 92px; }
+.rj-shell .clients-search-field { flex: 1 1 360px; }
+.rj-shell .management-view-bar .search-field { flex: 1 1 420px; }
+.rj-client-page { display: flex; flex-direction: column; gap: 16px; }
+.rj-back { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; color: var(--color-primary); font-weight: 600; cursor: pointer; }
+.rj-client-hero { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 18px; border: var(--border-subtle); border-radius: var(--radius-md); background: #fff; }
+.rj-client-logo { display: grid; place-items: center; width: 88px; height: 88px; border-radius: 16px; border: var(--border-subtle); background: #fff; overflow: hidden; }
+.rj-client-logo img { max-width: 80%; max-height: 80%; object-fit: contain; }
+.rj-client-identity { flex: 1; min-width: 240px; }
+.rj-client-name { display: flex; align-items: center; gap: 10px; }
+.rj-client-name h1 { margin: 0; font-size: 26px; color: var(--color-heading); }
+.rj-client-stats { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; color: var(--color-muted); font-size: 13.5px; }
+.rj-client-stats strong { color: var(--color-heading); font-size: 16px; }
+.rj-client-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.rj-client-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 16px; }
+.rj-client-projects, .rj-client-refs ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.rj-client-projects button { display: flex; justify-content: space-between; gap: 10px; width: 100%; padding: 9px 8px; border: 0; border-radius: var(--radius-sm); background: none; text-align: left; cursor: pointer; }
+.rj-client-projects button:hover { background: var(--surface-subtle); }
+.rj-client-project-name { display: flex; flex-direction: column; }
+.rj-client-project-name small { color: var(--color-muted); font-size: 12px; }
+.rj-status-dot { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--color-amber); white-space: nowrap; }
+.rj-status-dot.is-done { color: var(--color-green); }
+.rj-client-contexts { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; max-height: 520px; overflow-y: auto; }
+.rj-client-context { padding: 10px 12px; border: var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-subtle); cursor: pointer; }
+.rj-client-context p { margin: 4px 0; font-size: 12.5px; color: var(--color-ink); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.rj-client-context small { font-size: 11px; color: var(--color-muted); }
+.rj-client-refs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.rj-client-ref { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border: var(--border-subtle); border-radius: var(--radius-sm); }
+.rj-client-ref-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rj-client-ref-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted); font-size: 12px; }
+@media (max-width: 960px) { .rj-client-grid, .rj-client-refs { grid-template-columns: 1fr; } }

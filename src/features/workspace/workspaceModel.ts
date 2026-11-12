@@ -138,3 +138,14 @@ export function workspaceProvider(kind: WorkspaceKind, target: string): Workspac
   if (host === "photos.google.com" || host === "photos.app.goo.gl") return "google-photos";
   return "link";
 }
+
+/**
+ * Shows server paths from the "R. AC" / "R. AV" folder onwards, e.g.
+ * "D:\RAMOS ENGENHARIA\R. AC\APEU POLPAS\3 - PROJETOS\RCA" → "R. AC\APEU POLPAS\3 - PROJETOS\RCA".
+ * Paths without that folder are returned unchanged. Copy actions keep the full path.
+ */
+export function displayDirectoryPath(target: string): string {
+  const match = /(^|[\\/])(R\.?\s*A[CV])(?=[\\/]|$)/i.exec(target);
+  if (!match) return target;
+  return target.slice(match.index + match[1].length);
+}

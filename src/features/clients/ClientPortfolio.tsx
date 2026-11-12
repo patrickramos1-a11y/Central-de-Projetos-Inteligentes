@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpDown, ChevronDown, ChevronRight, Copy, ExternalLink, Filter, FolderOpen, Layers3, Loader2, Pencil, Search, UserRound } from "lucide-react";
 import { copyText } from "../../components/ui/clipboard";
 import type { WorkspaceOverview, WorkspaceReference } from "../workspace/workspaceModel";
-import { browserAccessibleUrl, workspaceProvider, type ProjectWorkspace } from "../workspace/workspaceModel";
+import { browserAccessibleUrl, displayDirectoryPath, workspaceProvider, type ProjectWorkspace } from "../workspace/workspaceModel";
 import { WorkspaceProviderBadge } from "../workspace/WorkspaceProviderBadge";
 import { buildClientPortfolioRows, filterClientPortfolioRows, sortClientPortfolioRows, type ClientPortfolioSortColumn, type ClientPortfolioSortDirection } from "./clientPortfolioModel";
 
@@ -10,7 +10,7 @@ type PortfolioClient = {
   id: string; name: string; company: string | null; logo_url: string | null; client_kind: "AC" | "AV" | null; is_active: boolean;
   responsible: string | null; responsible_user_id: string | null; status: string; created_at: string; updated_at: string;
 };
-type PortfolioProject = { id: string; name: string; company: string | null; client_id: string | null; status: string };
+type PortfolioProject = { id: string; name: string; company: string | null; client_id: string | null; status: string; project_type_id?: string | null };
 type PortfolioUser = { id: string; name: string };
 type PortfolioContext = {
   id: string; title: string; content: string; category: string | null; version: number; origin_type: "client" | "project";
@@ -68,7 +68,7 @@ function ReferenceTable({ title, items, empty, onOpenProject }: {
     {items.length ? <div className="client-detail-table">{items.map(({ id, projectId, projectName, reference }) => <div className="client-detail-row" data-provider={workspaceProvider(reference.kind, reference.target)} key={id}>
       <WorkspaceProviderBadge kind={reference.kind} target={reference.target} />
       <span><strong>{reference.title}</strong><small>{projectName}</small></span>
-      <span className="client-detail-target" title={reference.target}>{reference.target}</span>
+      <span className="client-detail-target" title={reference.target}>{displayDirectoryPath(reference.target)}</span>
       <DetailActions target={reference.target} projectId={projectId} onOpenProject={onOpenProject} />
     </div>)}</div> : <p>{empty}</p>}
   </section>;
@@ -107,8 +107,9 @@ function ClientExpansion({ client, details, loading, onOpenClient, onOpenProject
 }
 
 export function ClientPortfolio({
-  baseUrl, clients, projects, users, workspaces, contextCounts, query, setQuery, onOpenClient, onOpenProject, onEditClient, onActivateClient, onOpenContexts, onOpenWorkspaces,
+  baseUrl, clients, projects, users, workspaces, contextCounts, query, setQuery, onOpenClient, onOpenProject, onEditClient, onActivateClient, onOpenContexts, onOpenWorkspaces, projectTypes = [],
 }: {
+  projectTypes?: Array<{ id: string; name: string }>;
   baseUrl: string; clients: PortfolioClient[]; projects: PortfolioProject[]; users: PortfolioUser[]; workspaces: WorkspaceOverview[];
   contextCounts: Array<{ clientId: string; count: number }>; query: string; setQuery: (value: string) => void;
   onOpenClient: (id: string) => void; onOpenProject: (id: string) => void; onEditClient: (id: string) => void;
@@ -122,17 +123,16 @@ export function ClientPortfolio({
   const requestVersion = useRef<Record<string, number>>({});
   const [sortColumn, setSortColumn] = useState<ClientPortfolioSortColumn>("name");
   const [sortDirection, setSortDirection] = useState<ClientPortfolioSortDirection>("asc");
-  const [responsible, setResponsible] = useState("all");
-  const [status, setStatus] = useState("all");
+  const [projectType, setProjectType] = useState("all");
   const [minimumProjects, setMinimumProjects] = useState(0);
   const [minimumContexts, setMinimumContexts] = useState(0);
   const [minimumDirectories, setMinimumDirectories] = useState(0);
   const [minimumLinks, setMinimumLinks] = useState(0);
 
   const rows = useMemo(() => buildClientPortfolioRows({ clients, projects, users, workspaces, contextCounts }), [clients, projects, users, workspaces, contextCounts]);
-  const visible = useMemo(() => sortClientPortfolioRows(filterClientPortfolioRows(rows, { query, kind, responsible, status, showInactive, minimumProjects, minimumContexts, minimumDirectories, minimumLinks }), sortColumn, sortDirection), [rows, query, kind, responsible, status, showInactive, minimumProjects, minimumContexts, minimumDirectories, minimumLinks, sortColumn, sortDirection]);
-  const responsibleOptions = [...new Set(rows.map((row) => row.responsibleName))].sort((a, b) => a.localeCompare(b, "pt-BR"));
-  const statusOptions = [...new Set(rows.map((row) => row.status))].sort();
+  const clientsWithType = useMemo(() => projectType === "all" ? null : new Set(projects.filter((project) => project.project_type_id === projectType && project.client_id).map((project) => project.client_id as string)), [projects, projectType]);
+  const visible = useMemo(() => sortClientPortfolioRows(filterClientPortfolioRows(rows, { query, kind, responsible: "all", status: "all", showInactive, minimumProjects, minimumContexts, minimumDirectories, minimumLinks }), sortColumn, sortDirection).filter((row) => !clientsWithType || clientsWithType.has(row.id)), [rows, query, kind, showInactive, minimumProjects, minimumContexts, minimumDirectories, minimumLinks, sortColumn, sortDirection, clientsWithType]);
+  const usedTypes = projectTypes.filter((type) => projects.some((project) => project.project_type_id === type.id));
 
   function sort(column: ClientPortfolioSortColumn) {
     if (column === sortColumn) setSortDirection((current) => current === "asc" ? "desc" : "asc");
@@ -168,7 +168,8 @@ export function ClientPortfolio({
       <div className="client-kind-tabs" role="tablist" aria-label="Categoria de clientes">
         {(["all", "AC", "AV"] as const).map((value) => <button type="button" role="tab" aria-selected={kind === value} className={kind === value ? "active" : ""} key={value} onClick={() => setKind(value)}>{value === "all" ? "Todos" : value}</button>)}
       </div>
-      <label className="search-field clients-search-field"><Search size={17} /><input aria-label="Buscar clientes pelo nome, empresa, categoria ou responsavel" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar cliente, empresa, categoria ou responsavel" /></label>
+      <label className="search-field clients-search-field"><Search size={17} /><input aria-label="Buscar clientes" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar cliente ou empresa" /></label>
+      {usedTypes.length > 0 && <label className="rj-select-inline client-type-filter"><span>Tipo de projeto</span><select value={projectType} onChange={(event) => setProjectType(event.target.value)}><option value="all">Todos</option>{usedTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></label>}
       <button className="secondary-button client-inactive-toggle" type="button" aria-pressed={showInactive} onClick={() => setShowInactive((value) => !value)}>{showInactive ? "Ocultar inativos" : "Ver inativos"}</button>
       <span className="client-result-count">{visible.length} de {rows.length}</span>
     </div>
@@ -177,12 +178,10 @@ export function ClientPortfolio({
       <div className="client-portfolio-head" role="row">
         <ColumnHeader label="Cliente" column="name" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filtrar nome" /></ColumnHeader>
         <ColumnHeader label="Tipo" column="kind" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><select value={kind} onChange={(event) => setKind(event.target.value as "all" | "AC" | "AV")}><option value="all">Todos</option><option value="AC">AC</option><option value="AV">AV</option></select></ColumnHeader>
-        <ColumnHeader label="Responsável" column="responsible" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><select value={responsible} onChange={(event) => setResponsible(event.target.value)}><option value="all">Todos</option>{responsibleOptions.map((item) => <option key={item}>{item}</option>)}</select></ColumnHeader>
         <ColumnHeader label="Projetos" column="projects" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><CountFilter value={minimumProjects} onChange={setMinimumProjects} /></ColumnHeader>
         <ColumnHeader label="Contextos" column="contexts" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><CountFilter value={minimumContexts} onChange={setMinimumContexts} /></ColumnHeader>
         <ColumnHeader label="Locais" column="directories" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><CountFilter value={minimumDirectories} onChange={setMinimumDirectories} /></ColumnHeader>
         <ColumnHeader label="Links" column="links" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><CountFilter value={minimumLinks} onChange={setMinimumLinks} /></ColumnHeader>
-        <ColumnHeader label="Status" column="status" activeColumn={sortColumn} direction={sortDirection} onSort={sort}><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Todos</option><option value="active">Ativos</option><option value="inactive">Inativos</option>{statusOptions.map((item) => <option value={item} key={item}>{item.replace(/_/g, " ")}</option>)}</select></ColumnHeader>
         <span>Ações</span>
       </div>
       <div className="client-portfolio-body">{visible.map((row) => {
@@ -190,15 +189,13 @@ export function ClientPortfolio({
         const isExpanded = expanded.has(row.id);
         return <div className={`client-portfolio-entry ${isExpanded ? "expanded" : ""}`} key={row.id}>
           <div className="client-portfolio-row" role="row">
-            <button className="client-primary-cell" type="button" onClick={() => toggle(row.id)} aria-expanded={isExpanded}><span className="client-expand-icon">{isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span><ClientMark client={client} /><span><strong>{row.name}</strong><small>{row.company}</small></span></button>
+            <button className="client-primary-cell" type="button" onClick={() => toggle(row.id)} aria-expanded={isExpanded}><span className="client-expand-icon">{isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span><ClientMark client={client} /><span><strong>{row.name}{!row.isActive && <em className="rj-badge">inativo</em>}</strong><small>{row.company}</small></span></button>
             <span data-label="Tipo">{row.kind ? <span className={`client-kind-badge ${row.kind.toLowerCase()}`}>{row.kind}</span> : <small>Não definido</small>}</span>
-            <span data-label="Responsável" className="client-responsible"><UserRound size={14} /> {row.responsibleName}</span>
             <strong data-label="Projetos" className="client-count projects">{row.projectCount}</strong>
             <strong data-label="Contextos" className="client-count contexts">{row.contextCount}</strong>
             <strong data-label="Locais" className="client-count directories">{row.directoryCount}</strong>
             <strong data-label="Links" className="client-count links">{row.linkCount}</strong>
-            <span data-label="Status"><span className={`client-status-chip ${row.isActive ? "active" : "inactive"}`}>{row.isActive ? row.status.replace(/_/g, " ") : "Inativo"}</span></span>
-            <span className="client-row-actions"><button className="icon-button" type="button" title="Editar cadastro" aria-label={`Editar ${row.name}`} onClick={() => onEditClient(row.id)}><Pencil size={15} /></button>{!row.isActive && <button className="icon-button activate" type="button" title="Ativar cliente" aria-label={`Ativar ${row.name}`} onClick={() => onActivateClient(row.id)}><UserRound size={15} /></button>}</span>
+            <span className="client-row-actions"><button className="icon-button" type="button" title="Abrir página do cliente" aria-label={`Abrir ${row.name}`} onClick={() => onOpenClient(row.id)}><FolderOpen size={15} /></button><button className="icon-button" type="button" title="Editar cadastro" aria-label={`Editar ${row.name}`} onClick={() => onEditClient(row.id)}><Pencil size={15} /></button>{!row.isActive && <button className="icon-button activate" type="button" title="Ativar cliente" aria-label={`Ativar ${row.name}`} onClick={() => onActivateClient(row.id)}><UserRound size={15} /></button>}</span>
           </div>
           {isExpanded && <ClientExpansion client={client} details={details[row.id]} loading={loading.has(row.id)} onOpenClient={onOpenClient} onOpenProject={onOpenProject} onOpenContexts={onOpenContexts} onOpenWorkspaces={onOpenWorkspaces} />}
         </div>;

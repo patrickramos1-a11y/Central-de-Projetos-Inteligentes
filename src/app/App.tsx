@@ -95,6 +95,7 @@ import { AppSidebar, PageHeader } from "../features/shell/AppSidebar";
 import { GlobalSearch } from "../features/shell/GlobalSearch";
 import { DeliveriesView } from "../features/deliveries/DeliveriesView";
 import { ApplyTemplateDialog } from "../features/projects/ApplyTemplateDialog";
+import { ClientPage } from "../features/clients/ClientPage";
 import { MaterialsConfigEditor, MaterialsRuntime } from "../features/journey/MaterialsBlock";
 import { ProjectWorkspacePanel } from "../features/workspace/ProjectWorkspacePanel";
 import { ClientWorkspacesDialog } from "../features/workspace/ClientWorkspacesDialog";
@@ -104,7 +105,7 @@ type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
 type ProjectStatus = "planejado" | "em_andamento" | "concluido" | "bloqueado" | "arquivado";
 type ClientStatus = "em_implantacao" | "ativo" | "concluido" | "bloqueado" | "arquivado";
 type StepStatus = "pendente" | "em_andamento" | "concluido" | "bloqueado";
-type ViewMode = "projects" | "journey" | "deliveries" | "projectTemplates" | "clients" | "clientJourney" | "management" | "settings";
+type ViewMode = "projects" | "journey" | "deliveries" | "projectTemplates" | "clients" | "clientPage" | "clientJourney" | "management" | "settings";
 type JourneyMode = "execute" | "edit";
 
 function compactStepLabel(name: string) {
@@ -680,6 +681,10 @@ export default function App() {
   const [selectedClientStepId, setSelectedClientStepId] = useState<string | null>(null);
   const [stagePickerProjectId, setStagePickerProjectId] = useState<string | null>(null);
   const [applyTemplateProjectId, setApplyTemplateProjectId] = useState<string | null>(null);
+  const [clientPageEditing, setClientPageEditing] = useState<string | null>(null);
+  const previousViewRef = useRef<ViewMode | null>(null);
+  const currentViewRef = useRef<ViewMode>("projects");
+useEffect(() => {    if (view === currentViewRef.current) return;    previousViewRef.current = currentViewRef.current;    currentViewRef.current = view;  }, [view]);
   const [liveJourneyPanel, setLiveJourneyPanel] = useState<JourneyMode>("execute");
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -877,6 +882,7 @@ export default function App() {
       projects: "Projetos",
       journey: selectedProject?.name ?? "Projeto",
       deliveries: "Entregas",
+      clientPage: selectedClient?.name ?? "Cliente",
       projectTemplates: "Templates",
       clients: "Clientes",
       clientJourney: selectedClient?.name ?? "Cliente",
@@ -2969,7 +2975,7 @@ async function applyProjectSummary(summaryId: string): Promise<boolean> {    try
 
         {view === "projectTemplates" && (currentSecondaryReady ? <ProjectTemplatesView tables={tables} currentUserName={currentUser?.name ?? null} query={query} setQuery={setQuery} onUpdate={updateJourneyTemplate} onDelete={deleteJourneyTemplate} onRenameStep={renameJourneyTemplateStep} onRemoveStep={archiveJourneyTemplateStep} onRefresh={loadAll} initialTemplateId={templateEditorTargetId} onEditorClosed={() => setTemplateEditorTargetId(null)} onEditorDirtyChange={setTemplateEditorDirty} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
-        {view === "clients" && (currentSecondaryReady ? <ClientsView tables={tables} workspaces={overview.workspaces} clientContextCounts={overview.clientContextCounts} currentUser={currentUser} query={query} setQuery={setQuery} onCreate={createClientJourney} onSaveIdentity={saveClientIdentity} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} onOpenProject={(id) => { setSelectedProjectId(id); setSelectedStepId(WORKSPACE_STEP_ID); setView("journey"); }} baseUrl={cloudflareApiUrl} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
+        {view === "clients" && (currentSecondaryReady ? <ClientsView tables={tables} workspaces={overview.workspaces} clientContextCounts={overview.clientContextCounts} currentUser={currentUser} query={query} setQuery={setQuery} onCreate={createClientJourney} onSaveIdentity={saveClientIdentity} onOpen={(id) => { setSelectedClientId(id); setView("clientPage"); }} onOpenProject={(id) => { setSelectedProjectId(id); setSelectedStepId(WORKSPACE_STEP_ID); setView("journey"); }} baseUrl={cloudflareApiUrl} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
         {view === "deliveries" && (
           <DeliveriesView
@@ -2994,10 +3000,26 @@ async function applyProjectSummary(summaryId: string): Promise<boolean> {    try
             }}
             onOpenClient={(id) => {
               setSelectedClientId(id);
-              setView("clientJourney");
+              setView("clientPage");
             }}
           />
         )}
+
+        {view === "clientPage" && (() => {
+          const client = tables.clients.find((item) => item.id === selectedClientId);
+          if (!client) return <div className="empty-state"><strong>Cliente não encontrado</strong></div>;
+          return <ClientPage
+            baseUrl={cloudflareApiUrl}
+            client={client}
+            projects={tables.projects.filter((project) => project.client_id === client.id)}
+            projectTypes={tables.project_types.filter((type) => type.status !== "arquivado")}
+            onBack={() => setView(previousViewRef.current && previousViewRef.current !== "clientPage" && previousViewRef.current !== "journey" ? previousViewRef.current : "clients")}
+            onOpenProject={openProjectFromSearch}
+            onOpenJourney={(id) => { setSelectedClientId(id); setView("clientJourney"); }}
+            onEdit={(id) => setClientPageEditing(id)}
+          />;
+        })()}
+        {clientPageEditing && (() => { const client = tables.clients.find((item) => item.id === clientPageEditing); return client ? <ClientProfileDialog key={client.id} client={client} users={tables.app_users} onClose={() => setClientPageEditing(null)} onSave={saveClientIdentity} /> : null; })()}
 
         {view === "journey" && selectedStepId === WORKSPACE_STEP_ID && selectedProject && <>
           <section className="journey-hero journey-context-bar"><button className="ghost-button" type="button" onClick={() => setView("projects")}><PanelLeft size={17} /> Projetos</button><div className="journey-context-copy"><span className="eyebrow">Ramos Jornadas</span><h1>{selectedProject.name}</h1><p>{selectedProject.company || "Projeto sem empresa definida"}</p></div></section>
@@ -4169,6 +4191,7 @@ function ClientsView({
           onActivateClient={(id) => void onSaveIdentity(id, { is_active: true }, null)}
           onOpenContexts={(id) => setContextClient(tables.clients.find((client) => client.id === id) ?? null)}
           onOpenWorkspaces={(id) => setWorkspaceClient(tables.clients.find((client) => client.id === id) ?? null)}
+          projectTypes={tables.project_types.filter((type) => type.status !== "arquivado")}
         />
       </section>
       {editingClient && <ClientProfileDialog key={editingClient.id} client={editingClient} users={tables.app_users} onClose={() => setEditingClient(null)} onSave={onSaveIdentity} />}
@@ -4240,7 +4263,6 @@ function ClientProfileDialog({ client, users, onClose, onSave }: {
   const [clientKind, setClientKind] = useState<ClientKind | "">(client.client_kind ?? "");
   const [logoUrl, setLogoUrl] = useState(client.logo_url ?? "");
   const [logoFile, setLogoFile] = useState<File | null>(null);
-  const [responsibleUserId, setResponsibleUserId] = useState(client.responsible_user_id ?? "");
   const [isActive, setIsActive] = useState(client.is_active);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -4249,12 +4271,10 @@ function ClientProfileDialog({ client, users, onClose, onSave }: {
     event.preventDefault();
     if (!name.trim()) { setError("Informe o nome do cliente."); return; }
     setSaving(true);
-    const responsible = users.find((user) => user.id === responsibleUserId) ?? null;
     const saved = await onSave(client.id, {
       name: name.trim(), company: company.trim() || null,
       client_kind: clientKind || null, logo_url: logoUrl || null,
       is_active: isActive,
-      responsible_user_id: responsible?.id ?? null, responsible: responsible?.name ?? null,
     }, logoFile);
     setSaving(false);
     if (saved) onClose();
@@ -4269,7 +4289,6 @@ function ClientProfileDialog({ client, users, onClose, onSave }: {
         <Field label="Empresa / unidade" value={company} onChange={setCompany} />
         <ClientLogoPicker name={name} logoUrl={logoUrl} file={logoFile} onFile={setLogoFile} onRemove={() => { setLogoFile(null); setLogoUrl(""); }} />
         <SelectField label="Categoria do cliente" value={clientKind} onChange={(value) => setClientKind(value as ClientKind | "")} options={clientKindOptions} emptyLabel="Não definida" />
-        <SelectField label="Responsável interno" value={responsibleUserId} onChange={setResponsibleUserId} options={users.filter((user) => user.status === "ativo").map(toOption)} emptyLabel="Sem responsavel" />
         <label className="client-active-field"><input type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} /> Cliente ativo na lista</label>
       </div>
       {error && <p className="form-error" role="alert">{error}</p>}

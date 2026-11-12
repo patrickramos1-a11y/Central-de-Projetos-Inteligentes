@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpRight, CheckCircle2, ChevronDown, ClipboardCheck, Clock3, Copy, ExternalLink, Layers3, Link2, Pencil, Plus, RefreshCw, Save, Trash2, UserRound, X } from "lucide-react";
 import { copyText } from "../../components/ui/clipboard";
 import { buildJourneyLink } from "../projects/journeyLink";
-import { browserAccessibleUrl, contextTitleFromContent, serverDirectoryPath, workspaceMissing, workspaceProvider, workspaceStatusLabel, type ProjectWorkspace, type WorkspaceKind, type WorkspaceOverview, type WorkspaceReference } from "./workspaceModel";
+import { browserAccessibleUrl, contextTitleFromContent, displayDirectoryPath, serverDirectoryPath, workspaceMissing, workspaceProvider, workspaceStatusLabel, type ProjectWorkspace, type WorkspaceKind, type WorkspaceOverview, type WorkspaceReference } from "./workspaceModel";
 import { WorkspaceProviderBadge } from "./WorkspaceProviderBadge";
 
 type Draft = { id: string; kind: WorkspaceKind; title: string; target: string; notes: string };
@@ -206,7 +206,7 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, curr
           const update = workspaceReferenceUpdateParts(ref);
           return <article className="workspace-reference" data-provider={workspaceProvider(ref.kind, ref.target)} key={ref.id}>
             <WorkspaceProviderBadge kind={ref.kind} target={ref.target} />
-            <div className="workspace-reference-copy"><strong>{ref.title}</strong><span title={ref.target}>{ref.target}</span>{ref.notes && <small>{ref.notes}</small>}{ref.origin ? <small>Da etapa: {ref.origin.stepName}</small> : update && <small className="workspace-reference-meta"><span>Atualizado em {update.date}</span><span><Clock3 size={13} aria-hidden="true" /> {update.time}</span><span className={ref.updated_by_name ? "has-actor" : "legacy-actor"}><UserRound size={13} aria-hidden="true" /> {update.actor}</span></small>}</div>
+            <div className="workspace-reference-copy"><strong>{ref.title}</strong><span title={ref.target}>{displayDirectoryPath(ref.target)}</span>{ref.notes && <small>{ref.notes}</small>}{ref.origin ? <small>Da etapa: {ref.origin.stepName}</small> : update && <small className="workspace-reference-meta"><span>Atualizado em {update.date}</span><span><Clock3 size={13} aria-hidden="true" /> {update.time}</span><span className={ref.updated_by_name ? "has-actor" : "legacy-actor"}><UserRound size={13} aria-hidden="true" /> {update.actor}</span></small>}</div>
             <div className="workspace-reference-actions">
               <button className="icon-button" type="button" title={kind === "directory" ? "Copiar caminho" : "Copiar link"} aria-label={`Copiar ${ref.title}`} onClick={() => void copyText(ref.target)}><Copy size={16} /></button>
               {accessible && <a className="icon-button" href={accessible} target="_blank" rel="noopener noreferrer" title="Abrir link" aria-label={`Abrir ${ref.title}`}><ExternalLink size={16} /></a>}

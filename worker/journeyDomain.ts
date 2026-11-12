@@ -199,6 +199,10 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
     return json({ data: await createRuntimeContext(env.DB, ownerType, id, body.blockId, body, body.createdBy ?? null) }, 201);
   }
 
+  if (resource === "maintenance" && id === "link-project-contexts" && request.method === "POST") {
+    return json({ data: await linkAllProjectContextsToClients(env.DB) });
+  }
+
   if (resource === "summaries" && id && action === "apply" && request.method === "POST") {
     return json({ data: await applySummaryVersion(env.DB, id) });
   }
@@ -692,6 +696,39 @@ async function associateExistingProjectContexts(db: D1Database, ownerType: Owner
   if (!prepared.statements.length) throw new Error("Vincule um cliente antes de associar contextos.");
   await saveContextValueAtomically(db, ownerType, stepId, String(documentRow.id), blockId, { ...value, contexts: prepared.contexts }, "partial", body.updatedBy ?? null, prepared.statements);
   return genericPayload(db, ownerType, stepId, documentRow);
+}
+
+/**
+ * Every context written in a project whose client is known belongs to that
+ * client's library. Older projects kept "local" contexts; this links them all
+ * (idempotent: already linked cards are skipped).
+ */
+async function linkAllProjectContextsToClients(db: D1Database) {
+  const rows = await db.prepare(`select v.owner_step_id as step_id, v.block_id, v.value_json
+    from journey_step_values v
+    join project_steps s on s.id = v.owner_step_id
+    join projects p on p.id = s.project_id
+    where v.owner_type = 'project' and p.client_id is not null and v.value_json like '%"contexts"%'`).all<{ step_id: string; block_id: string; value_json: string }>();
+  let blocks = 0;
+  let linked = 0;
+  const failures: Array<{ stepId: string; blockId: string; error: string }> = [];
+  for (const row of rows.results ?? []) {
+    let value: Record<string, unknown>;
+    try { value = JSON.parse(row.value_json); } catch { continue; }
+    const contexts = Array.isArray(value.contexts) ? value.contexts as Array<Record<string, unknown>> : [];
+    const ids = contexts
+      .filter((item) => !item.sourceContextId && String(item.title ?? "").trim() && String(item.content ?? "").trim())
+      .map((item) => String(item.id));
+    if (!ids.length) continue;
+    blocks += 1;
+    try {
+      await associateExistingProjectContexts(db, "project", row.step_id, { blockId: row.block_id, contextIds: ids, updatedBy: "Vínculo automático" });
+      linked += ids.length;
+    } catch (failure) {
+      failures.push({ stepId: row.step_id, blockId: row.block_id, error: failure instanceof Error ? failure.message : String(failure) });
+    }
+  }
+  return { blocks, linked, failures };
 }
 
 async function saveProjectAsTemplate(

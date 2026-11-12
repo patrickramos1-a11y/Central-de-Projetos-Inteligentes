@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ArrowDown, ArrowUp, Ban, Copy, ExternalLink, Link2, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { copyText } from "../../components/ui/clipboard";
 import { WorkspaceProviderBadge } from "../workspace/WorkspaceProviderBadge";
-import { browserAccessibleUrl, serverDirectoryPath } from "../workspace/workspaceModel";
+import { browserAccessibleUrl, displayDirectoryPath, serverDirectoryPath } from "../workspace/workspaceModel";
 import { readNotApplicableSlots, readRuntimeLinks, readSlots, slotKindLabels, type MaterialSlot, type RuntimeLink, type SlotKind } from "../../../shared/materialsSlots";
 
 type AnyRecord = Record<string, unknown>;
@@ -114,7 +114,7 @@ export function MaterialsRuntime({ config, value, currentUserName, onSaveValue }
                 </div>
                 {filled ? (
                   <div className="rj-slot-value">
-                    <span className="rj-slot-target" title={filled.url}>{filled.url}</span>
+                    <span className="rj-slot-target" title={filled.url}>{displayDirectoryPath(filled.url)}</span>
                     <LinkActions target={filled.url} onRemove={() => clearSlot(slot)} />
                     {(filled.updatedBy || filled.updatedAt) && <small className="rj-muted">{[filled.updatedBy, filled.updatedAt ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(filled.updatedAt)) : null].filter(Boolean).join(" · ")}</small>}
                   </div>
