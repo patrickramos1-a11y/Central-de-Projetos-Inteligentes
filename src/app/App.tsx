@@ -2933,7 +2933,7 @@ export default function App() {
           />
         )}
 
-        {view === "projectTemplates" && (currentSecondaryReady ? <ProjectTemplatesView tables={tables} query={query} setQuery={setQuery} onUpdate={updateJourneyTemplate} onDelete={deleteJourneyTemplate} onRenameStep={renameJourneyTemplateStep} onRemoveStep={archiveJourneyTemplateStep} onRefresh={loadAll} initialTemplateId={templateEditorTargetId} onEditorClosed={() => setTemplateEditorTargetId(null)} onEditorDirtyChange={setTemplateEditorDirty} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
+        {view === "projectTemplates" && (currentSecondaryReady ? <ProjectTemplatesView tables={tables} currentUserName={currentUser?.name ?? null} query={query} setQuery={setQuery} onUpdate={updateJourneyTemplate} onDelete={deleteJourneyTemplate} onRenameStep={renameJourneyTemplateStep} onRemoveStep={archiveJourneyTemplateStep} onRefresh={loadAll} initialTemplateId={templateEditorTargetId} onEditorClosed={() => setTemplateEditorTargetId(null)} onEditorDirtyChange={setTemplateEditorDirty} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
         {view === "clients" && (currentSecondaryReady ? <ClientsView tables={tables} workspaces={overview.workspaces} clientContextCounts={overview.clientContextCounts} currentUser={currentUser} query={query} setQuery={setQuery} onCreate={createClientJourney} onSaveIdentity={saveClientIdentity} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} onOpenProject={(id) => { setSelectedProjectId(id); setSelectedStepId(WORKSPACE_STEP_ID); setView("journey"); }} baseUrl={cloudflareApiUrl} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
@@ -3585,6 +3585,7 @@ function NewProjectDialog({ children, onClose }: { children: React.ReactNode; on
 
 function ProjectTemplatesView({
   tables,
+  currentUserName,
   query,
   setQuery,
   onUpdate,
@@ -3597,6 +3598,7 @@ function ProjectTemplatesView({
   onEditorDirtyChange,
 }: {
   tables: Tables;
+  currentUserName: string | null;
   query: string;
   setQuery: (query: string) => void;
   onUpdate: (templateId: string, payload: Pick<JourneyTemplate, "name" | "description" | "status" | "project_type_id" | "project_modality_id">) => Promise<boolean>;
@@ -3656,7 +3658,7 @@ function ProjectTemplatesView({
 
       <div className="template-section-tabs" role="tablist" aria-label="Organizacao dos modelos"><button type="button" role="tab" aria-selected={templateSection === "templates"} onClick={() => setTemplateSection("templates")}><Route size={16} /> Templates</button><button type="button" role="tab" aria-selected={templateSection === "stages"} onClick={() => setTemplateSection("stages")}><Layers3 size={16} /> Etapas salvas</button><button type="button" role="tab" aria-selected={templateSection === "clientStages"} onClick={() => setTemplateSection("clientStages")}><Users size={16} /> Etapas dos clientes</button></div>
 
-      {templateSection === "stages" ? <StageLibraryPanel baseUrl={cloudflareApiUrl} scope="global" onChanged={onRefresh} /> : templateSection === "clientStages" ? <StageLibraryPanel baseUrl={cloudflareApiUrl} scope="client" clients={tables.clients.map((client) => ({ id: client.id, name: client.name }))} onChanged={onRefresh} /> : <>
+      {templateSection === "stages" ? <StageLibraryPanel baseUrl={cloudflareApiUrl} scope="global" currentUserName={currentUserName} onChanged={onRefresh} /> : templateSection === "clientStages" ? <StageLibraryPanel baseUrl={cloudflareApiUrl} scope="client" clients={tables.clients.map((client) => ({ id: client.id, name: client.name }))} currentUserName={currentUserName} onChanged={onRefresh} /> : <>
 
       <section className="list-panel">
         <div className="panel-heading template-panel-heading">
@@ -5681,6 +5683,7 @@ function PromptBlockSettings({
   onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
 }) {
   const selectedPrompt = tables.prompts.find((prompt) => prompt.id === block.config.promptId) ?? null;
+  const sourcePrompt = tables.prompts.find((prompt) => prompt.id === block.config.sourcePromptId) ?? null;
   const [draftPromptText, setDraftPromptText] = useState(resolvePromptContent(block.config, selectedPrompt?.content));
   const [draftDescription, setDraftDescription] = useState(String(block.config.description ?? selectedPrompt?.short_description ?? ""));
   const [draftExpectedOutput, setDraftExpectedOutput] = useState(String(block.config.expectedOutput ?? ""));
@@ -5711,6 +5714,7 @@ function PromptBlockSettings({
       title: prompt.title,
       config: {
         promptId: prompt.id,
+        sourcePromptId: prompt.id,
         contentSnapshot: prompt.content,
         toolId: prompt.ai_tool_id ?? "",
         description: prompt.short_description ?? draftDescription,
@@ -5731,6 +5735,7 @@ function PromptBlockSettings({
     onUpdate({
       config: {
         promptId: null,
+        sourcePromptId: block.config.sourcePromptId ?? selectedPrompt?.id ?? null,
         contentSnapshot: resolvePromptContent(block.config, selectedPrompt?.content),
         description: draftDescription,
         expectedOutput: draftExpectedOutput,
@@ -5753,6 +5758,7 @@ function PromptBlockSettings({
       title: created.title,
       config: {
         promptId: created.id,
+        sourcePromptId: created.id,
         contentSnapshot: created.content,
         toolId: created.ai_tool_id ?? "",
         description: created.short_description ?? draftDescription,
@@ -5782,6 +5788,19 @@ function PromptBlockSettings({
         emptyLabel="Prompt avulso / nao vinculado"
       />
       {selectedPrompt && <div className="prompt-library-link-note"><span>Este texto acompanha automaticamente as atualizações da biblioteca.</span><button className="secondary-button" type="button" onClick={unlinkPrompt}>Desvincular para personalizar</button></div>}
+      {!selectedPrompt && sourcePrompt && <div className="prompt-library-link-note"><span>Personalizado a partir de {sourcePrompt.title}. Alterações da biblioteca não são aplicadas enquanto estiver desvinculado.</span><button className="secondary-button" type="button" onClick={() => linkPrompt(sourcePrompt.id)}>Restaurar vínculo</button></div>}
+      <section className="prompt-condition-config" aria-label="Fontes do contexto automático">
+        <div className="prompt-condition-heading"><strong>Contexto automático</strong><span>Defina o que acompanha a cópia deste prompt.</span></div>
+        {([
+          ["projectNotes", "Observações do projeto"],
+          ["projectContexts", "Contextos vinculados ao projeto"],
+          ["projectLinks", "Materiais e links do projeto"],
+          ["summary", "Sumário consolidado"],
+        ] as const).map(([key, label]) => <label className="check-item-row compact" key={key}>
+          <input type="checkbox" checked={key === "projectNotes" ? block.config.contextSources?.[key] !== false : Boolean(block.config.contextSources?.[key])} onChange={(event) => onUpdate({ config: { contextSources: { ...(block.config.contextSources ?? {}), [key]: event.target.checked } } })} />
+          <span className="check-item-control">{(key === "projectNotes" ? block.config.contextSources?.[key] !== false : Boolean(block.config.contextSources?.[key])) && <Check size={16} />}</span><span>{label}</span>
+        </label>)}
+      </section>
       <label className="field prompt-content-config">
         <span>Orientacao breve</span>
         <input value={draftDescription} placeholder="Ex.: envie este prompt junto com o projeto consolidado" onChange={(event) => setDraftDescription(event.target.value)} onBlur={savePromptDraft} />
@@ -5841,7 +5860,14 @@ function PromptExecutionBlock({ block, value, tables, stepId, currentUser, owner
   const projectType = tables.project_types.find((item) => item.id === project.project_type_id)?.name ?? null;
   const latestSummary = tables.project_summaries.filter((summary) => summary.project_id === project.id && summary.consolidated_text).sort((left, right) => right.version_number - left.version_number)[0] ?? null;
   const responsibleName = getResponsibleName(project, tables.app_users);
-  const promptText = interpolateJourneyPrompt(rawPromptText, { projectName: project.name, company: project.company, projectType, stepName: selectedStep.name, responsible: responsibleName, context: project.notes, summary: latestSummary?.consolidated_text ?? null }).trim();
+  const contextSources = (block.config.contextSources && typeof block.config.contextSources === "object" ? block.config.contextSources : {}) as { projectNotes?: boolean; projectContexts?: boolean; projectLinks?: boolean; summary?: boolean };
+  const projectStepIds = new Set(tables.project_steps.filter((item) => item.project_id === project.id).map((item) => item.id));
+  const contextSections = [
+    contextSources.projectNotes !== false && project.notes ? `OBSERVACOES DO PROJETO:\n${project.notes}` : "",
+    contextSources.projectContexts && tables.project_step_contexts.filter((item) => projectStepIds.has(item.project_step_id) && item.status !== "arquivado").map((item) => `CONTEXTO - ${item.title}:\n${item.content}`).join("\n\n"),
+    contextSources.projectLinks && tables.project_step_links.filter((item) => projectStepIds.has(item.project_step_id)).map((item) => `MATERIAL - ${item.title}: ${item.url}${item.notes ? ` (${item.notes})` : ""}`).join("\n"),
+  ].filter(Boolean).join("\n\n");
+  const promptText = interpolateJourneyPrompt(rawPromptText, { projectName: project.name, company: project.company, projectType, stepName: selectedStep.name, responsible: responsibleName, context: contextSections, summary: contextSources.summary === false ? null : latestSummary?.consolidated_text ?? null }).trim();
   const expectedOutput = String(block.config.expectedOutput ?? "").trim();
   const copyCount = Number(runtimeValue.copyCount ?? 0);
   const isApplied = Boolean(runtimeValue.applied || runtimeValue.forceCompleted);

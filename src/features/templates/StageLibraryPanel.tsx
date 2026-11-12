@@ -9,6 +9,7 @@ export type StageLibraryItem = {
   status: "active" | "archived";
   currentVersion: number;
   usageCount: number;
+  projectUsageCount: number;
   clientId: string | null;
   clientName: string | null;
   templateUses: Array<{ templateId: string; templateName: string; templateStepId: string; clientId: string | null; clientName: string | null }>;
@@ -19,6 +20,7 @@ type StageLibraryProps = {
   baseUrl: string;
   clients?: Array<{ id: string; name: string }>;
   scope?: "global" | "client";
+  currentUserName?: string | null;
   onChanged?: () => Promise<void>;
 };
 
@@ -68,7 +70,7 @@ function blockPresentation(type: string) {
   return values[type] ?? { label: type, Icon: Layers3 };
 }
 
-export function StageLibraryPanel({ baseUrl, clients = [], scope = "global", onChanged }: StageLibraryProps) {
+export function StageLibraryPanel({ baseUrl, clients = [], scope = "global", currentUserName = null, onChanged }: StageLibraryProps) {
   const [items, setItems] = useState<StageLibraryItem[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [draft, setDraft] = useState<StageLibraryItem | null>(null);
@@ -121,7 +123,7 @@ export function StageLibraryPanel({ baseUrl, clients = [], scope = "global", onC
     try {
       const clientId = scope === "client" ? clientFilter || clients[0]?.id || null : null;
       if (scope === "client" && !clientId) throw new Error("Selecione o cliente antes de criar uma etapa exclusiva.");
-      const created = await stageApi<StageLibraryItem>(baseUrl, "", { method: "POST", body: JSON.stringify({ name: "Nova etapa", clientId }) });
+      const created = await stageApi<StageLibraryItem>(baseUrl, "", { method: "POST", body: JSON.stringify({ name: "Nova etapa", clientId, createdBy: currentUserName }) });
       await load(created.id); setMessage("Etapa criada. Configure os blocos e salve a primeira revisao.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Falha ao criar etapa."); setBusy(false); }
   }
@@ -130,9 +132,9 @@ export function StageLibraryPanel({ baseUrl, clients = [], scope = "global", onC
     if (!draft) return;
     setBusy(true); setError(""); setMessage("");
     try {
-      const updated = await stageApi<StageLibraryItem & { updatedTemplates: number }>(baseUrl, `/${encodeURIComponent(draft.id)}`, { method: "PUT", body: JSON.stringify({ expectedVersion: draft.currentVersion, name: draft.name, description: draft.description, clientId: scope === "client" ? draft.clientId : null, document: draft.document }) });
+      const updated = await stageApi<StageLibraryItem & { updatedTemplates: number; updatedProjects: number; reviewRequired: number }>(baseUrl, `/${encodeURIComponent(draft.id)}`, { method: "PUT", body: JSON.stringify({ expectedVersion: draft.currentVersion, name: draft.name, description: draft.description, clientId: scope === "client" ? draft.clientId : null, document: draft.document, updatedBy: currentUserName }) });
       await load(updated.id); await onChanged?.();
-      setMessage(`Versao ${updated.currentVersion} salva. ${updated.updatedTemplates} template(s) vinculado(s) atualizado(s); projetos existentes foram preservados.`);
+      setMessage(`Versao ${updated.currentVersion} salva. ${updated.updatedTemplates} template(s) e ${updated.updatedProjects} projeto(s) vinculado(s) atualizados.${updated.reviewRequired ? ` ${updated.reviewRequired} item(ns) requer(em) revisão.` : ""}`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Falha ao salvar etapa."); setBusy(false); }
   }
 
@@ -173,7 +175,7 @@ export function StageLibraryPanel({ baseUrl, clients = [], scope = "global", onC
       {draft ? <>
         <header><div><span className="eyebrow">Etapa compartilhada · versao {draft.currentVersion}</span><h2>{stagePresentation(draft).title}</h2><p>Alteracoes salvas atualizam os templates vinculados, sem modificar projetos existentes.</p></div><div className="inline-actions"><button className="secondary-button" type="button" disabled={busy || draft.status === "archived"} onClick={() => void archive()}><Archive size={16} /> Arquivar</button><button className="primary-button" type="button" disabled={busy || !draft.name.trim() || draft.status === "archived"} onClick={() => void save()}>{busy ? <Loader2 className="spin" size={16} /> : <Save size={16} />} Salvar nova versao</button></div></header>
         {error && <p className="form-error" role="alert">{error}</p>}{message && <p className="template-editor-notice" role="status">{message}</p>}
-        <div className="stage-library-origin"><strong>Origem e uso</strong><span>{draft.clientName ? `Exclusiva de ${draft.clientName}` : "Etapa global"}</span>{draft.templateUses.map((use) => <span key={`${use.templateId}:${use.templateStepId}`}>{use.templateName}{use.clientName ? ` · ${use.clientName}` : ""}</span>)}</div>
+        <div className="stage-library-origin"><strong>Origem e uso</strong><span>{draft.clientName ? `Exclusiva de ${draft.clientName}` : "Etapa global"}</span><span>{draft.usageCount} template(s) e {draft.projectUsageCount} projeto(s) vinculados</span>{draft.templateUses.map((use) => <span key={`${use.templateId}:${use.templateStepId}`}>{use.templateName}{use.clientName ? ` · ${use.clientName}` : ""}</span>)}</div>
         <div className="stage-library-meta"><label className="field"><span>Nome da etapa</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label><label className="field"><span>Descricao</span><input value={draft.description ?? ""} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Objetivo, extensao e quando esta etapa deve ser usada" /></label>{scope === "client" && <label className="field"><span>Cliente exclusivo</span><select value={draft.clientId ?? ""} onChange={(event) => setDraft({ ...draft, clientId: event.target.value || null, clientName: clients.find((client) => client.id === event.target.value)?.name ?? null })}><option value="">Etapa global</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>}</div>
         <div className="stage-library-add"><select value={newBlockType} onChange={(event) => setNewBlockType(event.target.value)}><option value="long_text">Orientacao</option><option value="prompt">Prompt</option><option value="context">Contexto</option><option value="checklist">Checklist</option><option value="materials">Materiais</option><option value="file_upload">Arquivos</option></select><button className="secondary-button" type="button" onClick={() => { const next = block(newBlockType, draft.document.blocks.length + 1); updateBlocks([...draft.document.blocks, next]); setCollapsedBlockIds((current) => { const value = new Set(current); value.delete(next.id); return value; }); }}><Plus size={15} /> Adicionar bloco</button><span className="stage-library-view-actions"><button className="secondary-button compact" type="button" onClick={() => setCollapsedBlockIds(new Set())}>Abrir todos</button><button className="secondary-button compact" type="button" onClick={() => setCollapsedBlockIds(new Set(draft.document.blocks.map((item) => item.id)))}>Recolher todos</button><button className="secondary-button compact" type="button" onClick={saveInitialView}><PanelTop size={15} /> Salvar visual inicial</button></span></div>
         <div className="stage-library-blocks">{draft.document.blocks.map((item, index) => {

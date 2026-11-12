@@ -109,11 +109,18 @@ export type StepBlockConfig = {
   requireDescription?: boolean;
   keepVersions?: boolean;
   promptId?: string | null;
+  sourcePromptId?: string | null;
   toolId?: string | null;
   toolNameSnapshot?: string;
   contentSnapshot?: string;
   expectedOutput?: string;
   executionMode?: "manual" | "automatic";
+  contextSources?: {
+    projectNotes?: boolean;
+    projectContexts?: boolean;
+    projectLinks?: boolean;
+    summary?: boolean;
+  };
   applicationConditions?: Array<{ id: string; label: string; required?: boolean }>;
   saveResultToBlockKey?: string | null;
   allowPast?: boolean;

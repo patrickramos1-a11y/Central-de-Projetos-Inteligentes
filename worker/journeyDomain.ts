@@ -30,9 +30,45 @@ type StepDocument = {
   state: "draft" | "published" | "archived";
   versionNumber: number;
   revision: number;
+  source?: {
+    kind: "stage_library";
+    id: string;
+    version: number;
+    mode: "linked" | "customized";
+    updatedAt?: string;
+    updatedBy?: string | null;
+  };
   blocks: Block[];
   completionRules: Array<{ id: string; type: string; enabled: boolean; message?: string }>;
 };
+
+async function canonicalBindingReport(db: D1Database) {
+  const [links, documents] = await Promise.all([
+    db.prepare("select auto_update, last_sync_status, count(*) as total from project_stage_links group by auto_update, last_sync_status").all<{ auto_update: number; last_sync_status: string; total: number }>(),
+    db.prepare("select owner_type, owner_id, step_id, document_json from journey_step_documents where state in ('draft', 'published')").all<{ owner_type: string; owner_id: string; step_id: string; document_json: string }>(),
+  ]);
+  const report = {
+    generatedAt: new Date().toISOString(),
+    projectStageLinks: links.results ?? [],
+    prompts: { linked: 0, customized: 0, emptySnapshots: [] as Array<{ ownerType: string; ownerId: string; stepId: string; blockId: string; title: string }> },
+    stages: { linked: 0, customized: 0, reviewRequired: 0 },
+  };
+  for (const row of documents.results ?? []) {
+    let document: StepDocument & { source?: { mode?: string }; sync?: { status?: string } };
+    try { document = JSON.parse(row.document_json) as typeof document; } catch { continue; }
+    if (document.source?.mode === "linked") report.stages.linked += 1;
+    if (document.source?.mode === "customized") report.stages.customized += 1;
+    if (document.sync?.status === "review_required") report.stages.reviewRequired += 1;
+    for (const block of document.blocks ?? []) {
+      if (block.type !== "prompt") continue;
+      if (block.config?.promptId) report.prompts.linked += 1;
+      else report.prompts.customized += 1;
+      const snapshot = String(block.config?.contentSnapshot ?? "").trim();
+      if (!block.config?.promptId && snapshot.length < 40) report.prompts.emptySnapshots.push({ ownerType: row.owner_type, ownerId: row.owner_id, stepId: row.step_id, blockId: block.id, title: block.title });
+    }
+  }
+  return report;
+}
 
 const headers = {
   "access-control-allow-origin": "*",
@@ -47,6 +83,9 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
 
   if (resource === "admin" && id === "migrate-canonical" && request.method === "POST") {
     return json({ data: await migrateLegacyJourneyData(env.DB) });
+  }
+  if (resource === "admin" && id === "canonical-binding-report" && request.method === "GET") {
+    return json({ data: await canonicalBindingReport(env.DB) });
   }
 
   if (resource === "journey-rail-preferences" && isOwnerType(id) && action) {
@@ -197,7 +236,7 @@ async function saveRailPreference(db: D1Database, ownerType: "project" | "client
 async function handleGenericStepRequest(request: Request, env: Env, ownerType: OwnerType, stepId: string, action?: string, nested?: string, url?: URL) {
   const db = env.DB;
   if (request.method === "POST" && action === "initialize") {
-    const body = await request.json().catch(() => ({})) as { templateStepId?: string };
+    const body = await request.json().catch(() => ({})) as { templateStepId?: string; createdBy?: string };
     const existing = await getCurrentDocument(db, ownerType, stepId, false);
     if (existing) return json({ data: await genericPayload(db, ownerType, stepId, existing) });
     const step = await getStepRow(db, ownerType, stepId);
@@ -206,6 +245,10 @@ async function handleGenericStepRequest(request: Request, env: Env, ownerType: O
       ? await db.prepare("select * from journey_step_documents where owner_type = 'template' and step_id = ? and state = 'published' order by version_number desc limit 1").bind(body.templateStepId).first<Record<string, unknown>>()
       : null;
     const templateDocument = templateRow ? normalizeDocumentRow(templateRow).document : null;
+    const templateStageLink = ownerType === "project" && templateRow
+      ? await db.prepare("select stage_id, linked_version, auto_update from template_stage_links where template_step_id = ? and auto_update = 1 limit 1")
+        .bind(String(templateRow.step_id)).first<{ stage_id: string; linked_version: number; auto_update: number }>()
+      : null;
     let document = templateDocument
       ? createRuntimeDocumentFromTemplate(templateDocument, ownerType, step, stepId)
       : ownerType === "client"
@@ -214,7 +257,25 @@ async function handleGenericStepRequest(request: Request, env: Env, ownerType: O
     if (ownerType === "project" && templateDocument) {
       document = await materializeProjectSummaryTemplates(db, document, getOwnerId(ownerType, step));
     }
-    await insertDocument(db, document, getOwnerId(ownerType, step), null);
+    if (templateStageLink) {
+      document = {
+        ...document,
+        source: {
+          kind: "stage_library",
+          id: templateStageLink.stage_id,
+          version: Number(templateStageLink.linked_version),
+          mode: "linked",
+          updatedAt: new Date().toISOString(),
+          updatedBy: body.createdBy ?? null,
+        },
+      };
+    }
+    await insertDocument(db, document, getOwnerId(ownerType, step), body.createdBy ?? null);
+    if (templateStageLink) {
+      const now = new Date().toISOString();
+      await db.prepare("insert into project_stage_links (project_id, project_step_id, stage_id, linked_version, auto_update, last_sync_status, created_at, updated_at) values (?, ?, ?, ?, 1, 'synced', ?, ?) on conflict(project_id, project_step_id) do update set stage_id = excluded.stage_id, linked_version = excluded.linked_version, auto_update = 1, last_sync_status = 'synced', last_sync_error = null, updated_at = excluded.updated_at")
+        .bind(getOwnerId(ownerType, step), stepId, templateStageLink.stage_id, Number(templateStageLink.linked_version), now, now).run();
+    }
     if (templateRow) await copyTemplateFilesToRuntime(env, ownerType, String(templateRow.step_id), stepId, document.structureId, document.blocks);
     return json({ data: await genericPayload(db, ownerType, stepId, await getCurrentDocument(db, ownerType, stepId)) }, 201);
   }
