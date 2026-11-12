@@ -12,6 +12,7 @@ import "./styles/workspace.css";
 import "./styles/theme-cobalt.css";
 import "./styles/shell.css";
 import "./styles/deliveries.css";
+import "./styles/journey-v2.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

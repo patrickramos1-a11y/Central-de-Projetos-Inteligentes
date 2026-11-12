@@ -1,3 +1,4 @@
+import { isMaterialsComplete } from "../shared/materialsSlots";
 type Env = { DB: D1Database };
 
 type StructureRow = {
@@ -509,11 +510,7 @@ function isBlockComplete(block: StepBlock, value: unknown, fileRows: Array<Recor
     const summaryId = String(block.config.summaryId ?? "");
     return Boolean(runtime.completed) && runtime.summaryId === summaryId && validSummaryIds.has(summaryId);
   }
-  if (block.type === "materials") {
-    const fixedLinks = Array.isArray(block.config.links) ? block.config.links : [];
-    const runtimeLinks = typeof value === "object" && value && Array.isArray((value as { links?: unknown[] }).links) ? (value as { links: unknown[] }).links : [];
-    return [...fixedLinks, ...runtimeLinks].some((link) => typeof link === "object" && link !== null && String((link as { url?: unknown }).url ?? "").trim().length > 0);
-  }
+  if (block.type === "materials") return isMaterialsComplete(block.config, value);
   if (block.type === "context") return Array.isArray(block.config.contexts) ? block.config.contexts.length > 0 : !isEmpty(block.config.content);
   if (block.type === "prompt") {
     const runtime = typeof value === "object" && value ? value as { applied?: boolean; completed?: boolean } : {};

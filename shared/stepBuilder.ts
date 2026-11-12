@@ -1,3 +1,4 @@
+import { isMaterialsComplete } from "./materialsSlots";
 export const STEP_SCHEMA_VERSION = 1;
 
 export const STEP_BLOCK_TYPES = [
@@ -717,12 +718,7 @@ function isBlockComplete(block: StepBlock, value: unknown, files: StepFileRecord
   }
 
   if (block.type === "materials") {
-    const fixedLinks = Array.isArray(block.config.links) ? block.config.links : [];
-    const runtimeLinks = Array.isArray(asObject(value).links) ? asObject(value).links as unknown[] : [];
-    return [...fixedLinks, ...runtimeLinks].some((link) => {
-      const item = asObject(link);
-      return String(item.url ?? "").trim().length > 0;
-    });
+    return isMaterialsComplete(block.config, value);
   }
 
   if (block.type === "approval") {

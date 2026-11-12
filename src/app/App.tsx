@@ -6,6 +6,8 @@ import {
   Bot,
   CalendarCheck,
   Check,
+  ListOrdered,
+  MoreHorizontal,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -91,6 +93,8 @@ import { AppShell, CommandBar, JourneyContextBar, WorkCanvas } from "../componen
 import { AppSidebar, PageHeader } from "../features/shell/AppSidebar";
 import { GlobalSearch } from "../features/shell/GlobalSearch";
 import { DeliveriesView } from "../features/deliveries/DeliveriesView";
+import { ApplyTemplateDialog } from "../features/projects/ApplyTemplateDialog";
+import { MaterialsConfigEditor, MaterialsRuntime } from "../features/journey/MaterialsBlock";
 import { ProjectWorkspacePanel } from "../features/workspace/ProjectWorkspacePanel";
 import { ClientWorkspacesDialog } from "../features/workspace/ClientWorkspacesDialog";
 import { selectWorkspaceContextPrompts, WORKSPACE_STEP_ID, type ProjectWorkspace, type WorkspaceOverview } from "../features/workspace/workspaceModel";
@@ -674,6 +678,7 @@ export default function App() {
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [selectedClientStepId, setSelectedClientStepId] = useState<string | null>(null);
   const [stagePickerProjectId, setStagePickerProjectId] = useState<string | null>(null);
+  const [applyTemplateProjectId, setApplyTemplateProjectId] = useState<string | null>(null);
   const [liveJourneyPanel, setLiveJourneyPanel] = useState<JourneyMode>("execute");
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -2342,6 +2347,21 @@ export default function App() {
     return created.length === selections.length;
   }
 
+  async function applyTemplateToProject(projectId: string, templateId: string, selections: StageImportSelection[]) {
+    const project = tables.projects.find((item) => item.id === projectId);
+    const template = tables.journey_templates.find((item) => item.id === templateId);
+    const completed = await importProjectStages(projectId, selections);
+    if (project && !project.journey_template_id) {
+      await updateProject(projectId, {
+        journey_template_id: templateId,
+        ...(project.project_type_id ? {} : { project_type_id: template?.project_type_id ?? null }),
+        ...(project.project_modality_id || !template?.project_modality_id ? {} : { project_modality_id: template.project_modality_id }),
+      });
+    }
+    if (completed) setNotice(`Template "${template?.name ?? ""}" aplicado: ${selections.length} etapa(s) adicionada(s).`);
+    return completed;
+  }
+
   async function deleteProjectStep(stepId: string) {
     const orderedSteps = tables.project_steps.filter((step) => step.project_id === selectedProjectId).sort(byOrder);
     const index = orderedSteps.findIndex((step) => step.id === stepId);
@@ -2981,7 +3001,7 @@ export default function App() {
           <section className="journey-hero journey-context-bar"><button className="ghost-button" type="button" onClick={() => setView("projects")}><PanelLeft size={17} /> Projetos</button><div className="journey-context-copy"><span className="eyebrow">Ramos Jornadas</span><h1>{selectedProject.name}</h1><p>{selectedProject.company || "Projeto sem empresa definida"}</p></div></section>
           <section className="journey-layout block-journey-layout">
             <JourneyStepRail ownerType="project" ownerId={selectedProject.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "concluido" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "em_andamento" : "pendente", status_label: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "Organizado" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "Parcial" : "Não iniciado" }, ...projectSteps]} selectedStepId={WORKSPACE_STEP_ID} onSelectStep={setSelectedStepId} onAdd={() => setStagePickerProjectId(selectedProject.id)} />
-            <section className="work-surface block-work-surface"><ProjectWorkspacePanel key={selectedProject.id} baseUrl={cloudflareApiUrl} projectId={selectedProject.id} contextPrompts={selectWorkspaceContextPrompts(tables.prompts)} currentUser={currentUser} onChanged={onWorkspaceChanged} onOpenStep={setSelectedStepId} /></section>
+            <section className="work-surface block-work-surface"><ProjectWorkspacePanel key={selectedProject.id} baseUrl={cloudflareApiUrl} projectId={selectedProject.id} contextPrompts={selectWorkspaceContextPrompts(tables.prompts)} currentUser={currentUser} onChanged={onWorkspaceChanged} onOpenStep={setSelectedStepId} stepCount={tables.project_steps.filter((step) => step.project_id === selectedProject.id).length} templateName={tables.journey_templates.find((template) => template.id === selectedProject.journey_template_id)?.name ?? null} onApplyTemplate={() => setApplyTemplateProjectId(selectedProject.id)} /></section>
           </section>
         </>}
 
@@ -3020,6 +3040,7 @@ export default function App() {
             onDeleteContext={deleteProjectStepContext}
             onAddNextStep={addNextStep}
             onOpenStagePicker={() => setStagePickerProjectId(selectedProject.id)}
+            onApplyTemplate={() => setApplyTemplateProjectId(selectedProject.id)}
             onDeleteStep={deleteProjectStep}
             onSaveTemplate={saveProjectAsTemplate}
             currentUser={currentUser}
@@ -3080,6 +3101,7 @@ export default function App() {
             onTables={setTables}
           />
         )}
+        {applyTemplateProjectId && (() => { const project = tables.projects.find((item) => item.id === applyTemplateProjectId); return project ? <ApplyTemplateDialog baseUrl={cloudflareApiUrl} projectName={project.name} currentTemplateId={project.journey_template_id} existingStepNames={tables.project_steps.filter((step) => step.project_id === project.id).map((step) => step.name)} templates={tables.journey_templates} onClose={() => setApplyTemplateProjectId(null)} onApply={async (templateId, selections) => { const ok = await applyTemplateToProject(project.id, templateId, selections); if (ok) setApplyTemplateProjectId(null); return ok; }} /> : null; })()}
         {stagePickerProjectId && <ProjectStagePicker baseUrl={cloudflareApiUrl} project={tables.projects.find((project) => project.id === stagePickerProjectId) ?? null} onClose={() => setStagePickerProjectId(null)} onCreateBlank={async () => { await addNextStep(stagePickerProjectId, "Nova etapa"); setStagePickerProjectId(null); }} onImport={async (selections) => { const completed = await importProjectStages(stagePickerProjectId, selections); if (completed) setStagePickerProjectId(null); return completed; }} />}
       </main>
     </AppShell>
@@ -4766,6 +4788,7 @@ function JourneyView({
   onDeleteContext,
   onAddNextStep,
   onOpenStagePicker,
+  onApplyTemplate,
   onDeleteStep,
   onSaveTemplate,
   currentUser,
@@ -4812,6 +4835,7 @@ function JourneyView({
   onDeleteContext: (contextId: string) => void;
   onAddNextStep: (projectId: string, name: string) => void;
   onOpenStagePicker: () => void;
+  onApplyTemplate?: () => void;
   onDeleteStep: (stepId: string) => void;
   onSaveTemplate: (project: Project, request: ProjectTemplateSaveRequest) => Promise<boolean>;
   currentUser: AppUser | null;
@@ -5040,30 +5064,15 @@ function JourneyView({
         <section className="work-surface block-work-surface">
           <CommandBar mode={journeyMode}>
             <div className="journey-step-identity">
-              <span className="eyebrow">Etapa selecionada</span>
+              <span className="eyebrow">{journeyMode === "edit" ? "Personalizando estrutura" : "Etapa"}</span>
               {journeyMode === "edit" ? (
                 <InlineText defaultValue={selectedStep.name} className="inline-title" onSave={(value) => onUpdateStep(selectedStep.id, { name: value })} />
               ) : (
                 <strong className="journey-step-title">{selectedStep.name}</strong>
               )}
             </div>
-            <div className="journey-mode-switch" role="group" aria-label="Modo da jornada">
-              <button className={journeyMode === "execute" ? "active" : ""} type="button" onClick={() => switchJourneyMode("execute")}><CheckCircle2 size={15} /> Executar</button>
-              <button className={journeyMode === "edit" ? "active" : ""} type="button" onClick={() => switchJourneyMode("edit")}><Pencil size={15} /> Editar estrutura</button>
-            </div>
-            <div className="journey-block-view-actions" role="group" aria-label="Visibilidade dos blocos">
-              <button className="secondary-button" type="button" onClick={() => updatePresentation(() => new Set())} title="Abrir todos os blocos desta etapa"><ChevronDown size={16} /> Abrir todos</button>
-              <button className="secondary-button" type="button" onClick={() => updatePresentation(() => collapseAllBlockIds(blocks.map((block) => block.id)))} title="Recolher todos os blocos desta etapa"><ChevronUp size={16} /> Recolher todos</button>
-              <button className="ghost-button" type="button" onClick={() => updatePresentation(() => new Set(), true)} title="Restaurar o visual padrão e abrir todos os blocos"><RefreshCw size={16} /> Restaurar</button>
-            </div>
-            <button className={`secondary-button ${selectedStep.is_not_applicable ? "is-not-applicable" : ""}`} type="button" onClick={() => onUpdateStep(selectedStep.id, { is_not_applicable: !selectedStep.is_not_applicable })}>{selectedStep.is_not_applicable ? <RefreshCw size={16} /> : <X size={16} />}{selectedStep.is_not_applicable ? " Aplicar etapa" : " Não se aplica"}</button>
-            <button className="secondary-button" type="button" disabled={Boolean(selectedStep.is_not_applicable) || !completion} title={selectedStep.is_not_applicable ? "Esta etapa foi marcada como não aplicavel" : completion?.canComplete ? "Concluir etapa" : "Concluir os blocos pendentes e finalizar a etapa"} onClick={() => void completeCurrentStep()}><CheckCircle2 size={17} /> Concluir</button>
-            {journeyMode === "edit" && (
-              <>
-                <form className="quick-step-form" onSubmit={(event) => { event.preventDefault(); onAddNextStep(project.id, newStepName || "Nova etapa"); setNewStepName(""); }}>
-                  <input value={newStepName} onChange={(event) => setNewStepName(event.target.value)} placeholder="Nova etapa" />
-                  <button className="secondary-button" type="submit"><Plus size={16} /> Adicionar etapa</button>
-                </form>
+            {journeyMode === "edit" ? (
+              <div className="rj-step-actions">
                 <div className="block-add-wrap">
                   <button className="primary-button" type="button" onClick={() => setIsAddMenuOpen((value) => !value)}><Plus size={17} /> Adicionar bloco</button>
                   {isAddMenuOpen && <BlockTypeMenu onSelect={addBlock} />}
@@ -5071,11 +5080,35 @@ function JourneyView({
                 <button className="secondary-button" type="button" onClick={() => {
                   setTemplatePresentationDefaults((current) => ({ ...current, [selectedStep.id]: [...collapsedBlockIds] }));
                   window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: "Visual inicial desta etapa será salvo com o template." } }));
-                }}><PanelTop size={17} /> Salvar visual inicial</button>
-                <button className="secondary-button" type="button" onClick={openTemplateSave}><Save size={17} /> Salvar template</button>
-              </>
+                }}><PanelTop size={16} /> Salvar visual inicial</button>
+                <button className="secondary-button" type="button" onClick={openTemplateSave}><Save size={16} /> Salvar como template</button>
+                <button className="primary-button" type="button" onClick={() => switchJourneyMode("execute")}><Check size={16} /> Concluir personalização</button>
+              </div>
+            ) : (
+              <div className="rj-step-actions">
+                <button className={`secondary-button ${selectedStep.is_not_applicable ? "is-not-applicable" : ""}`} type="button" onClick={() => onUpdateStep(selectedStep.id, { is_not_applicable: !selectedStep.is_not_applicable })}>{selectedStep.is_not_applicable ? <RefreshCw size={16} /> : <X size={16} />}{selectedStep.is_not_applicable ? " Voltar a aplicar" : " Não se aplica"}</button>
+                <button className="primary-button" type="button" disabled={Boolean(selectedStep.is_not_applicable) || !completion} title={selectedStep.is_not_applicable ? "Esta etapa foi marcada como não aplicável" : completion?.canComplete ? "Concluir etapa" : "Concluir os blocos pendentes e finalizar a etapa"} onClick={() => void completeCurrentStep()}><CheckCircle2 size={17} /> Concluir etapa</button>
+                <StepMoreMenu
+                  groups={[
+                    [
+                      { label: "Abrir todos os blocos", icon: ChevronDown, onSelect: () => updatePresentation(() => new Set()) },
+                      { label: "Recolher todos os blocos", icon: ChevronUp, onSelect: () => updatePresentation(() => collapseAllBlockIds(blocks.map((block) => block.id))) },
+                      { label: "Restaurar visual padrão", icon: RefreshCw, onSelect: () => updatePresentation(() => new Set(), true) },
+                    ],
+                    [
+                      { label: "Adicionar etapa", icon: Plus, onSelect: onOpenStagePicker },
+                      ...(onApplyTemplate ? [{ label: "Aplicar template", icon: Layers3, onSelect: onApplyTemplate }] : []),
+                      { label: "Organizar etapas", icon: ListOrdered, onSelect: () => setIsStepManagerOpen(true) },
+                    ],
+                    [
+                      { label: "Personalizar estrutura desta etapa", hint: "Avançado: muda só este projeto. Para todos, edite em Templates.", icon: Pencil, onSelect: () => switchJourneyMode("edit") },
+                    ],
+                  ]}
+                />
+              </div>
             )}
           </CommandBar>
+          {journeyMode === "edit" && <div className="rj-edit-banner" role="status"><Pencil size={16} /><span>Você está personalizando a estrutura <strong>só deste projeto</strong>. Para mudar a etapa em todos os projetos, edite em <strong>Templates</strong>.</span></div>}
           <div className="step-auto-status">
             <StatusBadge tone={selectedStep.is_not_applicable ? "pending" : statusTone(completion?.status ?? selectedStep.status)}>{selectedStep.is_not_applicable ? "Não se aplica" : formatStepStatus(completion?.status ?? selectedStep.status)}</StatusBadge>
             <span>{completion ? `${completion.completedBlocks}/${completion.totalBlocks} blocos completos` : "Carregando blocos"}</span>
@@ -5095,7 +5128,7 @@ function JourneyView({
               {journeyMode === "edit" ? (
                 <button className="primary-button" onClick={() => setIsAddMenuOpen(true)}><Plus size={17} /> Adicionar primeiro bloco</button>
               ) : (
-                <button className="secondary-button" onClick={() => switchJourneyMode("edit")}><Pencil size={17} /> Editar estrutura</button>
+                <button className="secondary-button" onClick={() => switchJourneyMode("edit")}><Pencil size={17} /> Personalizar esta etapa</button>
               )}
             </div>
           )}
@@ -5519,7 +5552,7 @@ function BlockBody({
   }
 
   if (block.type === "materials") {
-    return <MaterialsBlock block={block} value={value} isStructureEditing={mode === "edit"} onUpdate={onUpdate} onSaveValue={onSaveValue} />;
+    return <MaterialsBlock block={block} value={value} isStructureEditing={mode === "edit"} currentUserName={currentUser?.name ?? null} onUpdate={onUpdate} onSaveValue={onSaveValue} />;
   }
 
   if (block.type === "project_summary") {
@@ -6714,33 +6747,9 @@ function ChecklistBlock({ block, value, isStructureEditing, onSaveValue, onUpdat
   );
 }
 
-function MaterialsBlock({ block, value, isStructureEditing, onUpdate, onSaveValue }: { block: StepBuilderBlock; value: any; isStructureEditing: boolean; onUpdate: (patch: Partial<StepBuilderBlock>) => void; onSaveValue: (value: unknown) => void }) {
-  const [title, setTitle] = useState("");
-  const [url, setUrl] = useState("");
-  const templateLinks = Array.isArray(block.config.links) ? block.config.links as Array<any> : [];
-  const runtimeLinks = Array.isArray(value?.links) ? value.links as Array<any> : [];
-  const links = isStructureEditing ? templateLinks : [...templateLinks, ...runtimeLinks];
-  const add = () => {
-    if (!title.trim() || !url.trim()) return;
-    const link = { id: crypto.randomUUID(), title: title.trim(), url: url.trim() };
-    if (isStructureEditing) onUpdate({ config: { links: [...templateLinks, link] } });
-    else onSaveValue({ ...(value && typeof value === "object" ? value : {}), links: [...runtimeLinks, link] });
-    setTitle("");
-    setUrl("");
-  };
-
-  const remove = (linkId: string) => {
-    if (isStructureEditing) onUpdate({ config: { links: templateLinks.filter((item) => item.id !== linkId) } });
-    else onSaveValue({ ...(value && typeof value === "object" ? value : {}), links: runtimeLinks.filter((item) => item.id !== linkId) });
-  };
-
-  return (
-    <div className="materials-block-body">
-      {templateLinks.length > 0 && <div className="materials-group"><span className="materials-group-label">Links fixos do template</span>{templateLinks.map((link) => <div className="material-row" key={link.id}><a href={link.url} target="_blank" rel="noreferrer">{link.title}</a><button className="icon-button" type="button" title="Copiar link" onClick={() => void copyToClipboard(String(link.url), "Link")}><Copy size={13} /></button>{isStructureEditing && <button className="icon-button danger" type="button" title="Excluir link do template" onClick={() => remove(link.id)}><Trash2 size={13} /></button>}</div>)}</div>}
-      {!isStructureEditing && runtimeLinks.length > 0 && <div className="materials-group"><span className="materials-group-label">Links deste projeto</span>{runtimeLinks.map((link) => <div className="material-row" key={link.id}><a href={link.url} target="_blank" rel="noreferrer">{link.title}</a><button className="icon-button" type="button" title="Copiar link" onClick={() => void copyToClipboard(String(link.url), "Link")}><Copy size={13} /></button><button className="icon-button danger" type="button" title="Excluir link do projeto" onClick={() => remove(link.id)}><Trash2 size={13} /></button></div>)}</div>}
-      <div className="inline-form materials-runtime-form"><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Nome do link" /><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://" /><button className="secondary-button" type="button" onClick={add}><Plus size={15} /> {isStructureEditing ? "Salvar no template" : "Adicionar ao projeto"}</button></div>
-    </div>
-  );
+function MaterialsBlock({ block, value, isStructureEditing, currentUserName, onUpdate, onSaveValue }: { block: StepBuilderBlock; value: any; isStructureEditing: boolean; currentUserName: string | null; onUpdate: (patch: Partial<StepBuilderBlock>) => void; onSaveValue: (value: unknown) => void }) {
+  if (isStructureEditing) return <MaterialsConfigEditor config={block.config} onChange={(patch) => onUpdate({ config: { ...block.config, ...patch } })} />;
+  return <MaterialsRuntime config={block.config} value={value} currentUserName={currentUserName} onSaveValue={onSaveValue} />;
 }
 
 function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue, clientId, stepId, ownerType }: { block: StepBuilderBlock; value: any; isStructureEditing: boolean; onUpdate: (patch: Partial<StepBuilderBlock>) => void; onSaveValue: (value: unknown) => void | Promise<void>; clientId: string | null; stepId: string; ownerType: "project" | "client" }) {
@@ -9163,5 +9172,38 @@ function getDefaultClientTemplate(templates: JourneyTemplate[]) {
   return (
     templates.find((template) => template.context === "cliente" && template.name.toLowerCase().includes("integra")) ??
     templates.find((template) => template.context === "cliente")
+  );
+}
+
+type StepMenuItem = { label: string; hint?: string; icon: typeof Plus; onSelect: () => void };
+
+function StepMoreMenu({ groups }: { groups: StepMenuItem[][] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent ? event.key === "Escape" : !ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", close); };
+  }, [open]);
+  return (
+    <div className="rj-more" ref={ref}>
+      <button className="secondary-button rj-more-trigger" type="button" aria-haspopup="menu" aria-expanded={open} title="Mais ações" onClick={() => setOpen((value) => !value)}><MoreHorizontal size={18} /></button>
+      {open && (
+        <div className="rj-more-menu" role="menu">
+          {groups.filter((group) => group.length).map((group, index) => (
+            <div className="rj-more-group" key={index}>
+              {group.map((item) => {
+                const Icon = item.icon;
+                return <button key={item.label} type="button" role="menuitem" onClick={() => { setOpen(false); item.onSelect(); }}><Icon size={16} /><span><strong>{item.label}</strong>{item.hint && <small>{item.hint}</small>}</span></button>;
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

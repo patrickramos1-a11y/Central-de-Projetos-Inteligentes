@@ -1,3 +1,4 @@
+import { isMaterialsComplete, materialsPendingMessage } from "../shared/materialsSlots";
 import { clientContextList, clientContextReconciliation, contextSnapshots, createClientContext, currentContextVersion, getClientContext, prepareProjectContextSave, updateClientContext } from "./clientContexts";
 import { createEmptyProjectTemplate, duplicateProjectTemplate, getTemplateEditor, publishTemplateDraft, removeTemplateDraftFile, saveTemplateDraft, stageProjectModelFiles, uploadTemplateDraftFile } from "./templateEditor";
 import { sanitizeModelConfig, type TemplateSnapshot } from "../src/features/templates/templateModel";
@@ -1369,15 +1370,11 @@ async function calculateRuntimeCompletion(db: D1Database, ownerType: OwnerType, 
     }
     else if (block.type === "context") complete = Array.isArray(asRecord(value).contexts) && (asRecord(value).contexts as unknown[]).length > 0;
     else if (block.type === "file_upload") complete = files.filter((file) => String(file.block_id) === block.id).length >= Math.max(1, Number(block.config?.minFiles ?? 1));
-    else if (block.type === "materials") {
-      const fixedLinks = Array.isArray(block.config?.links) ? block.config.links as Array<Record<string, unknown>> : [];
-      const runtimeLinks = Array.isArray(asRecord(value).links) ? asRecord(value).links as Array<Record<string, unknown>> : [];
-      complete = [...fixedLinks, ...runtimeLinks].some((link) => String(link.url ?? "").trim().length > 0);
-    }
+    else if (block.type === "materials") complete = isMaterialsComplete(block.config, value);
     else if (block.type === "project_summary") complete = await isProjectSummaryComplete(db, ownerType, stepId, block, value);
     else complete = !isEmpty(value);
     if (complete) done += 1;
-    else reasons.push({ blockId: block.id, message: block.type === "project_summary" ? "Conclua todos os topicos selecionados do sumario." : `Conclua ${block.title}.` });
+    else reasons.push({ blockId: block.id, message: block.type === "project_summary" ? "Conclua todos os tópicos selecionados do sumário." : block.type === "materials" ? materialsPendingMessage(block.config, value, block.title) : `Conclua ${block.title}.` });
   }
   const progress = total === 0 ? 0 : Math.round((done / total) * 100);
   const status = reasons.length === 0 && total > 0 ? "concluido" : done > 0 || valueRows.results?.length ? "em_andamento" : "pendente";
