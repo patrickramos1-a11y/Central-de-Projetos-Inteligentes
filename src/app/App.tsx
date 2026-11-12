@@ -28,6 +28,7 @@ import {
   PanelLeft,
   PanelTop,
   Pencil,
+  PlayCircle,
   Plus,
   RefreshCw,
   Route,
@@ -585,7 +586,7 @@ const initialReadColumns: Partial<Record<keyof Tables, string>> = {
   journey_templates: "id,name,description,project_type_id,project_modality_id,context,status,created_at",
 };
 function activeSecondaryTables(view: ViewMode, activeConfig: ConfigModuleKey, selectedStepId?: string | null): Array<keyof Tables> {
-  if (view === "projectTemplates") return ["journey_steps", "step_prompts"];
+  if (view === "projectTemplates") return ["journey_steps", "step_prompts", "prompts"];
   if (view === "clients") return ["client_steps", "journey_steps"];
   if (view === "clientJourney") return ["client_steps", "client_step_checklist_items", "client_step_links", "prompts", "ai_tools", "prompt_blocks"];
   if (view === "settings") return [...new Set<keyof Tables>([activeConfig, "ai_tools", "prompt_categories", "project_types", "journey_steps"])];
@@ -2093,6 +2094,7 @@ export default function App() {
     }));
   }
 
+async function applyProjectSummary(summaryId: string): Promise<boolean> {    try {      const applied = await summaryApi.apply(summaryId) as ProjectSummary;      await loadAll();      setNotice(`Versão ${applied.version_number} do sumário aplicada à jornada. O progresso das outras versões foi mantido.`);      return true;    } catch (failure) {      setNotice(`Erro ao aplicar sumário: ${failure instanceof Error ? failure.message : "falha desconhecida"}`);      return false;    }  }
   async function consolidateProjectSummary(summaryId: string): Promise<ProjectSummary | null> {
     if (!supabase) {
       return null;
@@ -2104,7 +2106,7 @@ export default function App() {
       const consolidated = await summaryApi.consolidate(summaryId, currentUser?.name ?? null) as ProjectSummary;
       if (consolidated) {
         await loadAll();
-        setNotice(`Sumário consolidado como versão ${consolidated.version_number}, com numeracao atualizada.`);
+        setNotice(consolidated.status === "active" ? `Sumário consolidado e aplicado como versão ${consolidated.version_number}.` : `Versão ${consolidated.version_number} consolidada. Use "Aplicar sumário" para trabalhar nela.`);
         return consolidated;
       }
     } catch {
@@ -3053,6 +3055,7 @@ export default function App() {
             onMoveSummaryItemToNumber={moveProjectSummaryItemToNumber}
             onDeleteSummaryItem={deleteProjectSummaryItem}
             onConsolidateSummary={consolidateProjectSummary}
+            onApplySummary={applyProjectSummary}
             onSaveGeneratedPrompt={saveGeneratedPrompt}
             onArchiveGeneratedPrompt={archiveGeneratedPrompt}
             onCreatePromptFromBlock={createPromptFromBlock}
@@ -3702,7 +3705,7 @@ function ProjectTemplatesView({
 
       <div className="template-section-tabs" role="tablist" aria-label="Organização dos modelos"><button type="button" role="tab" aria-selected={templateSection === "templates"} onClick={() => setTemplateSection("templates")}><Route size={16} /> Templates</button><button type="button" role="tab" aria-selected={templateSection === "stages"} onClick={() => setTemplateSection("stages")}><Layers3 size={16} /> Etapas salvas</button><button type="button" role="tab" aria-selected={templateSection === "clientStages"} onClick={() => setTemplateSection("clientStages")}><Users size={16} /> Etapas dos clientes</button></div>
 
-      {templateSection === "stages" ? <StageLibraryPanel baseUrl={cloudflareApiUrl} scope="global" currentUserName={currentUserName} onChanged={onRefresh} /> : templateSection === "clientStages" ? <StageLibraryPanel baseUrl={cloudflareApiUrl} scope="client" clients={tables.clients.map((client) => ({ id: client.id, name: client.name }))} currentUserName={currentUserName} onChanged={onRefresh} /> : <>
+      {templateSection === "stages" ? <StageLibraryPanel baseUrl={cloudflareApiUrl} scope="global" currentUserName={currentUserName} onChanged={onRefresh} prompts={tables.prompts.filter((prompt) => prompt.status !== "arquivado").map((prompt) => ({ id: prompt.id, name: prompt.title, content: prompt.content }))} /> : templateSection === "clientStages" ? <StageLibraryPanel baseUrl={cloudflareApiUrl} scope="client" clients={tables.clients.map((client) => ({ id: client.id, name: client.name }))} currentUserName={currentUserName} onChanged={onRefresh} /> : <>
 
       <section className="list-panel">
         <div className="panel-heading template-panel-heading">
@@ -4801,6 +4804,7 @@ function JourneyView({
   onMoveSummaryItemToNumber,
   onDeleteSummaryItem,
   onConsolidateSummary,
+  onApplySummary,
   onSaveGeneratedPrompt,
   onArchiveGeneratedPrompt,
   onCreatePromptFromBlock,
@@ -4848,6 +4852,7 @@ function JourneyView({
   onMoveSummaryItemToNumber: (summaryId: string, itemId: string, topicNumber: string) => void;
   onDeleteSummaryItem: (summaryId: string, itemId: string) => void;
   onConsolidateSummary: (summaryId: string) => Promise<ProjectSummary | null>;
+  onApplySummary?: (summaryId: string) => Promise<boolean>;
   onSaveGeneratedPrompt: (payload: GeneratedPromptWrite) => Promise<boolean>;
   onArchiveGeneratedPrompt: (promptId: string, summaryItemId?: string) => void;
   onCreatePromptFromBlock: (payload: { title: string; content: string; ai_tool_id?: string | null; short_description?: string | null }) => Promise<Prompt | null>;
@@ -5196,6 +5201,7 @@ function JourneyView({
               onMoveItemToNumber={onMoveSummaryItemToNumber}
               onDeleteItem={onDeleteSummaryItem}
               onConsolidate={onConsolidateSummary}
+              onApply={onApplySummary}
             />
           </div>
         </div>
@@ -6761,7 +6767,8 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue,
   const [editingId, setEditingId] = useState<string | null>(null);
   const [autoDraftTitle, setAutoDraftTitle] = useState("");
   const [showImport, setShowImport] = useState(false);
-  const [library, setLibrary] = useState<Array<{ id: string; title: string; content: string; category: string | null; version: number }>>([]);
+  const [library, setLibrary] = useState<Array<{ id: string; title: string; content: string; category: string | null; version: number; created_at?: string }>>([]);
+  const autoAssociatedRef = useRef(false);
   const [libraryResults, setLibraryResults] = useState<typeof library>([]);
   const [librarySearch, setLibrarySearch] = useState("");
   const [libraryOffset, setLibraryOffset] = useState(0);
@@ -6772,7 +6779,7 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue,
   const [selectedLocalIds, setSelectedLocalIds] = useState<string[]>([]);
   const [contextError, setContextError] = useState("");
   const [saving, setSaving] = useState(false);
-  type ContextCard = { id: string; title: string; content: string; color?: string; pinned?: boolean; sourceContextId?: string; sourceVersion?: number };
+  type ContextCard = { id: string; title: string; content: string; color?: string; pinned?: boolean; sourceContextId?: string; sourceVersion?: number; createdAt?: string };
   const templateContexts = Array.isArray(block.config.contexts) ? block.config.contexts as ContextCard[] : [];
   const runtimeContexts = Array.isArray(value?.contexts) ? value.contexts as ContextCard[] : [];
   const legacyContent = String(block.config.content ?? "");
@@ -6870,6 +6877,7 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue,
       content: draftContent.trim(),
       color: draftColor,
       pinned: draftPinned,
+      createdAt: original?.createdAt ?? new Date().toISOString(),
     };
     const next = editingId && editingId !== "new"
       ? normalizedContexts.map((item) => item.id === editingId || (editingId === "legacy-context" && item.content === legacyContent) ? nextItem : item)
@@ -6891,7 +6899,7 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue,
   }
 
   async function importSelected() {
-    const additions = library.filter((item) => selectedLibraryIds.includes(item.id)).map((item) => ({ id: crypto.randomUUID(), title: item.title, content: item.content, color: "mint", pinned: isStructureEditing, sourceContextId: item.id, sourceVersion: item.version }));
+    const additions = library.filter((item) => selectedLibraryIds.includes(item.id)).map((item) => ({ id: crypto.randomUUID(), title: item.title, content: item.content, color: "mint", pinned: isStructureEditing, sourceContextId: item.id, sourceVersion: item.version, createdAt: item.created_at ?? new Date().toISOString() }));
     if (!additions.length) return;
     setSaving(true); setContextError("");
     try {
@@ -6899,6 +6907,27 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue,
       else await onSaveValue({ contexts: [...runtimeContexts, ...additions] });
       setSelectedLibraryIds([]); setShowImport(false);
     } catch (failure) { setContextError(failure instanceof Error ? failure.message : "Falha ao importar contextos."); }
+    finally { setSaving(false); }
+  }
+
+  useEffect(() => {
+    if (autoAssociatedRef.current || isStructureEditing || ownerType !== "project" || !clientId) return;
+    const localIds = runtimeContexts.filter((item) => !item.sourceContextId && item.title.trim() && item.content.trim()).map((item) => item.id);
+    if (!localIds.length) return;
+    autoAssociatedRef.current = true;
+    void associateContexts(localIds);
+  }, [clientId, isStructureEditing, ownerType, runtimeContexts.map((item) => `${item.id}:${item.sourceContextId ?? ""}`).join("|")]);
+
+  async function associateContexts(ids: string[]) {
+    setSaving(true); setContextError("");
+    try {
+      const response = await fetch(`${cloudflareApiUrl}/api/journey-steps/project/${encodeURIComponent(stepId)}/contexts/associate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ blockId: block.id, contextIds: ids }) });
+      const body = await response.json() as { data?: { data?: StepBuilderPayload } | StepBuilderPayload; error?: string };
+      const result = body.data && "data" in body.data ? body.data.data : body.data as StepBuilderPayload | undefined;
+      if (!response.ok || !result) throw new Error(body.error ?? "Falha ao vincular contextos ao cliente.");
+      const next = result.values.find((item) => item.block_id === block.id)?.value;
+      if (next) await onSaveValue(next);
+    } catch (failure) { setContextError(failure instanceof Error ? failure.message : "Falha ao vincular contextos ao cliente."); }
     finally { setSaving(false); }
   }
 
@@ -6922,11 +6951,23 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue,
     onUpdate({ config: { contexts: normalizedContexts.map((item) => item.id === itemId || (itemId === "legacy-context" && item.content === legacyContent) ? { ...item, ...patch } : item), content: "" } });
   }
 
-  function removeContext(itemId: string) {
+  async function removeContext(itemId: string) {
+    const removed = contexts.find((item) => item.id === itemId);
+    if (!removed) return;
+    if (!window.confirm(`Excluir o contexto "${removed.title}" deste ${isStructureEditing ? "template" : "projeto"}?`)) return;
     const next = contexts.filter((item) => item.id !== itemId);
     if (isStructureEditing) onUpdate({ config: { contexts: next, content: "" } });
-    else onSaveValue({ contexts: next.filter((item) => !item.pinned) });
+    else await onSaveValue({ contexts: next.filter((item) => !item.pinned) });
     if (editingId === itemId) resetForm();
+    if (!isStructureEditing && clientId && removed.sourceContextId && window.confirm(`Excluir "${removed.title}" também da biblioteca de contextos do cliente?\n\nOK: exclui do cliente (deixa de aparecer para novos projetos).\nCancelar: mantém no cliente.`)) {
+      try {
+        const response = await fetch(`${cloudflareApiUrl}/api/clients/${encodeURIComponent(clientId)}/contexts/${encodeURIComponent(removed.sourceContextId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "archived" }) });
+        if (!response.ok) { const body = await response.json() as { error?: string }; throw new Error(body.error ?? "Falha ao excluir do cliente."); }
+        setLibrary((current) => current.filter((item) => item.id !== removed.sourceContextId));
+        setLibraryResults((current) => current.filter((item) => item.id !== removed.sourceContextId));
+        window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: "Contexto excluído também da biblioteca do cliente." } }));
+      } catch (failure) { setContextError(failure instanceof Error ? failure.message : "Falha ao excluir do cliente."); }
+    }
   }
 
   return (
@@ -6937,8 +6978,8 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue,
         <button className="secondary-button" type="button" onClick={startNew}><Plus size={15} /> Adicionar contexto</button>
       </div>
       {contextError && <p className="form-error" role="alert">{contextError}</p>}
-      {ownerType === "project" && clientId && runtimeContexts.some((item) => !item.sourceContextId) && <div className="context-associate-review"><strong>Contextos locais para revisar</strong><p>Este projeto foi vinculado a um cliente. Selecione os textos que devem entrar na biblioteca; nada será movido automaticamente.</p>{runtimeContexts.filter((item) => !item.sourceContextId).map((item) => <label key={item.id}><input type="checkbox" checked={selectedLocalIds.includes(item.id)} onChange={(event) => setSelectedLocalIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /> {item.title}</label>)}<button className="secondary-button" type="button" disabled={saving || !selectedLocalIds.length} onClick={() => void associateSelected()}>Associar selecionados ({selectedLocalIds.length})</button></div>}
-      {showImport && <div className="context-import-panel"><label className="search-field"><Search size={15} /><input value={librarySearch} onChange={(event) => { setLibrarySearch(event.target.value); setLibraryOffset(0); }} placeholder="Buscar na biblioteca do cliente" /></label><div className="context-import-list">{libraryLoading && <p role="status"><Loader2 className="spin" size={15} /> Buscando contextos...</p>}{libraryResults.map((item) => <label key={item.id}><input type="checkbox" checked={selectedLibraryIds.includes(item.id)} onChange={(event) => setSelectedLibraryIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span><strong>{item.title}</strong></span></label>)}{libraryHasMore && <button className="secondary-button" type="button" disabled={libraryLoading} onClick={() => setLibraryOffset((current) => current + 100)}>Carregar mais</button>}</div><div className="inline-actions"><button className="secondary-button" type="button" onClick={() => setShowImport(false)}>Cancelar</button><button className="primary-button" type="button" disabled={saving || selectedLibraryIds.length === 0} onClick={() => void importSelected()}>Importar selecionados ({selectedLibraryIds.length})</button></div></div>}
+      {clientId && ownerType === "project" && !isStructureEditing && <p className="rj-context-hint">Contextos novos entram automaticamente na biblioteca do cliente.</p>}
+      {showImport && <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowImport(false)}><section className="rj-dialog rj-context-import" role="dialog" aria-modal="true" aria-label="Puxar contextos do cliente" onMouseDown={(event) => event.stopPropagation()}><header className="rj-dialog-head"><div><h2>Puxar contextos do cliente</h2><p>Selecione os contextos que entram neste {isStructureEditing ? "template" : "projeto"}.</p></div><button className="rj-icon-button" type="button" aria-label="Fechar" onClick={() => setShowImport(false)}><X size={18} /></button></header><div className="context-import-panel"><label className="search-field"><Search size={15} /><input value={librarySearch} onChange={(event) => { setLibrarySearch(event.target.value); setLibraryOffset(0); }} placeholder="Buscar na biblioteca do cliente" /></label><div className="context-import-list">{libraryLoading && <p role="status"><Loader2 className="spin" size={15} /> Buscando contextos...</p>}{libraryResults.map((item) => { const already = runtimeContexts.some((card) => card.sourceContextId === item.id); return <label key={item.id} className={already ? "is-disabled" : ""}><input type="checkbox" disabled={already} checked={selectedLibraryIds.includes(item.id)} onChange={(event) => setSelectedLibraryIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span><strong>{item.title}</strong>{already ? <small>Já está neste projeto</small> : item.content && <small>{item.content.slice(0, 140)}</small>}</span></label>; })}{!libraryLoading && !libraryResults.length && <p className="rj-muted">Nenhum contexto encontrado.</p>}{libraryHasMore && <button className="secondary-button" type="button" disabled={libraryLoading} onClick={() => setLibraryOffset((current) => current + 100)}>Carregar mais</button>}</div><div className="inline-actions"><button className="secondary-button" type="button" onClick={() => setShowImport(false)}>Cancelar</button><button className="primary-button" type="button" disabled={saving || selectedLibraryIds.length === 0} onClick={() => void importSelected()}>Importar selecionados ({selectedLibraryIds.length})</button></div></div></section></div>}
 
       {isWriting && (
         <div className="context-compose compact-context-compose">
@@ -6951,8 +6992,9 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue,
             {isStructureEditing && <label className="checkline"><input type="checkbox" checked={draftPinned} onChange={(event) => setDraftPinned(event.target.checked)} /> Fixar no template</label>}
           </div>
           <div className="inline-actions">
-            <button className="primary-button" type="button" disabled={saving} onClick={() => void saveContext()}><Save size={15} /> {editingId === "new" ? "Salvar contexto" : "Editar apenas aqui"}</button>
-            {!isStructureEditing && editingId !== "new" && runtimeContexts.some((item) => item.id === editingId && item.sourceContextId) && <button className="secondary-button" type="button" disabled={saving} onClick={() => void saveContext(true)}>Atualizar contexto do cliente</button>}
+            {!isStructureEditing && editingId !== "new" && clientId && runtimeContexts.some((item) => item.id === editingId && item.sourceContextId)
+              ? <><button className="primary-button" type="button" disabled={saving} onClick={() => void saveContext(true)}><Save size={15} /> Salvar (projeto e cliente)</button><button className="secondary-button" type="button" disabled={saving} onClick={() => void saveContext()}>Salvar só neste projeto</button></>
+              : <button className="primary-button" type="button" disabled={saving} onClick={() => void saveContext()}><Save size={15} /> Salvar contexto</button>}
             <button className="secondary-button" type="button" onClick={resetForm}>Cancelar</button>
           </div>
         </div>
@@ -6962,15 +7004,15 @@ function ContextBlock({ block, value, isStructureEditing, onUpdate, onSaveValue,
         {contexts.map((item) => (
           <article className={`context-mini-card compact-context-card ${item.color || "mint"} ${item.pinned ? "pinned" : ""}`} key={item.id} onClick={() => void copyToClipboard(item.content, "Contexto")} title="Clique para copiar o contexto">
             <strong>{item.title}</strong>
-            {item.sourceContextId && <small className="context-source-version">v{item.sourceVersion ?? 1}{library.find((source) => source.id === item.sourceContextId && source.version > Number(item.sourceVersion ?? 0)) ? " · Atualização disponível" : ""}</small>}
+            {(() => { const created = item.createdAt ?? library.find((source) => source.id === item.sourceContextId)?.created_at; const hasUpdate = library.some((source) => source.id === item.sourceContextId && source.version > Number(item.sourceVersion ?? 0)); return (created || hasUpdate) ? <small className="context-card-meta">{created ? new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" }).format(new Date(created)) : ""}{hasUpdate ? `${created ? " · " : ""}atualização disponível` : ""}</small> : null; })()}
             {item.pinned && <span className="context-pin-label" aria-label="Conteúdo do template" title="Conteúdo do template">T</span>}
             {isStructureEditing && <div className="context-mini-actions" onClick={(event) => event.stopPropagation()}>
               <button className={`icon-button ${item.pinned ? "active" : ""}`} type="button" title="Salvar no template" onClick={() => patchContext(item.id, { pinned: !item.pinned })}><Save size={14} /></button>
               <button className="icon-button" type="button" title="Copiar contexto" onClick={(event) => { event.stopPropagation(); void copyToClipboard(item.content, "Contexto"); }}><Copy size={14} /></button>
               <button className="icon-button" type="button" title="Editar contexto" onClick={() => startEdit(item)}><Pencil size={14} /></button>
-              <button className="icon-button danger" type="button" title="Excluir contexto" onClick={() => removeContext(item.id)}><Trash2 size={14} /></button>
+              <button className="icon-button danger" type="button" title="Excluir contexto" onClick={() => void removeContext(item.id)}><Trash2 size={14} /></button>
             </div>}
-            {!isStructureEditing && !item.pinned && <div className="context-mini-actions" onClick={(event) => event.stopPropagation()}><button className="icon-button" type="button" title="Editar apenas aqui" onClick={() => startEdit(item)}><Pencil size={14} /></button>{library.find((source) => source.id === item.sourceContextId && source.version > Number(item.sourceVersion ?? 0)) && <button className="icon-button" type="button" title="Atualizar copia da biblioteca" onClick={() => { const source = library.find((candidate) => candidate.id === item.sourceContextId); if (source && window.confirm("Atualizar esta copia para a versão atual da biblioteca?")) void onSaveValue({ contexts: runtimeContexts.map((candidate) => candidate.id === item.id ? { ...candidate, title: source.title, content: source.content, sourceVersion: source.version } : candidate) }); }}><RefreshCw size={14} /></button>}<button className="icon-button" type="button" title="Copiar contexto" onClick={() => void copyToClipboard(item.content, "Contexto")}><Copy size={14} /></button><button className="icon-button danger" type="button" title="Retirar deste projeto" onClick={() => removeContext(item.id)}><Trash2 size={14} /></button></div>}
+            {!isStructureEditing && !item.pinned && <div className="context-mini-actions" onClick={(event) => event.stopPropagation()}><button className="icon-button" type="button" title="Editar apenas aqui" onClick={() => startEdit(item)}><Pencil size={14} /></button>{library.find((source) => source.id === item.sourceContextId && source.version > Number(item.sourceVersion ?? 0)) && <button className="icon-button" type="button" title="Atualizar copia da biblioteca" onClick={() => { const source = library.find((candidate) => candidate.id === item.sourceContextId); if (source && window.confirm("Atualizar esta copia para a versão atual da biblioteca?")) void onSaveValue({ contexts: runtimeContexts.map((candidate) => candidate.id === item.id ? { ...candidate, title: source.title, content: source.content, sourceVersion: source.version } : candidate) }); }}><RefreshCw size={14} /></button>}<button className="icon-button" type="button" title="Copiar contexto" onClick={() => void copyToClipboard(item.content, "Contexto")}><Copy size={14} /></button><button className="icon-button danger" type="button" title="Excluir contexto" onClick={() => void removeContext(item.id)}><Trash2 size={14} /></button></div>}
           </article>
         ))}
       </div>
@@ -7006,6 +7048,7 @@ function ProjectSummaryPanel({
   onMoveItemToNumber,
   onDeleteItem,
   onConsolidate,
+  onApply,
 }: {
   project: Project;
   summaries: ProjectSummary[];
@@ -7020,8 +7063,10 @@ function ProjectSummaryPanel({
   onMoveItemToNumber: (summaryId: string, itemId: string, topicNumber: string) => void;
   onDeleteItem: (summaryId: string, itemId: string) => void;
   onConsolidate: (summaryId: string) => Promise<ProjectSummary | null>;
+  onApply?: (summaryId: string) => Promise<boolean>;
 }) {
   const [rawText, setRawText] = useState("");
+  const [applying, setApplying] = useState(false);
   const [summaryId, setSummaryId] = useState("");
   const [summarySearch, setSummarySearch] = useState("");
   const [newItemTitle, setNewItemTitle] = useState("");
@@ -7121,12 +7166,18 @@ function ProjectSummaryPanel({
 
   return (
     <section className="work-block summary-panel compact-summary-panel">
-      <div className="block-heading summary-heading">
-        <div>
+      <div className="block-heading summary-heading rj-summary-head">
+        <div className="rj-summary-title">
           <h2>Sumário inteligente</h2>
-          <span className="pending-summary">
-            {activeSummary ? `${selectedItems.length}/${summaryItems.length} topicos selecionados para esta versão` : "Importe ou cole o sumário do projeto"}
-          </span>
+          {activeSummary ? (
+            <div className="rj-summary-version">
+              <select aria-label="Versão do sumário" value={activeSummary.id} onChange={(event) => setSummaryId(event.target.value)}>
+                {sortedSummaries.map((summary) => <option key={summary.id} value={summary.id}>Versão {summary.version_number} · {summaryVersionLabel(summary)}</option>)}
+              </select>
+              <span className={`rj-version-pill is-${summaryVersionTone(activeSummary)}`}>{summaryVersionLabel(activeSummary)}</span>
+              <span className="rj-muted">{selectedItems.length}/{summaryItems.length} tópicos selecionados</span>
+            </div>
+          ) : <span className="pending-summary">Importe ou cole o sumário do projeto</span>}
         </div>
         {activeSummary && (
           <div className="summary-heading-actions">
@@ -7134,13 +7185,18 @@ function ProjectSummaryPanel({
               <Copy size={16} />
               Copiar consolidado
             </button>
-            <button className="secondary-button" onClick={() => void handleConsolidateActiveSummary()} disabled={selectedItems.length === 0}>
+            <button className="secondary-button" title="Valida a estrutura e cria uma nova versão consolidada, sem trocar a versão em uso" onClick={() => void handleConsolidateActiveSummary()} disabled={selectedItems.length === 0}>
               <CheckCircle2 size={16} />
-              Consolidar sumario
+              Consolidar sumário
             </button>
+            {onApply && <button className="primary-button" title={activeSummary.status === "active" ? "Esta é a versão em uso na jornada" : !activeSummary.consolidated_text ? "Consolide esta versão antes de aplicar" : "Usar esta versão na jornada (as outras versões guardam o progresso)"} disabled={applying || activeSummary.status === "active" || !activeSummary.consolidated_text} onClick={async () => { setApplying(true); try { await onApply(activeSummary.id); } finally { setApplying(false); } }}>
+              {applying ? <Loader2 className="spin" size={16} /> : <PlayCircle size={16} />}
+              {activeSummary.status === "active" ? "Em uso" : "Aplicar sumário"}
+            </button>}
           </div>
         )}
       </div>
+      <div className="rj-summary-tools">
 
       <details className="summary-import-drawer glass-panel">
         <summary>
@@ -7207,19 +7263,13 @@ function ProjectSummaryPanel({
           </div>
         </details>
       )}
+      </div>
 
       {activeSummary ? (
         <div className="summary-workspace summary-workspace-compact summary-editor-technical">
           <div className="summary-review-card summary-tree-card">
             <div className="summary-toolbar compact-tree-toolbar">
-              <SelectField
-                label="Versão"
-                value={activeSummary.id}
-                onChange={setSummaryId}
-                options={sortedSummaries.map((summary) => ({ value: summary.id, label: `Versão ${summary.version_number} - ${formatStatus(summary.status)}` }))}
-              />
               <div className="summary-meta">
-                <StatusPill status={activeSummary.status} />
                 <span>{formatSummaryParseStatus(activeSummary.parse_status)}</span>
               </div>
             </div>
@@ -7954,7 +8004,10 @@ function SettingsView({
           </select>
         </label>
       </PageHeader>
-      <ConfigCrud module={module} tables={tables} query={query} setQuery={setQuery} onRefresh={onRefresh} onNotice={onNotice} onTables={onTables} />
+      <div className="rj-settings-layout">
+        <nav className="rj-settings-nav" aria-label="Seções de configuração">{configModules.map((item) => { const Icon = item.icon; return <button key={item.key} type="button" className={item.key === activeConfig ? "is-active" : ""} onClick={() => setActiveConfig(item.key)}><Icon size={16} /><span>{item.label}</span></button>; })}</nav>
+        <div className="rj-settings-content"><ConfigCrud module={module} tables={tables} query={query} setQuery={setQuery} onRefresh={onRefresh} onNotice={onNotice} onTables={onTables} /></div>
+      </div>
     </>
   );
 }
@@ -9206,4 +9259,17 @@ function StepMoreMenu({ groups }: { groups: StepMenuItem[][] }) {
       )}
     </div>
   );
+}
+
+
+function summaryVersionLabel(summary: Pick<ProjectSummary, "status" | "consolidated_text">) {
+  if (summary.status === "active") return "Em uso";
+  if (summary.status === "archived") return "Arquivada";
+  return summary.consolidated_text ? "Consolidada" : "Rascunho";
+}
+
+function summaryVersionTone(summary: Pick<ProjectSummary, "status" | "consolidated_text">) {
+  if (summary.status === "active") return "active";
+  if (summary.status === "archived") return "archived";
+  return summary.consolidated_text ? "ready" : "draft";
 }

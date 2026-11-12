@@ -36,6 +36,15 @@ export function createSummaryApi(baseUrl: string) {
       return read<Record<string, unknown>>(response);
     },
 
+    async apply(summaryId: string) {
+      const response = await fetch(`${base}/api/summaries/${encodeURIComponent(summaryId)}/apply`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      return read<Record<string, unknown>>(response);
+    },
+
     async savePrompt(summaryId: string, input: SummaryPromptInput) {
       const response = await fetch(`${base}/api/summaries/${encodeURIComponent(summaryId)}/prompts`, {
         method: "POST",

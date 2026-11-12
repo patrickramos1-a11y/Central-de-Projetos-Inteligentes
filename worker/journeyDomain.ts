@@ -1,3 +1,4 @@
+import { applySummaryVersion } from "./summaryApply";
 import { isMaterialsComplete, materialsPendingMessage } from "../shared/materialsSlots";
 import { clientContextList, clientContextReconciliation, contextSnapshots, createClientContext, currentContextVersion, getClientContext, prepareProjectContextSave, updateClientContext } from "./clientContexts";
 import { createEmptyProjectTemplate, duplicateProjectTemplate, getTemplateEditor, publishTemplateDraft, removeTemplateDraftFile, saveTemplateDraft, stageProjectModelFiles, uploadTemplateDraftFile } from "./templateEditor";
@@ -196,6 +197,10 @@ export async function handleJourneyDomainRequest(request: Request, env: Env, par
     const ownerType: OwnerType = resource === "project-steps" ? "project" : "client";
     if (!body.blockId) return error("Informe o bloco de contexto.");
     return json({ data: await createRuntimeContext(env.DB, ownerType, id, body.blockId, body, body.createdBy ?? null) }, 201);
+  }
+
+  if (resource === "summaries" && id && action === "apply" && request.method === "POST") {
+    return json({ data: await applySummaryVersion(env.DB, id) });
   }
 
   if (resource === "summaries" && id && action === "consolidate" && request.method === "POST") {
@@ -1038,11 +1043,13 @@ async function consolidateSummary(db: D1Database, summaryId: string, createdBy: 
   const now = new Date().toISOString();
   const nextVersion = Number(summary.version_number ?? 0) + 1;
   const consolidatedText = normalized.map((item) => `${item.topic_number} ${item.title}`).join("\n");
+  const latest = await db.prepare("select max(version_number) as version from project_summaries where project_id = ?").bind(summary.project_id).first<{ version: number | null }>();
+  const versionNumber = Math.max(nextVersion, Number(latest?.version ?? 0) + 1);
+  const hasActive = await db.prepare("select 1 as found from project_summaries where project_id = ? and status = 'active' and consolidated_text is not null limit 1").bind(summary.project_id).first();
+  const status = hasActive ? "draft" : "active";
   const statements: D1PreparedStatement[] = [
-    db.prepare("update project_summaries set status = 'archived', archived_at = ?, updated_at = ? where project_id = ? and status = 'active'")
-      .bind(now, now, summary.project_id),
-    db.prepare("insert into project_summaries (id, project_id, raw_text, consolidated_text, version_number, status, parse_status, item_count, selected_item_count, prompt_config_json, created_by, created_at, updated_at, activated_at) values (?, ?, ?, ?, ?, 'active', 'reviewed', ?, ?, ?, ?, ?, ?, ?)")
-      .bind(nextId, summary.project_id, summary.raw_text ?? "", consolidatedText, nextVersion, normalized.length, normalized.length, summary.prompt_config_json ?? "{}", createdBy, now, now, now),
+    db.prepare("insert into project_summaries (id, project_id, raw_text, consolidated_text, version_number, status, parse_status, item_count, selected_item_count, prompt_config_json, created_by, created_at, updated_at, activated_at) values (?, ?, ?, ?, ?, ?, 'reviewed', ?, ?, ?, ?, ?, ?, ?)")
+      .bind(nextId, summary.project_id, summary.raw_text ?? "", consolidatedText, versionNumber, status, normalized.length, normalized.length, summary.prompt_config_json ?? "{}", createdBy, now, now, status === "active" ? now : null),
   ];
   for (const item of normalized) {
     statements.push(db.prepare("insert into project_summary_items (id, summary_id, project_id, parent_id, topic_number, title, level, sort_order, original_text, is_selected, status, notes, parse_confidence, parse_warning, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)")

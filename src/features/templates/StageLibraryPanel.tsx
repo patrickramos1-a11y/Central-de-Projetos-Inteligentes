@@ -1,6 +1,6 @@
-import { MaterialsConfigEditor } from "../journey/MaterialsBlock";
+import { BlockConfigEditor, BlockPreview, blockMeta, newTemplateBlock, type PromptOption } from "./BlockConfigEditor";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { Archive, ArrowDown, ArrowUp, Bot, BriefcaseBusiness, Building2, ChevronDown, ChevronRight, CircleGauge, ClipboardCheck, Cloud, Coffee, Compass, Database, FileStack, FileText, FolderTree, Globe2, Hammer, Image, KeyRound, Landmark, Layers3, LayoutTemplate, Lightbulb, Link, ListChecks, Loader2, Map, MessageSquareText, MessagesSquare, NotebookTabs, PackageCheck, PanelTop, Plus, Puzzle, Route, Save, ScanSearch, Search, ShieldCheck, Sparkles, Target, Trash2, Workflow } from "lucide-react";
+import { Archive, ArrowDown, ArrowUp, Copy, Bot, BriefcaseBusiness, Building2, ChevronDown, ChevronRight, CircleGauge, ClipboardCheck, Cloud, Coffee, Compass, Database, FileStack, FileText, FolderTree, Globe2, Hammer, Image, KeyRound, Landmark, Layers3, LayoutTemplate, Lightbulb, Link, ListChecks, Loader2, Map, MessageSquareText, MessagesSquare, NotebookTabs, PackageCheck, PanelTop, Plus, Puzzle, Route, Save, ScanSearch, Search, ShieldCheck, Sparkles, Target, Trash2, Workflow } from "lucide-react";
 import type { TemplateBlock } from "./templateModel";
 
 export type StageLibraryItem = {
@@ -23,6 +23,7 @@ type StageLibraryProps = {
   scope?: "global" | "client";
   currentUserName?: string | null;
   onChanged?: () => Promise<void>;
+  prompts?: PromptOption[];
 };
 
 async function stageApi<T>(baseUrl: string, path = "", init?: RequestInit): Promise<T> {
@@ -71,7 +72,7 @@ function blockPresentation(type: string) {
   return values[type] ?? { label: type, Icon: Layers3 };
 }
 
-export function StageLibraryPanel({ baseUrl, clients = [], scope = "global", currentUserName = null, onChanged }: StageLibraryProps) {
+export function StageLibraryPanel({ baseUrl, clients = [], scope = "global", currentUserName = null, onChanged, prompts = [] }: StageLibraryProps) {
   const [items, setItems] = useState<StageLibraryItem[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [draft, setDraft] = useState<StageLibraryItem | null>(null);
@@ -81,6 +82,9 @@ export function StageLibraryPanel({ baseUrl, clients = [], scope = "global", cur
   const [collapsedBlockIds, setCollapsedBlockIds] = useState<Set<string>>(new Set());
   const [newBlockType, setNewBlockType] = useState("long_text");
   const [busy, setBusy] = useState(true);
+  const [tab, setTab] = useState<"structure" | "preview" | "usage">("structure");
+  const [usageFilter, setUsageFilter] = useState<"all" | "used" | "unused" | "duplicates">("all");
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -164,36 +168,145 @@ export function StageLibraryPanel({ baseUrl, clients = [], scope = "global", cur
     setMessage("Visual inicial preparado. Salve uma nova versão para aplica-lo aos templates vinculados.");
   }
 
-  return <section className="stage-library-layout">
-    <aside className="stage-library-list">
-      <div className="stage-library-list-head"><label className="search-field"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar etapa, template ou origem" /></label>{scope === "client" && <select aria-label="Filtrar etapas por cliente" value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}><option value="">Todos os clientes</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select>}<button className="secondary-button compact" type="button" title="Nova etapa" onClick={() => void createStage()}><Plus size={17} /> Nova etapa</button></div>
-      <div className="stage-library-status-tabs" role="tablist" aria-label="Estado das etapas"><button type="button" role="tab" aria-selected={statusFilter === "active"} onClick={() => selectStatus("active")}>Ativas <span>{items.filter((item) => item.status === "active").length}</span></button><button type="button" role="tab" aria-selected={statusFilter === "archived"} onClick={() => selectStatus("archived")}>Arquivadas <span>{items.filter((item) => item.status === "archived").length}</span></button></div>
+  const original = items.find((item) => item.id === draft?.id) ?? null;
+  const dirty = Boolean(draft && original && JSON.stringify({ n: draft.name, d: draft.description ?? "", c: draft.clientId, b: draft.document.blocks }) !== JSON.stringify({ n: original.name, d: original.description ?? "", c: original.clientId, b: original.document.blocks }));
+  const normalizedName = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+  const duplicateNames = useMemo(() => {
+    const counts = new globalThis.Map<string, number>();
+    items.filter((item) => item.status === "active").forEach((item) => counts.set(normalizedName(item.name), (counts.get(normalizedName(item.name)) ?? 0) + 1));
+    return new Set([...counts].filter(([, count]) => count > 1).map(([name]) => name));
+  }, [items]);
+  const listed = visible.filter((item) => usageFilter === "all" || (usageFilter === "used" ? item.usageCount > 0 : usageFilter === "unused" ? item.usageCount === 0 : duplicateNames.has(normalizedName(item.name))));
+
+  function updateBlock(next: TemplateBlock) {
+    if (!draft) return;
+    updateBlocks(draft.document.blocks.map((candidate) => candidate.id === next.id ? next : candidate));
+  }
+
+  function addBlock(type: string) {
+    if (!draft) return;
+    const next = newTemplateBlock(type, draft.document.blocks.length + 1);
+    updateBlocks([...draft.document.blocks, next]);
+    setCollapsedBlockIds((current) => { const value = new Set(current); value.delete(next.id); return value; });
+  }
+
+  function duplicateBlock(index: number) {
+    if (!draft) return;
+    const item = draft.document.blocks[index];
+    const copy = { ...structuredClone(item), id: crypto.randomUUID(), title: `${item.title} (cópia)` };
+    const next = [...draft.document.blocks];
+    next.splice(index + 1, 0, copy);
+    updateBlocks(next);
+  }
+
+  return <section className="stage-library-layout rj-stage-library">
+    <aside className="stage-library-list rj-stage-list">
+      <div className="rj-stage-list-head">
+        <label className="rj-search-box"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar etapa ou template" /></label>
+        <button className="primary-button" type="button" onClick={() => void createStage()}><Plus size={16} /> Nova etapa</button>
+      </div>
+      {scope === "client" && <select aria-label="Filtrar etapas por cliente" value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}><option value="">Todos os clientes</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select>}
+      <div className="rj-chip-row" role="tablist" aria-label="Estado das etapas">
+        <button type="button" className={statusFilter === "active" ? "is-active" : ""} onClick={() => selectStatus("active")}>Ativas <span>{items.filter((item) => item.status === "active").length}</span></button>
+        <button type="button" className={statusFilter === "archived" ? "is-active" : ""} onClick={() => selectStatus("archived")}>Arquivadas <span>{items.filter((item) => item.status === "archived").length}</span></button>
+      </div>
+      {statusFilter === "active" && <div className="rj-chip-row is-small">
+        {([["all", "Todas"], ["used", "Em uso"], ["unused", "Sem uso"], ["duplicates", "Nomes repetidos"]] as const).map(([key, label]) => <button key={key} type="button" className={usageFilter === key ? "is-active" : ""} onClick={() => setUsageFilter(key)}>{label}</button>)}
+      </div>}
       {busy && !items.length && <p role="status"><Loader2 className="spin" size={16} /> Carregando...</p>}
-      <div className="stage-library-catalog">{visible.map((item, index) => { const presentation = stagePresentation(item, index); const Icon = presentation.Icon; return <button className={`stage-library-list-item ${selectedId === item.id ? "active" : ""}`} style={{ "--stage-hue": presentation.hue } as CSSProperties} type="button" key={item.id} onClick={() => selectStage(item)}><span className="stage-library-item-icon"><Icon size={18} /></span><span><strong>{presentation.title}</strong><small>v{item.currentVersion} · {item.document.blocks.length} bloco(s) · {item.usageCount} template(s)</small><small>{item.templateUses.length ? `Usada em: ${item.templateUses.map((use) => use.templateName).join(", ")}` : "Ainda não vinculada a template"}</small><p>{item.description || "Sem descrição. Abra para documentar o objetivo desta etapa."}</p></span>{item.status === "archived" && <em>Arquivada</em>}</button>; })}</div>
-      {!visible.length && !busy && <p className="workspace-empty">Nenhuma etapa encontrada.</p>}
+      <div className="rj-stage-items">{listed.map((item, index) => {
+        const presentation = stagePresentation(item, index);
+        const Icon = presentation.Icon;
+        const repeated = duplicateNames.has(normalizedName(item.name));
+        return <button className={`rj-stage-item ${selectedId === item.id ? "is-active" : ""}`} style={{ "--stage-hue": presentation.hue } as CSSProperties} type="button" key={item.id} onClick={() => selectStage(item)}>
+          <span className="stage-library-item-icon"><Icon size={17} /></span>
+          <span className="rj-stage-item-text"><strong>{presentation.title}</strong><small>{item.document.blocks.length} bloco(s) · {item.usageCount ? `${item.usageCount} template(s)` : "sem uso"}{item.projectUsageCount ? ` · ${item.projectUsageCount} projeto(s)` : ""}</small>{item.description && <small className="rj-stage-desc">{item.description}</small>}</span>
+          {repeated && <em className="rj-badge is-warning" title="Existe outra etapa ativa com o mesmo nome">repetida</em>}
+          {item.status === "archived" && <em className="rj-badge">arquivada</em>}
+        </button>;
+      })}</div>
+      {!listed.length && !busy && <p className="workspace-empty">Nenhuma etapa encontrada.</p>}
     </aside>
-    <main className="stage-library-editor">
+    <main className="stage-library-editor rj-stage-editor">
       {draft ? <>
-        <header><div><span className="eyebrow">Etapa compartilhada · versao {draft.currentVersion}</span><h2>{stagePresentation(draft).title}</h2><p>Alterações salvas atualizam os templates vinculados, sem modificar projetos existentes.</p></div><div className="inline-actions"><button className="secondary-button" type="button" disabled={busy || draft.status === "archived"} onClick={() => void archive()}><Archive size={16} /> Arquivar</button><button className="primary-button" type="button" disabled={busy || !draft.name.trim() || draft.status === "archived"} onClick={() => void save()}>{busy ? <Loader2 className="spin" size={16} /> : <Save size={16} />} Salvar nova versao</button></div></header>
+        <header className="rj-stage-head">
+          <div>
+            <span className="eyebrow">Etapa {draft.clientName ? `exclusiva de ${draft.clientName}` : "global"} · versão {draft.currentVersion}{dirty ? " · alterações não publicadas" : ""}</span>
+            <h2>{stagePresentation(draft).title}</h2>
+          </div>
+          <div className="inline-actions">
+            <button className="secondary-button" type="button" disabled={busy || draft.status === "archived"} onClick={() => void archive()}><Archive size={16} /> Arquivar</button>
+            {dirty && <button className="secondary-button" type="button" disabled={busy} onClick={() => original && selectStage(original)}>Descartar</button>}
+            <button className="primary-button" type="button" disabled={busy || !dirty || !draft.name.trim() || draft.status === "archived"} onClick={() => setConfirmOpen(true)}>{busy ? <Loader2 className="spin" size={16} /> : <Save size={16} />} Publicar versão {draft.currentVersion + 1}</button>
+          </div>
+        </header>
         {error && <p className="form-error" role="alert">{error}</p>}{message && <p className="template-editor-notice" role="status">{message}</p>}
-        <div className="stage-library-origin"><strong>Origem e uso</strong><span>{draft.clientName ? `Exclusiva de ${draft.clientName}` : "Etapa global"}</span><span>{draft.usageCount} template(s) e {draft.projectUsageCount} projeto(s) vinculados</span>{draft.templateUses.map((use) => <span key={`${use.templateId}:${use.templateStepId}`}>{use.templateName}{use.clientName ? ` · ${use.clientName}` : ""}</span>)}</div>
-        <div className="stage-library-meta"><label className="field"><span>Nome da etapa</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label><label className="field"><span>Descrição</span><input value={draft.description ?? ""} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Objetivo, extensao e quando esta etapa deve ser usada" /></label>{scope === "client" && <label className="field"><span>Cliente exclusivo</span><select value={draft.clientId ?? ""} onChange={(event) => setDraft({ ...draft, clientId: event.target.value || null, clientName: clients.find((client) => client.id === event.target.value)?.name ?? null })}><option value="">Etapa global</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>}</div>
-        <div className="stage-library-add"><select value={newBlockType} onChange={(event) => setNewBlockType(event.target.value)}><option value="long_text">Orientação</option><option value="prompt">Prompt</option><option value="context">Contexto</option><option value="checklist">Checklist</option><option value="materials">Materiais</option><option value="file_upload">Arquivos</option></select><button className="secondary-button" type="button" onClick={() => { const next = block(newBlockType, draft.document.blocks.length + 1); updateBlocks([...draft.document.blocks, next]); setCollapsedBlockIds((current) => { const value = new Set(current); value.delete(next.id); return value; }); }}><Plus size={15} /> Adicionar bloco</button><span className="stage-library-view-actions"><button className="secondary-button compact" type="button" onClick={() => setCollapsedBlockIds(new Set())}>Abrir todos</button><button className="secondary-button compact" type="button" onClick={() => setCollapsedBlockIds(new Set(draft.document.blocks.map((item) => item.id)))}>Recolher todos</button><button className="secondary-button compact" type="button" onClick={saveInitialView}><PanelTop size={15} /> Salvar visual inicial</button></span></div>
-        <div className="stage-library-blocks">{draft.document.blocks.map((item, index) => {
-          const collapsed = collapsedBlockIds.has(item.id);
-          const presentation = blockPresentation(item.type);
-          const BlockIcon = presentation.Icon;
-          return <article className={collapsed ? "is-collapsed" : ""} key={item.id}>
-            <div className="stage-library-block-order"><button className="icon-button" type="button" title="Mover para cima" disabled={index === 0} onClick={() => updateBlocks(move(draft.document.blocks, index, -1))}><ArrowUp size={14} /></button><button className="icon-button" type="button" title="Mover para baixo" disabled={index === draft.document.blocks.length - 1} onClick={() => updateBlocks(move(draft.document.blocks, index, 1))}><ArrowDown size={14} /></button></div>
-            <div className="stage-library-block-fields">
-              <button className="stage-library-block-summary" type="button" aria-expanded={!collapsed} onClick={() => toggleBlock(item.id)}><span className="stage-library-block-icon"><BlockIcon size={17} /></span><span><strong>{item.title || presentation.label}</strong><small>{presentation.label} · bloco {index + 1} de {draft.document.blocks.length}</small></span>{collapsed ? <ChevronRight size={17} /> : <ChevronDown size={17} />}</button>
-              {!collapsed && <div className="stage-library-block-body"><label className="field"><span>Título</span><input value={item.title} onChange={(event) => updateBlocks(draft.document.blocks.map((candidate) => candidate.id === item.id ? { ...candidate, title: event.target.value } : candidate))} /></label>{item.type === "materials" && <MaterialsConfigEditor config={item.config} onChange={(patch) => updateBlocks(draft.document.blocks.map((candidate) => candidate.id === item.id ? { ...candidate, config: { ...candidate.config, ...patch } } : candidate))} />}{["long_text", "prompt"].includes(item.type) && <label className="field full"><span>{item.type === "prompt" ? "Texto-modelo do prompt" : "Conteúdo"}</span><textarea rows={4} value={String(item.config[item.type === "prompt" ? "contentSnapshot" : "content"] ?? "")} onChange={(event) => { const key = item.type === "prompt" ? "contentSnapshot" : "content"; updateBlocks(draft.document.blocks.map((candidate) => candidate.id === item.id ? { ...candidate, config: { ...candidate.config, [key]: event.target.value } } : candidate)); }} /></label>}</div>}
-            </div>
-            <button className="icon-button danger" type="button" title="Remover bloco" onClick={() => updateBlocks(draft.document.blocks.filter((candidate) => candidate.id !== item.id))}><Trash2 size={15} /></button>
-          </article>;
-        })}</div>
-        {!draft.document.blocks.length && <div className="empty-state"><Layers3 size={28} /><strong>Etapa sem blocos</strong><span>Adicione os blocos que farao parte dos templates.</span></div>}
+        <div className="rj-tabs" role="tablist">
+          {([["structure", "Estrutura"], ["preview", "Prévia"], ["usage", `Uso (${draft.usageCount})`]] as const).map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={tab === key} className={tab === key ? "is-active" : ""} onClick={() => setTab(key)}>{label}</button>)}
+        </div>
+
+        {tab === "structure" && <>
+          <div className="stage-library-meta">
+            <label className="field"><span>Nome da etapa</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+            <label className="field"><span>Descrição</span><input value={draft.description ?? ""} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Objetivo e quando esta etapa deve ser usada" /></label>
+            {scope === "client" && <label className="field"><span>Cliente exclusivo</span><select value={draft.clientId ?? ""} onChange={(event) => setDraft({ ...draft, clientId: event.target.value || null, clientName: clients.find((client) => client.id === event.target.value)?.name ?? null })}><option value="">Etapa global</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>}
+          </div>
+          <div className="rj-blocks-toolbar">
+            <span className="rj-muted">{draft.document.blocks.length} bloco(s)</span>
+            <span className="stage-library-view-actions"><button className="secondary-button compact" type="button" onClick={() => setCollapsedBlockIds(new Set())}>Abrir todos</button><button className="secondary-button compact" type="button" onClick={() => setCollapsedBlockIds(new Set(draft.document.blocks.map((item) => item.id)))}>Recolher todos</button><button className="secondary-button compact" type="button" onClick={saveInitialView} title="Os blocos recolhidos agora começam recolhidos nos projetos"><PanelTop size={15} /> Usar como visual inicial</button></span>
+          </div>
+          <div className="rj-stage-blocks">{draft.document.blocks.map((item, index) => {
+            const collapsed = collapsedBlockIds.has(item.id);
+            const meta = blockMeta(item.type);
+            const BlockIcon = meta.Icon;
+            return <article className={`rj-stage-block ${collapsed ? "is-collapsed" : ""}`} key={item.id}>
+              <div className="rj-stage-block-head">
+                <button className="rj-stage-block-title" type="button" aria-expanded={!collapsed} onClick={() => toggleBlock(item.id)}><span className="stage-library-block-icon"><BlockIcon size={17} /></span><span><strong>{item.title || meta.label}</strong><small>{meta.label}{item.required ? " · obrigatório" : ""} · bloco {index + 1} de {draft.document.blocks.length}</small></span>{collapsed ? <ChevronRight size={17} /> : <ChevronDown size={17} />}</button>
+                <div className="rj-stage-block-actions">
+                  <button className="icon-button" type="button" title="Mover para cima" disabled={index === 0} onClick={() => updateBlocks(move(draft.document.blocks, index, -1))}><ArrowUp size={14} /></button>
+                  <button className="icon-button" type="button" title="Mover para baixo" disabled={index === draft.document.blocks.length - 1} onClick={() => updateBlocks(move(draft.document.blocks, index, 1))}><ArrowDown size={14} /></button>
+                  <button className="icon-button" type="button" title="Duplicar bloco" onClick={() => duplicateBlock(index)}><Copy size={14} /></button>
+                  <button className="icon-button danger" type="button" title="Remover bloco" onClick={() => { if (window.confirm(`Remover o bloco "${item.title}"?`)) updateBlocks(draft.document.blocks.filter((candidate) => candidate.id !== item.id)); }}><Trash2 size={14} /></button>
+                </div>
+              </div>
+              {!collapsed && <BlockConfigEditor block={item} prompts={prompts} onChange={updateBlock} />}
+            </article>;
+          })}</div>
+          {!draft.document.blocks.length && <div className="empty-state"><Layers3 size={28} /><strong>Etapa sem blocos</strong><span>Escolha abaixo os blocos que fazem parte desta etapa.</span></div>}
+          <div className="rj-add-block">
+            <span>Adicionar bloco</span>
+            {["long_text", "prompt", "checklist", "materials", "context", "file_upload"].map((type) => { const meta = blockMeta(type); const AddIcon = meta.Icon; return <button key={type} className="secondary-button" type="button" onClick={() => addBlock(type)}><AddIcon size={15} /> {meta.label}</button>; })}
+          </div>
+        </>}
+
+        {tab === "preview" && <div className="rj-stage-preview">
+          <p className="rj-muted">Assim a etapa aparece num projeto novo. Os campos são preenchidos na execução.</p>
+          <div className="rj-preview-frame">
+            <div className="rj-preview-bar"><strong>{draft.name}</strong><span className="rj-fake-button">Não se aplica</span><span className="rj-fake-button is-primary">Concluir etapa</span></div>
+            {draft.document.blocks.map((item) => <BlockPreview key={item.id} block={item} />)}
+            {!draft.document.blocks.length && <p className="rj-muted">Etapa sem blocos.</p>}
+          </div>
+        </div>}
+
+        {tab === "usage" && <div className="rj-stage-usage">
+          <p>{draft.usageCount} template(s) e {draft.projectUsageCount} projeto(s) usam esta etapa. Ao publicar uma nova versão, os templates e os projetos com atualização automática recebem a estrutura nova; o que já foi preenchido nos projetos é mantido.</p>
+          {draft.templateUses.length ? <ul className="rj-usage-list">{draft.templateUses.map((use) => <li key={`${use.templateId}:${use.templateStepId}`}><Route size={15} /><strong>{use.templateName}</strong>{use.clientName && <small>{use.clientName}</small>}</li>)}</ul> : <p className="rj-muted">Ainda não está em nenhum template. Adicione-a pelo editor de templates.</p>}
+        </div>}
       </> : <div className="empty-state"><Layers3 size={30} /><strong>Biblioteca de etapas</strong><span>Crie ou selecione uma etapa para editar.</span></div>}
     </main>
+    {confirmOpen && draft && <div className="modal-backdrop" role="presentation" onMouseDown={() => setConfirmOpen(false)}>
+      <section className="rj-dialog rj-confirm" role="dialog" aria-modal="true" aria-label="Publicar versão" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="rj-dialog-head"><div><span className="eyebrow">{draft.name}</span><h2>Publicar versão {draft.currentVersion + 1}?</h2></div></header>
+        <div className="rj-confirm-body">
+          <p><strong>{draft.usageCount}</strong> template(s) e <strong>{draft.projectUsageCount}</strong> projeto(s) vinculados recebem a nova estrutura.</p>
+          <ul>
+            <li>O que já foi preenchido nos projetos (links, checklists, contextos, arquivos) é mantido.</li>
+            <li>Blocos removidos ficam guardados como histórico se tiverem conteúdo.</li>
+            <li>Projetos concluídos não são reabertos.</li>
+          </ul>
+        </div>
+        <footer className="rj-dialog-foot"><button className="secondary-button" type="button" onClick={() => setConfirmOpen(false)}>Cancelar</button><button className="primary-button" type="button" disabled={busy} onClick={() => { setConfirmOpen(false); void save(); }}><Save size={16} /> Publicar</button></footer>
+      </section>
+    </div>}
   </section>;
 }
