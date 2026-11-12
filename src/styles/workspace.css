@@ -94,6 +94,8 @@
 .workspace-context-list article > div { display: grid; flex: 1; gap: 2px; min-width: 0; }
 .workspace-context-list p { margin: 4px 0; color: #455d56; white-space: pre-wrap; }
 .workspace-context-list small { color: #667a74; }
+.workspace-project-models .workspace-tool-body { padding-bottom: 3px; }
+.workspace-project-models .workspace-reference { border: 1px solid #e9d99f; border-left: 3px solid #d2a422; border-radius: 6px; background: #fffbef; }
 .status-pill.regularizacao_pendente { background: #fff0cb; color: #805800; border-color: #d8ad48; }
 @media (max-width: 700px) {
   .modal-backdrop:has(.template-preview-modal) { padding: 8px; }

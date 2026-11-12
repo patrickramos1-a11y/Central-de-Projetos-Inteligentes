@@ -8,6 +8,7 @@ import { WorkspaceProviderBadge } from "./WorkspaceProviderBadge";
 type Draft = { id: string; kind: WorkspaceKind; title: string; target: string; notes: string };
 const emptyDraft = (kind: WorkspaceKind): Draft => ({ id: crypto.randomUUID(), kind, title: "", target: "", notes: "" });
 const kindLabels: Record<WorkspaceKind, string> = { directory: "Diretórios do servidor", conversation: "Conversas", support: "Links de apoio" };
+const projectModelsDriveUrl = "https://drive.google.com/drive/folders/182byM4fzIS_OEgn4WOEX0lpV5wDC27xf?usp=sharing";
 
 async function getWorkspace(baseUrl: string, projectId: string): Promise<ProjectWorkspace> {
   const response = await fetch(`${baseUrl}/api/projects/${encodeURIComponent(projectId)}/workspace`, { cache: "no-store" });
@@ -39,6 +40,7 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, curr
   const [checklistOpen, setChecklistOpen] = useState(false);
   const [checklistAdding, setChecklistAdding] = useState(false);
   const [contextsOpen, setContextsOpen] = useState(false);
+  const [projectModelsOpen, setProjectModelsOpen] = useState(false);
   const [checklistLabel, setChecklistLabel] = useState("");
   const [contextDraft, setContextDraft] = useState({ title: "", content: "" });
   const [contextTitleEdited, setContextTitleEdited] = useState(false);
@@ -68,6 +70,7 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, curr
     setChecklistAdding(false);
     setChecklistLabel("");
     setContextsOpen(false);
+    setProjectModelsOpen(false);
     setContextDraft({ title: "", content: "" });
     setContextTitleEdited(false);
     void refresh();
@@ -250,6 +253,21 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, curr
         <div className="workspace-context-form"><input value={contextDraft.title} maxLength={160} placeholder="Título do contexto" onChange={(event) => { setContextTitleEdited(true); setContextDraft({ ...contextDraft, title: event.target.value }); }} /><textarea value={contextDraft.content} maxLength={20000} placeholder="Cole ou escreva o contexto" onChange={(event) => { const content = event.target.value; setContextDraft((current) => ({ ...current, content, title: contextTitleEdited ? current.title : contextTitleFromContent(content) })); }} /><button className="primary-button compact" type="button" disabled={saving || !contextDraft.title.trim() || !contextDraft.content.trim()} onClick={() => void addContext()}><Save size={15} /> Salvar contexto</button></div>
         <div className="workspace-context-list">{workspace.contexts.map((context) => <article key={context.id}><div><strong>{context.title}</strong>{context.category && <small>{context.category}</small>}<p>{context.content}</p>{context.source_client_context_id && <small>Disponivel na biblioteca do cliente · versao {context.source_version}</small>}</div><button className="icon-button danger" type="button" title="Retirar contexto deste projeto" onClick={() => void mutateWorkspace(`contexts/${encodeURIComponent(context.id)}`, "DELETE")}><Trash2 size={15} /></button></article>)}</div>
         {!workspace.contexts.length && <p className="workspace-empty">Nenhum contexto cadastrado nesta Etapa 0.</p>}
+      </div>}
+    </section>
+    <section className="workspace-tool-section workspace-project-models" aria-label="Modelos de projetos">
+      <header>
+        <button className="workspace-tool-toggle" type="button" aria-expanded={projectModelsOpen} onClick={() => setProjectModelsOpen((value) => !value)}><Layers3 size={17} /><span>Modelos de projetos</span><ChevronDown size={16} className={projectModelsOpen ? "open" : ""} /></button>
+      </header>
+      {projectModelsOpen && <div className="workspace-tool-body">
+        <article className="workspace-reference" data-provider="google-drive">
+          <WorkspaceProviderBadge kind="support" target={projectModelsDriveUrl} />
+          <div className="workspace-reference-copy"><strong>Modelos básicos de projetos</strong><span title={projectModelsDriveUrl}>{projectModelsDriveUrl}</span><small>Biblioteca fixa de modelos para desenvolvimento de projetos.</small></div>
+          <div className="workspace-reference-actions">
+            <button className="icon-button" type="button" title="Copiar link dos modelos" aria-label="Copiar link dos modelos de projetos" onClick={() => void copyText(projectModelsDriveUrl, "Link dos modelos de projetos")}><Copy size={16} /></button>
+            <a className="icon-button" href={projectModelsDriveUrl} target="_blank" rel="noopener noreferrer" title="Abrir modelos de projetos" aria-label="Abrir modelos de projetos"><ExternalLink size={16} /></a>
+          </div>
+        </article>
       </div>}
     </section>
   </section>;
