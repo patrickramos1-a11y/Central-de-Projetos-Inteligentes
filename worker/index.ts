@@ -4,6 +4,7 @@ import { buildTableReadQuery } from "./tableRead";
 import { handleProjectWorkspaceRequest, isProjectWorkspaceOrganized, readWorkspaceOverview } from "./projectWorkspace";
 import { handleStageLibraryRequest } from "./stageLibrary";
 import { applyProjectStatusTransition, readProjectStatus } from "./projectCompletion";
+import { handleDeliveriesRequest } from "./deliveries";
 
 type Env = {
   DB: D1Database;
@@ -82,6 +83,9 @@ export default {
           clientContextCounts: (clientContexts.results ?? []).map((row) => ({ clientId: row.client_id, count: row.total })),
         } });
       }
+
+      const deliveriesResponse = await handleDeliveriesRequest(request, env, parts, url);
+      if (deliveriesResponse) return deliveriesResponse;
 
       const workspaceResponse = await handleProjectWorkspaceRequest(request, env, parts);
       if (workspaceResponse) return workspaceResponse;

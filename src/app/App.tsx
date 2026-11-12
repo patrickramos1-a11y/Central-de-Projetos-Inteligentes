@@ -4,6 +4,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   Bot,
+  CalendarCheck,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -89,6 +90,7 @@ import { StatusBadge, type StatusTone } from "../components/ui/StatusBadge";
 import { AppShell, CommandBar, JourneyContextBar, WorkCanvas } from "../components/ui/LayoutPrimitives";
 import { AppSidebar, PageHeader } from "../features/shell/AppSidebar";
 import { GlobalSearch } from "../features/shell/GlobalSearch";
+import { DeliveriesView } from "../features/deliveries/DeliveriesView";
 import { ProjectWorkspacePanel } from "../features/workspace/ProjectWorkspacePanel";
 import { ClientWorkspacesDialog } from "../features/workspace/ClientWorkspacesDialog";
 import { selectWorkspaceContextPrompts, WORKSPACE_STEP_ID, type ProjectWorkspace, type WorkspaceOverview } from "../features/workspace/workspaceModel";
@@ -97,7 +99,7 @@ type ConfigStatus = "ativo" | "inativo" | "rascunho" | "arquivado";
 type ProjectStatus = "planejado" | "em_andamento" | "concluido" | "bloqueado" | "arquivado";
 type ClientStatus = "em_implantacao" | "ativo" | "concluido" | "bloqueado" | "arquivado";
 type StepStatus = "pendente" | "em_andamento" | "concluido" | "bloqueado";
-type ViewMode = "projects" | "journey" | "projectTemplates" | "clients" | "clientJourney" | "management" | "settings";
+type ViewMode = "projects" | "journey" | "deliveries" | "projectTemplates" | "clients" | "clientJourney" | "management" | "settings";
 type JourneyMode = "execute" | "edit";
 
 function compactStepLabel(name: string) {
@@ -654,7 +656,7 @@ export default function App() {
   const [templateEditorTargetId, setTemplateEditorTargetId] = useState<string | null>(null);
   const [templateEditorDirty, setTemplateEditorDirty] = useState(false);
   const navigateFromTemplate = useCallback((next: ViewMode) => {
-    if (view === "projectTemplates" && templateEditorDirty && !window.confirm("Ha alterações não salvas no template. Sair do editor?")) return;
+    if (view === "projectTemplates" && templateEditorDirty && !window.confirm("Há alterações não salvas no template. Sair do editor?")) return;
     setTemplateEditorDirty(false);
     setTemplateEditorTargetId(null);
     setView(next);
@@ -868,6 +870,7 @@ export default function App() {
     const viewLabels: Record<ViewMode, string> = {
       projects: "Projetos",
       journey: selectedProject?.name ?? "Projeto",
+      deliveries: "Entregas",
       projectTemplates: "Templates",
       clients: "Clientes",
       clientJourney: selectedClient?.name ?? "Cliente",
@@ -2884,6 +2887,7 @@ export default function App() {
       <AppSidebar
         items={[
           { key: "projects", label: "Projetos", icon: PanelLeft, active: view === "projects" || view === "journey", onSelect: () => navigateFromTemplate("projects") },
+          { key: "deliveries", label: "Entregas", icon: CalendarCheck, active: view === "deliveries", onSelect: () => navigateFromTemplate("deliveries") },
           { key: "projectTemplates", label: "Templates", icon: Route, active: view === "projectTemplates", onSelect: () => navigateFromTemplate("projectTemplates") },
           { key: "clients", label: "Clientes", icon: Users, active: view === "clients" || view === "clientJourney", onSelect: () => navigateFromTemplate("clients") },
           { key: "management", label: "Gestão", icon: Layers3, active: view === "management", onSelect: () => navigateFromTemplate("management") },
@@ -2944,6 +2948,16 @@ export default function App() {
         {view === "projectTemplates" && (currentSecondaryReady ? <ProjectTemplatesView tables={tables} currentUserName={currentUser?.name ?? null} query={query} setQuery={setQuery} onUpdate={updateJourneyTemplate} onDelete={deleteJourneyTemplate} onRenameStep={renameJourneyTemplateStep} onRemoveStep={archiveJourneyTemplateStep} onRefresh={loadAll} initialTemplateId={templateEditorTargetId} onEditorClosed={() => setTemplateEditorTargetId(null)} onEditorDirtyChange={setTemplateEditorDirty} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
 
         {view === "clients" && (currentSecondaryReady ? <ClientsView tables={tables} workspaces={overview.workspaces} clientContextCounts={overview.clientContextCounts} currentUser={currentUser} query={query} setQuery={setQuery} onCreate={createClientJourney} onSaveIdentity={saveClientIdentity} onOpen={(id) => { setSelectedClientId(id); setView("clientJourney"); }} onOpenProject={(id) => { setSelectedProjectId(id); setSelectedStepId(WORKSPACE_STEP_ID); setView("journey"); }} baseUrl={cloudflareApiUrl} /> : <DataAreaLoading loading={secondaryLoading} onRetry={() => void refreshSecondary(activeSecondaryTables(view, activeConfig))} />)}
+
+        {view === "deliveries" && (
+          <DeliveriesView
+            baseUrl={cloudflareApiUrl}
+            currentUserName={currentUser.name}
+            currentUserId={currentUser.id}
+            openProjects={tables.projects}
+            onOpenProject={openProjectFromSearch}
+          />
+        )}
 
         {view === "management" && (
           <ManagementView
