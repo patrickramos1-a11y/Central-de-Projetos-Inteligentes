@@ -9535,6 +9535,20 @@ body {
 .client-detail-actions .icon-button { width: 30px; height: 30px; }
 .client-detail-error { border-left: 3px solid #c95252; color: #8a3131 !important; background: #fff2f2; }
 
+/* Contextos precisam manter contexto suficiente para serem reconhecidos na visão consolidada. */
+.client-expansion-toolbar .secondary-button.is-active { color: #244eaa; border-color: #91ade8; background: #eef3ff; }
+.client-detail-row.context { grid-template-columns: 24px minmax(310px, 1.25fr) minmax(270px, 1fr) minmax(148px, .52fr) auto; gap: 12px; }
+.client-detail-row.context.is-selecting { grid-template-columns: 24px 26px minmax(280px, 1.25fr) minmax(240px, 1fr) minmax(142px, .52fr) auto; }
+.client-context-select { display: grid; place-items: center; width: 24px; height: 28px; cursor: pointer; }
+.client-context-select input { width: 17px; height: 17px; accent-color: #4169d8; cursor: pointer; }
+.client-context-title,
+.client-context-meta { display: grid; min-width: 0; gap: 2px; }
+.client-context-title strong,
+.client-context-summary { overflow: hidden; white-space: normal; text-overflow: clip; display: -webkit-box; -webkit-box-orient: vertical; }
+.client-context-title strong { -webkit-line-clamp: 2; line-height: 1.25; }
+.client-context-summary { -webkit-line-clamp: 2; color: #376d67; font-size: 11px; line-height: 1.35; }
+.client-context-meta small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 @media (max-width: 1080px) {
   .client-portfolio-head,
   .client-portfolio-row { grid-template-columns: minmax(210px,2fr) 62px minmax(110px,1fr) repeat(4,62px) minmax(98px,.9fr) 72px; }
@@ -9565,6 +9579,13 @@ body {
   .client-detail-row.context { grid-template-columns: 92px minmax(0,1fr) auto; }
   .client-detail-target { grid-column: 1 / -1; grid-row: 2; padding-left: 4px; }
   .client-detail-actions { grid-column: 3; grid-row: 1; }
+  .client-detail-row.context { grid-template-columns: 24px minmax(0, 1fr) auto; gap: 7px; }
+  .client-detail-row.context.is-selecting { grid-template-columns: 24px 24px minmax(0, 1fr) auto; }
+  .client-detail-row.context .client-context-summary,
+  .client-detail-row.context .client-context-meta { grid-column: 2 / -1; padding-left: 0; }
+  .client-detail-row.context.is-selecting .client-context-summary,
+  .client-detail-row.context.is-selecting .client-context-meta { grid-column: 3 / -1; }
+  .client-detail-row.context .client-detail-actions { grid-column: -2; grid-row: 1; }
 }
 
 /* Compact journey controls and stage organization */

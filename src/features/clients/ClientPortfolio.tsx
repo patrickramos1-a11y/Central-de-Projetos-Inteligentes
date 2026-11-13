@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpDown, ChevronDown, ChevronRight, Copy, ExternalLink, Filter, FolderOpen, Layers3, Loader2, Pencil, Search, UserRound } from "lucide-react";
+import { ArrowUpDown, CheckSquare, ChevronDown, ChevronRight, Copy, ExternalLink, Filter, FolderOpen, Layers3, Loader2, Pencil, Search, UserRound } from "lucide-react";
 import { copyText } from "../../components/ui/clipboard";
 import type { WorkspaceOverview, WorkspaceReference } from "../workspace/workspaceModel";
 import { browserAccessibleUrl, displayDirectoryPath, workspaceProvider, type ProjectWorkspace } from "../workspace/workspaceModel";
@@ -14,7 +14,7 @@ type PortfolioProject = { id: string; name: string; company: string | null; clie
 type PortfolioUser = { id: string; name: string };
 type PortfolioContext = {
   id: string; title: string; content: string; category: string | null; version: number; origin_type: "client" | "project";
-  origin_project_id: string | null; updated_at: string;
+  origin_project_id: string | null; created_at: string; updated_at: string;
 };
 type ClientWorkspace = { project: { id: string; name: string; status: string; linkType: "explicit" | "legacy" }; workspace: ProjectWorkspace };
 type LoadedDetails = { contexts: PortfolioContext[]; workspaces: ClientWorkspace[]; contextError: string; workspaceError: string };
@@ -57,6 +57,16 @@ function DetailActions({ target, projectId, onOpenProject }: { target: string; p
   </span>;
 }
 
+function contextSummary(content: string) {
+  return content.replace(/\s+/g, " ").trim();
+}
+
+function contextCreatedAt(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Data não registrada";
+  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(date);
+}
+
 function ReferenceTable({ title, items, empty, onOpenProject }: {
   title: string;
   items: Array<{ id: string; projectId: string; projectName: string; reference: WorkspaceReference }>;
@@ -78,26 +88,58 @@ function ClientExpansion({ client, details, loading, onOpenClient, onOpenProject
   client: PortfolioClient; details?: LoadedDetails; loading: boolean; onOpenClient: (id: string) => void;
   onOpenProject: (id: string) => void; onOpenContexts: (id: string) => void; onOpenWorkspaces: (id: string) => void;
 }) {
+  const [isSelectingContexts, setIsSelectingContexts] = useState(false);
+  const [selectedContextIds, setSelectedContextIds] = useState<Set<string>>(new Set());
   const projects = new Map((details?.workspaces ?? []).map((item) => [item.project.id, item.project.name]));
   const flattened = (details?.workspaces ?? []).flatMap((item) => item.workspace.references.map((reference) => ({ id: `${item.project.id}:${reference.id}`, projectId: item.project.id, projectName: item.project.name, reference })));
   const directories = flattened.filter((item) => item.reference.kind === "directory");
   const links = flattened.filter((item) => item.reference.kind !== "directory");
+  const contexts = [...(details?.contexts ?? [])].sort((left, right) => {
+    const leftDate = Date.parse(left.created_at || left.updated_at);
+    const rightDate = Date.parse(right.created_at || right.updated_at);
+    return rightDate - leftDate;
+  });
+  const selectedContexts = contexts.filter((context) => selectedContextIds.has(context.id));
+
+  function toggleContextSelection(contextId: string) {
+    setSelectedContextIds((current) => {
+      const next = new Set(current);
+      next.has(contextId) ? next.delete(contextId) : next.add(contextId);
+      return next;
+    });
+  }
+
+  function toggleSelectionMode() {
+    if (isSelectingContexts) setSelectedContextIds(new Set());
+    setIsSelectingContexts((current) => !current);
+  }
+
+  function copySelectedContexts() {
+    const value = selectedContexts.map((context) => `${context.title}\n\n${context.content}`).join("\n\n---\n\n");
+    void copyText(value, `${selectedContexts.length} contexto${selectedContexts.length === 1 ? "" : "s"}`);
+  }
+
   return <div className="client-portfolio-expansion">
     <div className="client-expansion-toolbar">
       <span>Informacoes consolidadas de {client.name}</span>
-      <div><button className="secondary-button" type="button" onClick={() => onOpenContexts(client.id)}><Layers3 size={15} /> Gerenciar contextos</button><button className="secondary-button" type="button" onClick={() => onOpenWorkspaces(client.id)}><FolderOpen size={15} /> Ver locais completos</button><button className="secondary-button" type="button" onClick={() => onOpenClient(client.id)}><UserRound size={15} /> Abrir cliente</button></div>
+      <div><button className="secondary-button" type="button" onClick={() => onOpenContexts(client.id)}><Layers3 size={15} /> Gerenciar contextos</button>{contexts.length > 0 && <><button className={`secondary-button ${isSelectingContexts ? "is-active" : ""}`} type="button" aria-pressed={isSelectingContexts} onClick={toggleSelectionMode}><CheckSquare size={15} /> {isSelectingContexts ? "Cancelar seleção" : "Selecionar contextos"}</button>{isSelectingContexts && <button className="secondary-button" type="button" disabled={selectedContexts.length === 0} onClick={copySelectedContexts}><Copy size={15} /> Copiar selecionados ({selectedContexts.length})</button>}</>}<button className="secondary-button" type="button" onClick={() => onOpenWorkspaces(client.id)}><FolderOpen size={15} /> Ver locais completos</button><button className="secondary-button" type="button" onClick={() => onOpenClient(client.id)}><UserRound size={15} /> Abrir cliente</button></div>
     </div>
     {loading && <p className="client-detail-loading" role="status"><Loader2 className="spin" size={17} /> Carregando detalhes...</p>}
     {details && <div className="client-expansion-grid">
       <section className="client-detail-section contexts">
         <header><strong>Contextos</strong><span>{details.contexts.length}</span></header>
         {details.contextError && <p className="client-detail-error" role="alert">{details.contextError}</p>}
-        {details.contexts.length ? <div className="client-detail-table">{details.contexts.map((context) => <div className="client-detail-row context" key={context.id}>
+        {contexts.length ? <div className="client-detail-table">{contexts.map((context) => {
+          const projectName = context.origin_project_id ? projects.get(context.origin_project_id) : null;
+          return <div className={`client-detail-row context ${isSelectingContexts ? "is-selecting" : ""}`} key={context.id}>
           <Layers3 size={16} />
-          <span><strong>{context.title}</strong><small>{context.category || "Sem categoria"} · v{context.version}</small></span>
-          <span className="client-detail-target" title={context.content}>{context.content}</span>
+          {isSelectingContexts && <label className="client-context-select" title={`Selecionar ${context.title}`}><input type="checkbox" checked={selectedContextIds.has(context.id)} onChange={() => toggleContextSelection(context.id)} aria-label={`Selecionar ${context.title}`} /></label>}
+          <span className="client-context-title"><strong title={context.title}>{context.title}</strong><small>{context.category || "Sem categoria"} · v{context.version}</small></span>
+          <span className="client-context-summary" title={context.content}>{contextSummary(context.content)}</span>
+          <span className="client-context-meta"><small>Criado em {contextCreatedAt(context.created_at)}</small><small>{projectName ? `Projeto: ${projectName}` : context.origin_type === "project" ? "Projeto de origem indisponível" : "Biblioteca do cliente"}</small></span>
           <DetailActions target={context.content} projectId={context.origin_project_id && projects.has(context.origin_project_id) ? context.origin_project_id : null} onOpenProject={onOpenProject} />
-        </div>)}</div> : !details.contextError && <p>Nenhum contexto ativo vinculado.</p>}
+        </div>;
+        })}</div> : !details.contextError && <p>Nenhum contexto ativo vinculado.</p>}
       </section>
       {details.workspaceError && <p className="client-detail-error" role="alert">{details.workspaceError}</p>}
       <ReferenceTable title="Diretórios e locais" items={directories} empty="Nenhum diretorio de servidor cadastrado." onOpenProject={onOpenProject} />
