@@ -5,6 +5,7 @@ import type { WorkspaceOverview, WorkspaceReference } from "../workspace/workspa
 import { browserAccessibleUrl, displayDirectoryPath, workspaceProvider, type ProjectWorkspace } from "../workspace/workspaceModel";
 import { WorkspaceProviderBadge } from "../workspace/WorkspaceProviderBadge";
 import { buildClientPortfolioRows, filterClientPortfolioRows, sortClientPortfolioRows, type ClientPortfolioSortColumn, type ClientPortfolioSortDirection } from "./clientPortfolioModel";
+import { createContextSummary } from "../../../shared/contextSummary";
 
 type PortfolioClient = {
   id: string; name: string; company: string | null; logo_url: string | null; client_kind: "AC" | "AV" | null; is_active: boolean;
@@ -13,7 +14,7 @@ type PortfolioClient = {
 type PortfolioProject = { id: string; name: string; company: string | null; client_id: string | null; status: string; project_type_id?: string | null };
 type PortfolioUser = { id: string; name: string };
 type PortfolioContext = {
-  id: string; title: string; content: string; category: string | null; version: number; origin_type: "client" | "project";
+  id: string; title: string; content: string; summary: string | null; category: string | null; version: number; origin_type: "client" | "project";
   origin_project_id: string | null; created_at: string; updated_at: string;
 };
 type ClientWorkspace = { project: { id: string; name: string; status: string; linkType: "explicit" | "legacy" }; workspace: ProjectWorkspace };
@@ -55,10 +56,6 @@ function DetailActions({ target, projectId, onOpenProject }: { target: string; p
     {url && <a className="icon-button" href={url} target="_blank" rel="noopener noreferrer" title="Abrir link" aria-label="Abrir link"><ExternalLink size={15} /></a>}
     {projectId && <button className="icon-button" type="button" title="Ir para o projeto" aria-label="Ir para o projeto" onClick={() => onOpenProject(projectId)}><FolderOpen size={15} /></button>}
   </span>;
-}
-
-function contextSummary(content: string) {
-  return content.replace(/\s+/g, " ").trim();
 }
 
 function contextCreatedAt(value: string) {
@@ -135,7 +132,7 @@ function ClientExpansion({ client, details, loading, onOpenClient, onOpenProject
           <Layers3 size={16} />
           {isSelectingContexts && <label className="client-context-select" title={`Selecionar ${context.title}`}><input type="checkbox" checked={selectedContextIds.has(context.id)} onChange={() => toggleContextSelection(context.id)} aria-label={`Selecionar ${context.title}`} /></label>}
           <span className="client-context-title"><strong title={context.title}>{context.title}</strong><small>{context.category || "Sem categoria"} · v{context.version}</small></span>
-          <span className="client-context-summary" title={context.content}>{contextSummary(context.content)}</span>
+          <span className="client-context-summary" title={context.summary || context.content}>{context.summary?.trim() || createContextSummary(context.title, context.content)}</span>
           <span className="client-context-meta"><small>Criado em {contextCreatedAt(context.created_at)}</small><small>{projectName ? `Projeto: ${projectName}` : context.origin_type === "project" ? "Projeto de origem indisponível" : "Biblioteca do cliente"}</small></span>
           <DetailActions target={context.content} projectId={context.origin_project_id && projects.has(context.origin_project_id) ? context.origin_project_id : null} onOpenProject={onOpenProject} />
         </div>;

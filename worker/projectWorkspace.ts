@@ -1,5 +1,6 @@
 import { WORKSPACE_STEP_ID, serverDirectoryPath, workspaceStatus, type WorkspaceChecklistItem, type WorkspaceContext, type WorkspaceKind, type WorkspaceReference } from "../src/features/workspace/workspaceModel";
 import { mergeWorkspaceReferences, normalizeManualReference, readLinkedWorkspaceReferences } from "./workspaceLinks";
+import { createContextSummary } from "../shared/contextSummary";
 
 type Env = { DB: D1Database };
 type WorkspaceRow = { project_id: string; conversation_not_applicable: number; revision: number };
@@ -107,9 +108,10 @@ async function createWorkspaceContext(db: D1Database, projectId: string, body: R
   const statements: D1PreparedStatement[] = [];
   if (project.client_id) {
     sourceId = crypto.randomUUID();
+    const summary = createContextSummary(title, content);
     statements.push(
-      db.prepare("insert into client_contexts (id, client_id, title, content, category, status, version, origin_type, origin_project_id, origin_step_id, origin_block_id, origin_context_id, created_at, updated_at) values (?, ?, ?, ?, ?, 'active', 1, 'project', ?, ?, 'workspace-contexts', ?, ?, ?)")
-        .bind(sourceId, project.client_id, title, content, category, projectId, WORKSPACE_STEP_ID, id, timestamp, timestamp),
+      db.prepare("insert into client_contexts (id, client_id, title, content, summary, category, status, version, origin_type, origin_project_id, origin_step_id, origin_block_id, origin_context_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, 'active', 1, 'project', ?, ?, 'workspace-contexts', ?, ?, ?)")
+        .bind(sourceId, project.client_id, title, content, summary, category, projectId, WORKSPACE_STEP_ID, id, timestamp, timestamp),
       db.prepare("insert into client_context_versions (context_id, version, title, content, category, created_at) values (?, 1, ?, ?, ?, ?)")
         .bind(sourceId, title, content, category, timestamp),
     );

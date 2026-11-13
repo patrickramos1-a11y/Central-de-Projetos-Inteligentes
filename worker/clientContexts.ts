@@ -1,3 +1,5 @@
+import { createContextSummary } from "../shared/contextSummary";
+
 type ContextRow = Record<string, unknown>;
 type ContextCard = {
   id: string;
@@ -14,7 +16,7 @@ const now = () => new Date().toISOString();
 export async function clientContextList(db: D1Database, clientId: string, search = "", includeArchived = false, category = "", offset = 0) {
   const client = await db.prepare("select id from clients where id = ?").bind(clientId).first();
   if (!client) throw new Error("Cliente nao encontrado.");
-  const rows = await db.prepare(`select id, client_id, title, content, category, status, version, origin_type, origin_project_id, origin_step_id, origin_block_id, origin_context_id, created_at, updated_at, archived_at
+  const rows = await db.prepare(`select id, client_id, title, content, summary, category, status, version, origin_type, origin_project_id, origin_step_id, origin_block_id, origin_context_id, created_at, updated_at, archived_at
     from client_contexts where client_id = ? and (? = 1 or status = 'active') and (? = '' or category = ?) and (? = '' or lower(title || ' ' || content || ' ' || coalesce(category, '')) like ?)
     order by updated_at desc, id desc limit 100 offset ?`)
     .bind(clientId, includeArchived ? 1 : 0, category, category, search, `%${search.toLowerCase()}%`, Math.max(0, offset)).all<ContextRow>();
@@ -30,8 +32,9 @@ export async function createClientContext(db: D1Database, clientId: string, body
   const id = crypto.randomUUID();
   const timestamp = now();
   const category = String(body.category ?? "").trim() || null;
+  const summary = createContextSummary(title, content);
   await db.batch([
-    db.prepare("insert into client_contexts (id, client_id, title, content, category, status, version, origin_type, created_at, updated_at) values (?, ?, ?, ?, ?, 'active', 1, 'client', ?, ?)").bind(id, clientId, title, content, category, timestamp, timestamp),
+    db.prepare("insert into client_contexts (id, client_id, title, content, summary, category, status, version, origin_type, created_at, updated_at) values (?, ?, ?, ?, ?, ?, 'active', 1, 'client', ?, ?)").bind(id, clientId, title, content, summary, category, timestamp, timestamp),
     db.prepare("insert into client_context_versions (context_id, version, title, content, category, created_at) values (?, 1, ?, ?, ?, ?)").bind(id, title, content, category, timestamp),
   ]);
   return getClientContext(db, clientId, id);
@@ -53,9 +56,10 @@ export async function updateClientContext(db: D1Database, clientId: string, cont
   const status = body.status === "archived" ? "archived" : body.status === "active" ? "active" : String(current.status);
   const version = Number(current.version) + 1;
   const timestamp = now();
+  const summary = createContextSummary(title, content);
   const results = await db.batch([
-    db.prepare("update client_contexts set title = ?, content = ?, category = ?, status = ?, version = ?, updated_at = ?, archived_at = ? where id = ? and client_id = ? and version = ?")
-      .bind(title, content, category, status, version, timestamp, status === "archived" ? timestamp : null, contextId, clientId, current.version),
+    db.prepare("update client_contexts set title = ?, content = ?, summary = ?, category = ?, status = ?, version = ?, updated_at = ?, archived_at = ? where id = ? and client_id = ? and version = ?")
+      .bind(title, content, summary, category, status, version, timestamp, status === "archived" ? timestamp : null, contextId, clientId, current.version),
     db.prepare("insert into client_context_versions (context_id, version, title, content, category, created_at) values (?, ?, ?, ?, ?, ?)")
       .bind(contextId, version, title, content, category, timestamp),
   ]);
@@ -87,8 +91,9 @@ export async function prepareProjectContextSave(db: D1Database, stepId: string, 
     if (!title || !content) throw new Error("Informe titulo e conteudo do contexto.");
     const sourceContextId = crypto.randomUUID();
     const timestamp = now();
-    statements.push(db.prepare("insert into client_contexts (id, client_id, title, content, category, status, version, origin_type, origin_project_id, origin_step_id, origin_block_id, origin_context_id, created_at, updated_at) values (?, ?, ?, ?, null, 'active', 1, 'project', ?, ?, ?, ?, ?, ?)")
-      .bind(sourceContextId, owner.client_id, title, content, owner.project_id, stepId, blockId, context.id, timestamp, timestamp));
+    const summary = createContextSummary(title, content);
+    statements.push(db.prepare("insert into client_contexts (id, client_id, title, content, summary, category, status, version, origin_type, origin_project_id, origin_step_id, origin_block_id, origin_context_id, created_at, updated_at) values (?, ?, ?, ?, ?, null, 'active', 1, 'project', ?, ?, ?, ?, ?, ?)")
+      .bind(sourceContextId, owner.client_id, title, content, summary, owner.project_id, stepId, blockId, context.id, timestamp, timestamp));
     statements.push(db.prepare("insert into client_context_versions (context_id, version, title, content, category, created_at) values (?, 1, ?, ?, null, ?)")
       .bind(sourceContextId, title, content, timestamp));
     contexts.push({ ...context, sourceContextId, sourceVersion: 1 });

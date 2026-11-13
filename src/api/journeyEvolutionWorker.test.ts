@@ -38,6 +38,8 @@ function fixture() {
   const stageOrganizationMigration = readFileSync(new URL("../../cloudflare/migrations/0022_stage_library_organization.sql", import.meta.url), "utf8");
   sqlite.exec(stageOrganizationMigration);
   sqlite.exec(stageOrganizationMigration);
+  const contextSummaryMigration = readFileSync(new URL("../../cloudflare/migrations/0029_client_context_summaries.sql", import.meta.url), "utf8");
+  sqlite.exec(contextSummaryMigration);
   const templateDocument = { schemaVersion: 1, ownerType: "template", templateId: "template-a", stepId: "template-step", structureId: "template-document", title: "Inicio", status: "ativo", state: "published", versionNumber: 1, revision: 1, blocks: [{ id: "prompt-block", type: "prompt", order: 1, title: "Prompt", required: false, config: { contentSnapshot: "modelo" } }], completionRules: [] };
   const projectDocument = { ...templateDocument, ownerType: "project", projectId: "project-a", templateId: undefined, stepId: "project-step", structureId: "project-document", state: "draft", blocks: [{ id: "context-block", type: "context", order: 1, title: "Contexto", required: false, config: { contexts: [] } }] };
   sqlite.prepare("insert into journey_step_documents (id,owner_type,owner_id,step_id,schema_version,version_number,revision,state,title,document_json,created_at) values (?,?,?,?,1,1,1,?,?,?,?)")
@@ -99,6 +101,7 @@ test("new project context is saved with library origin atomically; later edits s
     await request(db, "/journey-steps/project/project-step/block-values/context-block", "PATCH", { value });
     const library = await request(db, "/clients/client-a/contexts") as Array<{ id: string; version: number; title: string }>;
     expect(library.length).toBe(1);
+    expect(library[0]).toMatchObject({ summary: "Versao 1" });
     const stored = JSON.parse(String((sqlite.query("select value_json from journey_step_values where owner_step_id = 'project-step'").get() as { value_json: string }).value_json));
     expect(stored.contexts[0].sourceContextId).toBe(library[0].id);
     expect(stored.contexts[0].sourceVersion).toBe(1);
