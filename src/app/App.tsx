@@ -37,6 +37,7 @@ import {
   Settings,
   Sparkles,
   Trash2,
+  UserRound,
   Users,
   X,
 } from "lucide-react";
@@ -3949,149 +3950,119 @@ function ManagementView({
   const visibleClients = clientRows.filter((client) => client.projectCount > 0 && normalizeSearchText(`${client.name} ${client.company}`).includes(normalizeSearchText(query)));
   const attentionKinds: ManagementAttentionKind[] = ["regularizacao_pendente", "bloqueado", "sem_cliente", "sem_responsavel", "sem_tipo", "concluido_com_etapas_abertas"];
 
+  const STALE_DAYS = 14;
+  const now = Date.now();
+  const workspaceOf = (id: string) => workspaces.find((item) => item.projectId === id);
+  const isActive = (row: { status: string }) => !["concluido", "arquivado"].includes(row.status);
+  const daysSince = (iso: string) => iso ? Math.floor((now - new Date(iso).getTime()) / 86_400_000) : 0;
+  const staleRows = searchedRows.filter((row) => isActive(row) && daysSince(row.updatedAt) >= STALE_DAYS).sort((a, b) => daysSince(b.updatedAt) - daysSince(a.updatedAt));
+  const workspacePendingRows = searchedRows.filter((row) => isActive(row) && workspaceOf(row.id)?.status !== "organizado");
+  type Focus = ManagementAttentionKind | "ativos" | "parados" | "local";
+  const [focus, setFocus] = useState<Focus>("parados");
+  const focusRows = focus === "parados" ? staleRows
+    : focus === "local" ? workspacePendingRows
+      : focus === "ativos" ? searchedRows.filter(isActive)
+        : filteredAttentionRows.filter((row) => row.reasons.includes(focus));
+  const reasonsFor = (id: string) => filteredAttentionRows.find((row) => row.id === id)?.reasons ?? [];
+  const people = activeUsers.map((user) => {
+    const mine = projectRows.filter((row) => row.responsibleUserId === user.id);
+    const active = mine.filter(isActive);
+    return {
+      user,
+      active: active.length,
+      stale: active.filter((row) => daysSince(row.updatedAt) >= STALE_DAYS).length,
+      localPending: active.filter((row) => workspaceOf(row.id)?.status !== "organizado").length,
+      done30: mine.filter((row) => row.status === "concluido" && daysSince(row.updatedAt) <= 30).length,
+      top: [...active].sort((a, b) => daysSince(b.updatedAt) - daysSince(a.updatedAt)).slice(0, 4),
+    };
+  }).filter((person) => person.active || person.done30);
+  const focusOptions: Array<{ key: Focus; label: string; count: number; tone?: string }> = [
+    { key: "parados", label: `Parados há ${STALE_DAYS}+ dias`, count: staleRows.length, tone: "warning" },
+    { key: "local", label: "Local de trabalho pendente", count: workspacePendingRows.length, tone: "warning" },
+    ...attentionKinds.map((kind) => ({ key: kind as Focus, label: managementAttentionLabels[kind], count: filteredAttentionRows.filter((row) => row.reasons.includes(kind)).length })),
+    { key: "ativos", label: "Todos em andamento", count: searchedRows.filter(isActive).length },
+  ];
+
   return (
     <>
-      <section className="topbar">
-        <div>
-          <h1>Gestão</h1>
-          <p>Visao consolidada para acompanhar projetos, clientes, responsaveis e tipos de entrega.</p>
-        </div>
-      </section>
+      <PageHeader title="Gestão" subtitle="O que precisa de atenção agora, por motivo, responsável e cliente." />
 
-      <section className="metric-grid management-metrics">
-        <article className="metric-card">
-          <span>Projetos ativos</span>
-          <strong>{activeProjects.length}</strong>
-        </article>
-        <article className="metric-card">
-          <span>Bloqueados</span>
-          <strong>{projectRows.filter((row) => row.status === "bloqueado").length}</strong>
-        </article>
-        <article className="metric-card">
-          <span>Precisam de revisao</span>
-          <strong>{activeAttentionCount}</strong>
-        </article>
-        <article className="metric-card">
-          <span>Clientes com projetos</span>
-          <strong>{clientRows.filter((row) => row.projectCount > 0).length}</strong>
-        </article>
-      </section>
-
-      <div className="management-view-bar">
-        <div className="projects-segment" role="group" aria-label="Visao da gestao">
-          <button type="button" aria-pressed={view === "attention"} onClick={() => setView("attention")}><ListChecks size={16} />Acompanhar <span>{activeProjects.length}</span></button>
-          <button type="button" aria-pressed={view === "portfolio"} onClick={() => setView("portfolio")}><Layers3 size={16} />Carteira</button>
+      <div className="management-view-bar rj-management-bar">
+        <div className="projects-segment" role="group" aria-label="Visão da gestão">
+          <button type="button" aria-pressed={view === "attention"} onClick={() => setView("attention")}><ListChecks size={16} />Atenção <span>{staleRows.length + activeAttentionCount}</span></button>
+          <button type="button" aria-pressed={view === "portfolio"} onClick={() => setView("portfolio")}><UserRound size={16} />Responsáveis</button>
           <button type="button" aria-pressed={view === "clients"} onClick={() => setView("clients")}><Users size={16} />Clientes</button>
         </div>
-        <label className="search-field"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar projeto ou cliente" aria-label="Buscar na gestao" /></label>
+        <label className="rj-search-box rj-management-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar projeto ou cliente" aria-label="Buscar na gestão" /></label>
       </div>
 
-      {view === "attention" && <section className="list-panel management-panel management-attention">
-        <div className="panel-heading"><div><h2>Fila de atencao</h2><p>Bloqueios e vínculos a revisar; conclusoes manuais ficam em uma revisao separada.</p></div></div>
-        <div className="management-attention-filters" role="group" aria-label="Filtrar motivos de atencao">
-          <button type="button" aria-pressed={attentionFilter === "ativos"} onClick={() => setAttentionFilter("ativos")}>Projetos ativos <span>{filteredAttentionRows.filter((row) => row.status !== "concluido").length}</span></button>
-          {attentionKinds.map((kind) => <button type="button" key={kind} aria-pressed={attentionFilter === kind} onClick={() => setAttentionFilter(kind)}>{managementAttentionLabels[kind]} <span>{filteredAttentionRows.filter((row) => row.reasons.includes(kind)).length}</span></button>)}
+      {view === "attention" && <section className="rj-attention">
+        <div className="rj-attention-kpis">
+          {focusOptions.filter((option) => option.count > 0 || option.key === "parados" || option.key === "ativos").map((option) => (
+            <button key={option.key} type="button" className={`rj-attention-kpi ${focus === option.key ? "is-active" : ""} ${option.tone && option.count ? `is-${option.tone}` : ""}`} onClick={() => setFocus(option.key)}>
+              <strong>{option.count}</strong><span>{option.label}</span>
+            </button>
+          ))}
         </div>
-        <div className="management-attention-list">
-          {attentionRows.map((row) => <div className="management-attention-item" key={row.id}>
-            <div className="management-attention-identity"><button type="button" className="management-link" onClick={() => onOpenProject(row.id)}>{row.name}</button><small>{row.clientName} | {row.responsibleName || "Sem responsavel"}</small></div>
-            <div className="management-attention-reasons">{row.reasons.map((reason) => <span key={reason} className={`management-reason ${reason}`}>{managementAttentionLabels[reason]}</span>)}</div>
-            <span className="management-attention-progress">{row.completedSteps}/{row.totalSteps} etapas</span>
-            <button type="button" className="secondary-button" onClick={() => onOpenProject(row.id)}>Abrir <ChevronRight size={15} /></button>
-          </div>)}
-          {attentionRows.length === 0 && <div className="empty-state"><CheckCircle2 size={28} /><strong>Nenhum projeto nesta fila</strong><span>Os filtros atuais não mostram pendencias de cadastro ou bloqueios.</span></div>}
-        </div>
-        <div className="management-execution-heading"><h3>Projetos abertos</h3><span>{visibleActiveProjects.length} projeto(s)</span></div>
-        <div className="management-attention-list">
-          {visibleActiveProjects.map((row) => <div className="management-attention-item" key={row.id}>
-            <div className="management-attention-identity"><button type="button" className="management-link" onClick={() => onOpenProject(row.id)}>{row.name}</button><small>{row.clientName} | {row.responsibleName || "Sem responsavel"}</small></div>
-            <span className="management-next-step">{row.nextStepName ? `Próxima etapa: ${row.nextStepName}` : "Sem próxima etapa registrada"}</span>
-            <span className="management-attention-progress">{row.completedSteps}/{row.totalSteps} etapas</span>
-            <button type="button" className="secondary-button" onClick={() => onOpenProject(row.id)}>Abrir <ChevronRight size={15} /></button>
-          </div>)}
-          {visibleActiveProjects.length === 0 && <div className="empty-state"><CheckCircle2 size={28} /><strong>Nenhum projeto aberto encontrado</strong></div>}
+        <div className="rj-card rj-attention-list">
+          {focusRows.map((row) => {
+            const workspace = workspaceOf(row.id);
+            const idle = daysSince(row.updatedAt);
+            return (
+              <div className="rj-attention-row" key={row.id}>
+                <div className="rj-attention-id">
+                  <button type="button" className="management-link" onClick={() => onOpenProject(row.id)}>{row.name}</button>
+                  <small>{row.clientId ? <button type="button" className="rj-link-button" onClick={() => onOpenClient(row.clientId!)}>{row.clientName}</button> : row.clientName} · {row.responsibleName || "Sem responsável"} · {row.projectTypeName}</small>
+                </div>
+                <div className="rj-attention-tags">
+                  {idle >= STALE_DAYS && isActive(row) && <span className="management-reason is-stale">sem movimento há {idle} dias</span>}
+                  {isActive(row) && workspace?.status !== "organizado" && <span className="management-reason">local de trabalho {workspace?.status === "parcial" ? "parcial" : "pendente"}</span>}
+                  {reasonsFor(row.id).map((reason) => <span key={reason} className={`management-reason ${reason}`}>{managementAttentionLabels[reason]}</span>)}
+                </div>
+                <span className="rj-attention-next">{row.nextStepName ? `Próxima: ${row.nextStepName}` : ""}</span>
+                <span className="management-attention-progress">{row.completedSteps}/{row.totalSteps} etapas</span>
+                <button type="button" className="secondary-button" onClick={() => onOpenProject(row.id)}>Abrir <ChevronRight size={15} /></button>
+              </div>
+            );
+          })}
+          {focusRows.length === 0 && <div className="empty-state"><CheckCircle2 size={28} /><strong>Nada nesta fila</strong><span>Nenhum projeto com este motivo de atenção.</span></div>}
         </div>
       </section>}
 
-      {view === "portfolio" && <section className="list-panel management-panel">
-        <div className="panel-heading">
-          <div>
-            <h2>Carteira de projetos</h2>
-            <p>Visao consolidada por cliente, responsavel, tipo e status.</p>
-          </div>
-          <div className="panel-tools management-tools">
-            <select className="compact-select" value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}>
-              <option value="todos">Todos clientes</option>
-              {tables.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-            </select>
-            <select className="compact-select" value={responsibleFilter} onChange={(event) => setResponsibleFilter(event.target.value)}>
-              <option value="todos">Todos responsaveis</option>
-              {activeUsers.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
-            </select>
-            <select className="compact-select" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
-              <option value="todos">Todos tipos</option>
-              {tables.project_types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
-            </select>
-            <select className="compact-select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ManagementStatus | "todos")}>
-              <option value="todos">Todos status</option>
-              <option value="planejado">Planejado</option>
-              <option value="em_andamento">Em andamento</option>
-              <option value="concluido">Concluído</option>
-              <option value="bloqueado">Bloqueado</option>
-              <option value="arquivado">Arquivado</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="management-table" role="table" aria-label="Carteira de projetos">
-          <div className="management-row management-row-head" role="row">
-            <span>Projeto</span>
-            <span>Cliente</span>
-            <span>Tipo</span>
-            <span>Responsável</span>
-            <span>Status</span>
-            <span>Progresso</span>
-          </div>
-          {filteredRows.map((row) => (
-            <div className="management-row" role="row" key={row.id}>
-              <button type="button" className="management-link" onClick={() => onOpenProject(row.id)}>{row.name}</button>
-              <button type="button" className="management-link subtle management-client-name" disabled={!row.clientId} onClick={() => row.clientId && onOpenClient(row.clientId)}>{row.clientId && <ClientLogo client={tables.clients.find((client) => client.id === row.clientId) ?? { name: row.clientName, logo_url: null }} small />}{row.clientName}</button>
-              <span>{row.projectTypeName}</span>
-              <span>{row.responsibleName || "Sem responsavel"}</span>
-              <span><StatusPill status={row.regularizationPending ? "regularizacao_pendente" : row.status} /></span>
-              <span className="management-progress"><span>{row.progress}%</span><div className="progress-bar"><span style={{ width: `${row.progress}%` }} /></div></span>
+      {view === "portfolio" && <section className="rj-people">
+        {people.map((person) => (
+          <article className="rj-card rj-person" key={person.user.id}>
+            <header><span className="rj-avatar">{person.user.name.slice(0, 1).toUpperCase()}</span><strong>{person.user.name}</strong></header>
+            <div className="rj-person-stats">
+              <span><strong>{person.active}</strong> em andamento</span>
+              <span className={person.stale ? "is-warning" : ""}><strong>{person.stale}</strong> parados</span>
+              <span className={person.localPending ? "is-warning" : ""}><strong>{person.localPending}</strong> local pendente</span>
+              <span className="is-good"><strong>{person.done30}</strong> concluídos (30 dias)</span>
             </div>
-          ))}
-        </div>
-
-        {filteredRows.length === 0 && (
-          <div className="empty-state">
-            <Layers3 size={34} />
-            <strong>Nenhum projeto para os filtros atuais</strong>
-            <span>Ajuste os filtros para visualizar a carteira.</span>
-          </div>
-        )}
+            {person.top.length > 0 && <ul>{person.top.map((row) => <li key={row.id}><button type="button" onClick={() => onOpenProject(row.id)}><span>{row.name}<small>{row.clientName}</small></span><em>{daysSince(row.updatedAt)}d</em></button></li>)}</ul>}
+          </article>
+        ))}
+        {people.length === 0 && <div className="empty-state"><Users size={28} /><strong>Nenhum responsável com projetos</strong></div>}
       </section>}
 
       {view === "clients" && <section className="list-panel management-panel">
         <div className="panel-heading">
           <div>
             <h2>Clientes consolidados</h2>
-            <p>Quantidade de projetos, pendencias e progresso medio por cliente.</p>
+            <p>Clique num cliente para abrir a página dele.</p>
           </div>
         </div>
         <div className="management-client-grid">
           {visibleClients.map((client) => (
             <button className="management-client-card" type="button" key={client.id} onClick={() => onOpenClient(client.id)}>
               <span className="management-client-title"><ClientLogo client={tables.clients.find((item) => item.id === client.id) ?? { name: client.name, logo_url: null }} /><strong>{client.name}</strong>{tables.clients.find((item) => item.id === client.id)?.client_kind && <span className="client-kind-badge">{tables.clients.find((item) => item.id === client.id)?.client_kind}</span>}</span>
-              <span>{client.company || "Cliente sem unidade informada"}</span>
               <div className="management-client-stats">
                 <small>{client.projectCount} projeto(s)</small>
                 <small>{client.activeProjectCount} ativo(s)</small>
-                <small>{client.completedProjectCount} concluido(s)</small>
+                <small>{client.completedProjectCount} concluído(s)</small>
               </div>
               <div className="progress-bar"><span style={{ width: `${client.averageProgress}%` }} /></div>
-              <small>{client.averageProgress}% de progresso medio</small>
+              <small>{client.averageProgress}% de progresso médio</small>
             </button>
           ))}
         </div>
@@ -8061,24 +8032,56 @@ function ConfigCrud({
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formState, setFormState] = useState<Record<string, unknown>>(createBlankConfig(module.key));
-  const [isFormOpen, setIsFormOpen] = useState(module.key === "prompts");
-  const records = (tables[module.key] as Array<Record<string, unknown>>).filter((record) => normalizeSearch(record.name, record.title, record.description).includes(query.toLowerCase()));
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("todos");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [toolFilter, setToolFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [sortBy, setSortBy] = useState<"name" | "recent">("name");
+  const isPrompts = module.key === "prompts";
+  const allRecords = tables[module.key] as Array<Record<string, unknown>>;
+  const records = allRecords
+    .filter((record) => normalizeSearchText(normalizeSearch(record.name, record.title, record.description, record.short_description, isPrompts ? record.content : "")).includes(normalizeSearchText(query)))
+    .filter((record) => statusFilter === "todos" || String(record.status ?? "ativo") === statusFilter)
+    .filter((record) => !categoryFilter || record.category_id === categoryFilter)
+    .filter((record) => !toolFilter || record.ai_tool_id === toolFilter)
+    .filter((record) => !typeFilter || record.project_type_id === typeFilter)
+    .sort((a, b) => sortBy === "recent"
+      ? String(b.updated_at ?? b.created_at ?? "").localeCompare(String(a.updated_at ?? a.created_at ?? ""))
+      : getRecordTitle(a).localeCompare(getRecordTitle(b), "pt-BR"));
+  const statusCounts = allRecords.reduce<Record<string, number>>((counts, record) => { const key = String(record.status ?? "ativo"); counts[key] = (counts[key] ?? 0) + 1; return counts; }, {});
+  const hasField = (field: string) => allRecords.some((record) => field in record) || field in createBlankConfig(module.key);
   const Icon = module.icon;
+  const nameOf = (list: Array<{ id: string; name?: string; title?: string }>, id: unknown) => { const item = list.find((entry) => entry.id === id); return item ? String(item.name ?? item.title ?? "") : ""; };
 
   useEffect(() => {
     setEditingId(null);
     setFormState(createBlankConfig(module.key));
-    setIsFormOpen(module.key === "prompts");
+    setIsFormOpen(false);
+    setStatusFilter("todos");
+    setCategoryFilter("");
+    setToolFilter("");
+    setTypeFilter("");
   }, [module.key]);
+
+  useEffect(() => {
+    if (!isFormOpen) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setIsFormOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isFormOpen]);
 
   async function saveConfig() {
     if (!supabase) {
       return;
     }
 
+    setSaving(true);
     const payload = normalizePayload(formState);
     const request = editingId ? supabase.from(module.key).update(payload).eq("id", editingId) : supabase.from(module.key).insert(payload);
     const { data, error } = await request;
+    setSaving(false);
 
     if (error) {
       onNotice(`Erro ao salvar ${module.label}: ${error.message}`);
@@ -8099,13 +8102,16 @@ function ConfigCrud({
     onNotice(editingId ? "Registro atualizado." : "Registro criado.");
     setEditingId(null);
     setFormState(createBlankConfig(module.key));
+    setIsFormOpen(false);
   }
 
-  async function removeConfig(id: string) {
+  async function removeConfig(record: Record<string, unknown>) {
     if (!supabase) {
       return;
     }
+    if (!window.confirm(`Excluir "${getRecordTitle(record)}"? Esta ação não pode ser desfeita. Para tirar de uso sem apagar, mude a situação para Arquivado.`)) return;
 
+    const id = String(record.id);
     const { error } = await supabase.from(module.key).delete().eq("id", id);
 
     if (error) {
@@ -8113,12 +8119,21 @@ function ConfigCrud({
       return;
     }
 
-    onTables((current) => ({ ...current, [module.key]: (current[module.key] as Array<{ id: string }>).filter((record) => record.id !== id) }));
+    onTables((current) => ({ ...current, [module.key]: (current[module.key] as Array<{ id: string }>).filter((item) => item.id !== id) }));
+    if (editingId === id) setIsFormOpen(false);
+    onNotice("Registro excluído.");
   }
 
   function editConfig(record: Record<string, unknown>) {
     setEditingId(String(record.id));
     setFormState(record);
+    setIsFormOpen(true);
+  }
+
+  function duplicateConfig(record: Record<string, unknown>) {
+    const { id: _id, created_at: _created, updated_at: _updated, ...rest } = record;
+    setEditingId(null);
+    setFormState({ ...rest, title: rest.title ? `${String(rest.title)} (cópia)` : rest.title, name: rest.name ? `${String(rest.name)} (cópia)` : rest.name, status: isPrompts ? "rascunho" : rest.status });
     setIsFormOpen(true);
   }
 
@@ -8128,68 +8143,78 @@ function ConfigCrud({
     setIsFormOpen(true);
   }
 
+  const statusLabels: Record<string, string> = { ativo: "Ativos", rascunho: "Rascunhos", inativo: "Inativos", arquivado: "Arquivados" };
+
   return (
-    <section className={`module-layout config-crud-layout ${module.key === "prompts" ? "prompt-library-layout" : ""}`}>
-      <aside className={`form-panel config-form-panel ${isFormOpen ? "is-open" : "is-collapsed"}`}>
-        <div className="form-heading">
-          <div>
-            <h2>{editingId ? "Editar cadastro" : module.key === "prompts" ? "Cadastrar novo prompt" : "Novo cadastro"}</h2>
-            <p>{module.label}</p>
-          </div>
-          <div className="config-form-actions">
-            {!isFormOpen && <button className="primary-button" type="button" onClick={openNewRecord}><Plus size={16} /> Novo</button>}
-            {isFormOpen && <button className="secondary-button" type="button" onClick={() => setIsFormOpen(false)}><ChevronDown size={16} /> Recolher</button>}
-            {isFormOpen && <button className="primary-button" type="button" onClick={() => void saveConfig()}><Save size={16} /> Salvar</button>}
-          </div>
-        </div>
-        {isFormOpen && <div className="config-form-content"><ConfigForm moduleKey={module.key} value={formState} tables={tables} onChange={(key, value) => setFormState((current) => ({ ...current, [key]: value }))} /></div>}
-      </aside>
+    <section className={`rj-config ${isPrompts ? "is-prompts" : ""}`}>
+      <div className="rj-config-toolbar">
+        <label className="rj-search-box rj-config-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={isPrompts ? "Buscar por título, descrição ou texto do prompt" : `Buscar em ${module.label.toLowerCase()}`} /></label>
+        {isPrompts && <label className="rj-select-inline"><span>Categoria</span><select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="">Todas</option>{tables.prompt_categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+        {(isPrompts || module.key === "prompt_blocks") && <label className="rj-select-inline"><span>Ferramenta</span><select value={toolFilter} onChange={(event) => setToolFilter(event.target.value)}><option value="">Todas</option>{tables.ai_tools.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+        {hasField("project_type_id") && module.key !== "project_types" && <label className="rj-select-inline"><span>Tipo</span><select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}><option value="">Todos</option>{tables.project_types.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+        <label className="rj-select-inline"><span>Ordem</span><select value={sortBy} onChange={(event) => setSortBy(event.target.value as "name" | "recent")}><option value="name">Nome</option><option value="recent">Mais recentes</option></select></label>
+        <button className="primary-button" type="button" onClick={openNewRecord}><Plus size={16} /> {isPrompts ? "Novo prompt" : "Novo cadastro"}</button>
+      </div>
+      <div className="rj-chip-row">
+        <button type="button" className={statusFilter === "todos" ? "is-active" : ""} onClick={() => setStatusFilter("todos")}>Todos <span>{allRecords.length}</span></button>
+        {Object.entries(statusCounts).sort(([a], [b]) => (["ativo", "rascunho", "inativo", "arquivado"].indexOf(a) - ["ativo", "rascunho", "inativo", "arquivado"].indexOf(b))).map(([status, count]) => <button key={status} type="button" className={statusFilter === status ? "is-active" : ""} onClick={() => setStatusFilter(status)}>{statusLabels[status] ?? status} <span>{count}</span></button>)}
+      </div>
 
-      <div className="list-panel">
-        <div className="panel-heading">
-          <div>
-            <h2>
-              <Icon size={18} /> {module.label}
-            </h2>
-            <p>{module.description}</p>
-          </div>
-          <label className="search-field">
-            <Search size={16} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar" />
-          </label>
-        </div>
-
-        <div className="record-list">
-          {records.map((record) => (
-            <div className="record-row" key={String(record.id)}>
-              <div className="record-main">
-                {module.key === "ai_tools" && <ToolLogo record={record} />}
-                <div>
-                  <strong>{getRecordTitle(record)}</strong>
-                  <span>{getRecordSubtitle(record, tables)}</span>
-                </div>
+      <div className="rj-config-list" role="list">
+        {records.map((record) => {
+          const category = isPrompts ? nameOf(tables.prompt_categories, record.category_id) : "";
+          const tool = record.ai_tool_id ? nameOf(tables.ai_tools, record.ai_tool_id) : "";
+          const type = record.project_type_id ? nameOf(tables.project_types, record.project_type_id) : "";
+          const description = String(record.short_description ?? record.description ?? "").trim();
+          return (
+            <article className={`rj-config-row ${editingId === String(record.id) && isFormOpen ? "is-active" : ""}`} role="listitem" key={String(record.id)} onClick={() => editConfig(record)}>
+              {module.key === "ai_tools" ? <ToolLogo record={record} /> : <span className="rj-config-icon"><Icon size={16} /></span>}
+              <div className="rj-config-main">
+                <strong>{getRecordTitle(record)}</strong>
+                {description ? <small>{description}</small> : <small className="rj-muted">{getRecordSubtitle(record, tables)}</small>}
               </div>
-              <div className="row-actions">
-                <StatusPill status={String(record.status ?? "ativo")} />
-                <button onClick={() => editConfig(record)}>
-                  <Pencil size={16} />
-                </button>
-                <button onClick={() => void removeConfig(String(record.id))}>
-                  <Trash2 size={16} />
-                </button>
+              <div className="rj-config-tags">
+                {category && <span className="rj-tag">{category}</span>}
+                {tool && <span className="rj-tag is-tool">{tool}</span>}
+                {type && <span className="rj-tag is-type">{type}</span>}
+                {isPrompts && record.version ? <span className="rj-tag is-soft">v{String(record.version)}</span> : null}
               </div>
-            </div>
-          ))}
-        </div>
-
+              <StatusPill status={String(record.status ?? "ativo")} />
+              <div className="row-actions" onClick={(event) => event.stopPropagation()}>
+                {isPrompts && <button type="button" title="Copiar texto do prompt" onClick={() => void copyToClipboard(String(record.content ?? ""), "Prompt")}><Copy size={15} /></button>}
+                {(isPrompts || module.key === "prompt_blocks") && <button type="button" title="Duplicar" onClick={() => duplicateConfig(record)}><Layers3 size={15} /></button>}
+                <button type="button" title="Editar" onClick={() => editConfig(record)}><Pencil size={15} /></button>
+                <button type="button" title="Excluir" onClick={() => void removeConfig(record)}><Trash2 size={15} /></button>
+              </div>
+            </article>
+          );
+        })}
         {records.length === 0 && (
           <div className="empty-state">
             <Icon size={34} />
-            <strong>Nenhum registro</strong>
-            <span>Abra o cadastro acima para criar o primeiro registro.</span>
+            <strong>{allRecords.length ? "Nada encontrado com esses filtros" : "Nenhum registro"}</strong>
+            <span>{allRecords.length ? "Ajuste a busca ou os filtros." : `Clique em "${isPrompts ? "Novo prompt" : "Novo cadastro"}" para criar o primeiro.`}</span>
           </div>
         )}
       </div>
+
+      {isFormOpen && (
+        <div className="rj-drawer-backdrop" role="presentation" onMouseDown={() => setIsFormOpen(false)}>
+          <aside className={`rj-drawer ${isPrompts ? "is-wide" : ""}`} role="dialog" aria-modal="true" aria-label={editingId ? "Editar cadastro" : "Novo cadastro"} onMouseDown={(event) => event.stopPropagation()}>
+            <header className="rj-drawer-head">
+              <div><span className="eyebrow">{module.label}</span><h2>{editingId ? getRecordTitle(formState) || "Editar" : isPrompts ? "Novo prompt" : "Novo cadastro"}</h2></div>
+              <button className="rj-icon-button" type="button" aria-label="Fechar" onClick={() => setIsFormOpen(false)}><X size={18} /></button>
+            </header>
+            <div className="rj-drawer-body"><ConfigForm moduleKey={module.key} value={formState} tables={tables} onChange={(key, value) => setFormState((current) => ({ ...current, [key]: value }))} /></div>
+            <footer className="rj-drawer-foot">
+              {editingId && <button className="secondary-button danger" type="button" onClick={() => void removeConfig(formState)}><Trash2 size={15} /> Excluir</button>}
+              <span className="rj-spacer" />
+              <button className="secondary-button" type="button" onClick={() => setIsFormOpen(false)}>Cancelar</button>
+              <button className="primary-button" type="button" disabled={saving} onClick={() => void saveConfig()}>{saving ? <Loader2 className="spin" size={16} /> : <Save size={16} />} Salvar</button>
+            </footer>
+          </aside>
+        </div>
+      )}
     </section>
   );
 }
