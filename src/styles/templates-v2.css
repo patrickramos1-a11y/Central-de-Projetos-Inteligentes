@@ -150,3 +150,13 @@
 .rj-client-ref-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .rj-client-ref-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted); font-size: 12px; }
 @media (max-width: 960px) { .rj-client-grid, .rj-client-refs { grid-template-columns: 1fr; } }
+
+/* Projetos: tipo clicável para classificar */
+.rj-type-select { max-width: 100%; height: 30px; padding: 0 22px 0 8px; border: 1px solid transparent; border-radius: 6px; background-color: transparent; color: #5b63a5; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; text-overflow: ellipsis; }
+.rj-type-select:hover, .rj-type-select:focus { border-color: var(--color-border); background-color: #fff; }
+.projects-type.is-missing .rj-type-select { color: var(--color-amber); border-color: rgb(217 149 24 / 45%); background-color: var(--surface-warning); }
+
+/* Linha estreita: o nome do cliente já aparece junto ao projeto; o logo não fica solto no meio */
+@media (max-width: 1080px) {
+  .rj-shell .projects-row .projects-client { display: none; }
+}

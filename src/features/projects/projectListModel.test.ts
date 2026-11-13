@@ -8,8 +8,8 @@ const baseRows = buildManagementProjectRows({
   templates: [{ id: "template-pca", name: "Template PCA" }, { id: "template-ria", name: "Template RIA" }],
   users: [{ id: "user-1", name: "Patrick" }],
   projects: [
-    { id: "pca", name: "PCA Bento Sushi", company: "Bento Sushi", client_id: null, project_type_id: null, journey_template_id: "template-pca", responsible: "Patrick", responsible_user_id: null, status: "em_andamento", updated_at: "2026-01-02" },
-    { id: "ria", name: "RIA Advance", company: "Outro nome", client_id: "client-2", project_type_id: null, journey_template_id: "template-ria", responsible: null, responsible_user_id: "user-1", status: "em_andamento", updated_at: "2026-01-03" },
+    { id: "pca", name: "PCA Bento Sushi", company: "Bento Sushi", client_id: null, project_type_id: "type-pca", journey_template_id: "template-pca", responsible: "Patrick", responsible_user_id: null, status: "em_andamento", updated_at: "2026-01-02" },
+    { id: "ria", name: "RIA Advance", company: "Outro nome", client_id: "client-2", project_type_id: "type-ria", journey_template_id: "template-ria", responsible: null, responsible_user_id: "user-1", status: "em_andamento", updated_at: "2026-01-03" },
   ],
   steps: [],
 });
@@ -37,19 +37,19 @@ describe("projectListModel", () => {
     expect(withSummary.find((row) => row.id === "ria")?.displayStatus).toBe("concluido");
   });
 
-  test("groups by linked or legacy client, template, operational status, or no group", () => {
+  test("groups by linked or legacy client, project type, operational status, or no group", () => {
     const rows = buildProjectListRows(baseRows, [], []);
     expect(groupProjectListRows(rows, "client").map((group) => group.label)).toEqual(["Advance", "Bento Sushi"]);
-    expect(groupProjectListRows(rows, "template").map((group) => group.label)).toEqual(["Template RIA", "Template PCA"]);
+    expect(groupProjectListRows(rows, "template").map((group) => group.label)).toEqual(["RIA", "PCA"]);
     expect(groupProjectListRows(rows, "status").map((group) => group.label)).toEqual(["Em andamento · Local nao verificado"]);
     expect(groupProjectListRows(rows, "none")).toHaveLength(1);
   });
 
-  test("filters by effective status, client, template and responsible name", () => {
+  test("filters by effective status, client, project type and responsible name", () => {
     const rows = buildProjectListRows(baseRows, [{ project_id: "ria", name: "Iniciar", status: "concluido" }], []);
 const defaults = { search: "", status: "todos" as const, responsible: "todos", template: "todos" };
     expect(filterProjectListRows(rows, { ...defaults, status: "concluido" }).map((row) => row.id)).toEqual(["ria"]);
-    expect(filterProjectListRows(rows, { ...defaults, search: "bento", template: "Template PCA", responsible: "Patrick" }).map((row) => row.id)).toEqual(["pca"]);
+    expect(filterProjectListRows(rows, { ...defaults, search: "bento", template: "PCA", responsible: "Patrick" }).map((row) => row.id)).toEqual(["pca"]);
     expect(filterProjectListRows(rows, { ...defaults, search: "advance" }).map((row) => row.id)).toEqual(["ria"]);
   });
 

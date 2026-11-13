@@ -142,7 +142,7 @@ function elapsedProjectDays(row: Pick<ProjectListRow, "createdAt" | "displayStat
 }
 
 export function sortProjectListRows(rows: ProjectListRow[], column: ProjectSortColumn, direction: ProjectSortDirection, now = new Date()): ProjectListRow[] {
-  const textFor = (row: ProjectListRow) => column === "name" ? row.name : column === "client" ? row.clientName : column === "template" ? row.templateName : row.responsibleName;
+  const textFor = (row: ProjectListRow) => column === "name" ? row.name : column === "client" ? row.clientName : column === "template" ? row.projectTypeName : row.responsibleName;
   const numberFor = (row: ProjectListRow) => column === "progress" ? row.progress : elapsedProjectDays(row, now);
   return [...rows].sort((a, b) => {
     if (column === "progress" || column === "age") {
@@ -206,7 +206,7 @@ export function filterProjectListRows(rows: ProjectListRow[], filters: ProjectLi
     if (filters.status === "concluido" && row.displayStatus !== "concluido") return false;
     if (filters.status === "em_andamento" && (row.displayStatus === "concluido" || row.displayStatus === "arquivado")) return false;
     if (filters.responsible !== "todos" && row.responsibleName !== filters.responsible) return false;
-    if (filters.template !== "todos" && row.templateName !== filters.template) return false;
+    if (filters.template !== "todos" && row.projectTypeName !== filters.template) return false;
     if (filters.workspaceGap && filters.workspaceGap !== "todos" && row.workspaceGap !== filters.workspaceGap) return false;
     if (project && !normalizeManagementText(row.name).includes(project)) return false;
     if (filters.client && filters.client !== "todos" && row.clientName !== filters.client) return false;
@@ -231,6 +231,7 @@ export function filterProjectListRows(rows: ProjectListRow[], filters: ProjectLi
       row.clientName,
       row.legacyCompany,
       row.projectTypeName,
+      row.projectTypeName,
       row.templateName,
       row.responsibleName,
     ].join(" ")).includes(search);
@@ -243,7 +244,7 @@ export function groupProjectListRows(rows: ProjectListRow[], groupBy: ProjectGro
   const groups = new Map<string, ProjectListGroup>();
   for (const row of rows) {
     const statusGroup = groupBy === "status" ? projectStatusGroup(row) : null;
-    const label = statusGroup?.label ?? (groupBy === "client" ? row.clientName : row.templateName);
+    const label = statusGroup?.label ?? (groupBy === "client" ? row.clientName : row.projectTypeName);
     const identifier = groupBy === "client" ? row.clientId : groupBy === "template" ? row.templateId : null;
     const key = statusGroup?.key ?? `${groupBy}:${identifier || normalizeManagementText(label)}`;
     const group = groups.get(key) ?? { key, label, rows: [] };

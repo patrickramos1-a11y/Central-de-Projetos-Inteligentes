@@ -3234,7 +3234,7 @@ type NewClientFormState = {
 const projectColumns: { key: ProjectSortColumn; label: string }[] = [
   { key: "client", label: "Cliente" },
   { key: "name", label: "Projeto" },
-  { key: "template", label: "Template" },
+  { key: "template", label: "Tipo" },
   { key: "responsible", label: "Responsável" },
   { key: "age", label: "Tempo" },
   { key: "progress", label: "Execução" },
@@ -3324,7 +3324,7 @@ function ProjectsView({
   const sortedRows = useMemo(() => sortColumn ? sortProjectListRows(filteredRows, sortColumn, sortDirection) : filteredRows, [filteredRows, sortColumn, sortDirection]);
   const groupedRows = useMemo(() => groupProjectListRows(sortedRows, groupBy), [sortedRows, groupBy]);
   const responsibleOptions = useMemo(() => [...new Set(projectRows.map((row) => row.responsibleName).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [projectRows]);
-  const templateOptions = useMemo(() => [...new Set(projectRows.map((row) => row.templateName))].sort((a, b) => a.localeCompare(b)), [projectRows]);
+  const templateOptions = useMemo(() => [...new Set(projectRows.map((row) => row.projectTypeName))].sort((a, b) => a.localeCompare(b)), [projectRows]);
   const clientOptions = useMemo(() => [...new Set(projectRows.map((row) => row.clientName))].sort((a, b) => a.localeCompare(b)), [projectRows]);
 
   function toggleSort(column: ProjectSortColumn) {
@@ -3385,6 +3385,7 @@ function ProjectsView({
 
   function saveProjectEditor() {
     if (!editingProject || !projectNameDraft.trim()) return;
+    if (!projectTypeDraft) { window.dispatchEvent(new CustomEvent("ramos:toast", { detail: { message: "Selecione o tipo de projeto." } })); return; }
     const responsibleUser = tables.app_users.find((user) => user.id === projectResponsibleUserDraft) ?? null;
     const linkedClient = tables.clients.find((client) => client.id === projectClientDraft) ?? null;
     onUpdate(editingProject.id, {
@@ -3445,7 +3446,7 @@ function ProjectsView({
             </div>
           </div>
           <label className="projects-filter">
-            <span>Template</span>
+            <span>Tipo</span>
             <select value={templateFilter} onChange={(event) => setTemplateFilter(event.target.value)}>
               <option value="todos">Todos</option>
               {templateOptions.map((name) => <option key={name} value={name}>{name}</option>)}
@@ -3456,7 +3457,7 @@ function ProjectsView({
             <div className="projects-segment projects-group-segment" role="group" aria-label="Agrupar projetos">
               <button type="button" aria-pressed={groupBy === "none"} title="Mostrar lista sem agrupamento" onClick={() => selectGrouping("none")}><PanelTop size={15} aria-hidden="true" /><span>Lista</span></button>
               <button type="button" aria-pressed={groupBy === "client"} title="Agrupar por cliente, inicialmente recolhido" onClick={() => selectGrouping("client")}><Users size={15} aria-hidden="true" /><span>Cliente</span></button>
-              <button type="button" aria-pressed={groupBy === "template"} title="Agrupar por template, inicialmente recolhido" onClick={() => selectGrouping("template")}><Layers3 size={15} aria-hidden="true" /><span>Template</span></button>
+              <button type="button" aria-pressed={groupBy === "template"} title="Agrupar por tipo de projeto, inicialmente recolhido" onClick={() => selectGrouping("template")}><Layers3 size={15} aria-hidden="true" /><span>Tipo</span></button>
               <button type="button" aria-pressed={groupBy === "status"} title="Agrupar por status e pendencias do local, inicialmente recolhido" onClick={() => selectGrouping("status")}><ListChecks size={15} aria-hidden="true" /><span>Status</span></button>
             </div>
           </div>
@@ -3502,6 +3503,8 @@ function ProjectsView({
                     onComplete={() => completeProject(row)}
                     onReopen={() => onUpdate(row.id, { status: "em_andamento" })}
                     onDelete={() => onDelete(row.id)}
+                    projectTypes={tables.project_types.filter((type) => type.status === "ativo")}
+                    onChangeType={(typeId) => onUpdate(row.id, { project_type_id: typeId, project_modality_id: null })}
                   />
                 ))}
               </div>}
@@ -3534,14 +3537,13 @@ function ProjectsView({
             <div className="project-editor-fields">
               <Field label="Nome do projeto" value={projectNameDraft} onChange={setProjectNameDraft} />
               <ClientSearchSelect label="Cliente vinculado" value={projectClientDraft} clients={tables.clients} onChange={(value) => { setProjectClientDraft(value); const client = tables.clients.find((item) => item.id === value); if (client) setProjectCompanyDraft(client.name); }} />
-              {!projectClientDraft && <Field label="Empresa legada" value={projectCompanyDraft} onChange={setProjectCompanyDraft} />}
               <SelectField label="Responsável" value={projectResponsibleUserDraft} onChange={setProjectResponsibleUserDraft} options={activeUsers.map(toOption)} />
-              <SelectField label="Tipo de projeto" value={projectTypeDraft} onChange={(value) => { setProjectTypeDraft(value); setProjectModalityDraft(""); }} options={tables.project_types.filter((item) => item.status === "ativo").map(toOption)} />
+              <SelectField label="Tipo de projeto *" value={projectTypeDraft} onChange={(value) => { setProjectTypeDraft(value); setProjectModalityDraft(""); }} options={tables.project_types.filter((item) => item.status === "ativo").map(toOption)} emptyLabel="Selecione o tipo" />
               <SelectField label="Modalidade" value={projectModalityDraft} onChange={setProjectModalityDraft} options={tables.project_modalities.filter((item) => item.status === "ativo" && item.project_type_id === projectTypeDraft).map(toOption)} />
             </div>
             <div className="inline-actions project-editor-actions">
               <button className="secondary-button" type="button" onClick={() => setEditingProject(null)}>Cancelar</button>
-              <button className="primary-button" type="submit"><Save size={16} /> Salvar alterações</button>
+              <button className="primary-button" type="submit" disabled={!projectNameDraft.trim() || !projectTypeDraft}><Save size={16} /> Salvar alterações</button>
             </div>
           </form>
         </div>
@@ -3559,7 +3561,9 @@ function projectOwnerTone(name: string) {
   return (hash % 5) + 1;
 }
 
-function ProjectPortfolioRow({ row, client, workspace, onOpen, onShare, onEdit, onComplete, onReopen, onDelete }: {
+function ProjectPortfolioRow({ row, client, workspace, onOpen, onShare, onEdit, onComplete, onReopen, onDelete, projectTypes = [], onChangeType }: {
+  projectTypes?: Array<{ id: string; name: string }>;
+  onChangeType?: (typeId: string) => void;
   row: ProjectListRow;
   client: Client | null;
   workspace?: WorkspaceOverview;
@@ -3606,7 +3610,14 @@ function ProjectPortfolioRow({ row, client, workspace, onOpen, onShare, onEdit, 
           {hasClientName && <span className="projects-project-company"> - {row.clientName}</span>}
         </button>
       </div>
-      <span className="projects-cell projects-type" title={row.templateName}>{row.templateName}</span>
+      <span className={`projects-cell projects-type ${row.hasProjectTypeLink ? "" : "is-missing"}`} title={row.templateName !== "Sem template" ? `Template: ${row.templateName}` : "Clique para classificar o tipo"}>
+        {onChangeType ? (
+          <select className="rj-type-select" aria-label={`Tipo de ${row.name}`} value={row.hasProjectTypeLink ? row.projectTypeId : ""} onChange={(event) => event.target.value && onChangeType(event.target.value)}>
+            {!row.hasProjectTypeLink && <option value="">Classificar…</option>}
+            {projectTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
+          </select>
+        ) : row.projectTypeName}
+      </span>
       <span className="projects-cell projects-owner">
         <span className="projects-owner-tag" data-tone={projectOwnerTone(ownerName)} title={`Responsável: ${ownerName}`}>
           <span className="projects-owner-initials" aria-hidden="true">{ownerInitials}</span>{ownerName}
@@ -3860,9 +3871,8 @@ function NewProjectPanel({ tables, currentUser, onCreate, onClose }: { tables: T
           }}
         />
         {form.client_id === "__new" && <Field label="Novo cliente" value={form.new_client_name} onChange={(value) => setForm({ ...form, new_client_name: value, company: value })} />}
-        {!form.client_id && <Field label="Empresa / cliente legado" value={form.company} onChange={(value) => setForm({ ...form, company: value })} />}
         <SelectField label="Responsável" value={form.responsible_user_id} onChange={(value) => setForm({ ...form, responsible_user_id: value })} options={activeUsers.map(toOption)} />
-        <SelectField label="Tipo de projeto" value={form.project_type_id} onChange={(value) => setForm((current) => ({ ...current, project_type_id: value, project_modality_id: "", new_project_modality_name: "", journey_template_id: templateAfterTypeChange(current.journey_template_id, value, "", tables.journey_templates) }))} options={tables.project_types.filter((type) => type.status === "ativo" || type.id === form.project_type_id).map(toOption)} />
+        <SelectField label="Tipo de projeto *" emptyLabel="Selecione o tipo" value={form.project_type_id} onChange={(value) => setForm((current) => ({ ...current, project_type_id: value, project_modality_id: "", new_project_modality_name: "", journey_template_id: templateAfterTypeChange(current.journey_template_id, value, "", tables.journey_templates) }))} options={tables.project_types.filter((type) => type.status === "ativo" || type.id === form.project_type_id).map(toOption)} />
         <ModalitySearchSelect
           value={form.project_modality_id}
           projectTypeId={form.project_type_id}
@@ -3884,7 +3894,8 @@ function NewProjectPanel({ tables, currentUser, onCreate, onClose }: { tables: T
       </div>
       <div className="project-create-footer">
         <button className="secondary-button" type="button" onClick={onClose}>Cancelar</button>
-        <button className="primary-button" type="button" onClick={() => onCreate(form)}><Save size={16} />Criar jornada</button>
+        {!form.project_type_id && <span className="rj-muted">Escolha o tipo de projeto para criar.</span>}
+        <button className="primary-button" type="button" disabled={!form.name.trim() || !form.project_type_id} onClick={() => onCreate(form)}><Save size={16} />Criar jornada</button>
       </div>
     </section>
   );
