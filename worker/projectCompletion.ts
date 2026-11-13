@@ -69,3 +69,30 @@ export async function applyProjectStatusTransition(db: D1Database, projectId: st
   }
   return { completed: 0, notApplicable: 0 };
 }
+
+/**
+ * Applies the completion rule to projects concluded before it existed:
+ * started steps become concluded, untouched steps become not applicable.
+ * Idempotent; projects without open steps are skipped.
+ */
+export async function closeOpenStepsOfConcludedProjects(db: D1Database) {
+  const projects = await db.prepare(`select distinct p.id, p.name from projects p
+    join project_steps s on s.project_id = p.id
+    where p.status = 'concluido' and coalesce(s.is_not_applicable, 0) = 0 and s.status != 'concluido'`).all<{ id: string; name: string }>();
+  const now = new Date().toISOString();
+  const result = { projects: 0, completed: 0, notApplicable: 0, details: [] as Array<{ name: string; completed: number; notApplicable: number }> };
+  for (const project of projects.results ?? []) {
+    const { results } = await db.prepare(stepProgressSql).bind(project.id).all<StepCompletionInput>();
+    const actions = planStepsOnProjectCompletion(results ?? []);
+    if (!actions.length) continue;
+    await db.batch(actions.map((item) => item.action === "complete"
+      ? db.prepare("update project_steps set status = 'concluido', updated_at = ? where id = ?").bind(now, item.id)
+      : db.prepare("update project_steps set is_not_applicable = 1, updated_at = ? where id = ?").bind(now, item.id)));
+    const completed = actions.filter((item) => item.action === "complete").length;
+    result.projects += 1;
+    result.completed += completed;
+    result.notApplicable += actions.length - completed;
+    result.details.push({ name: project.name, completed, notApplicable: actions.length - completed });
+  }
+  return result;
+}

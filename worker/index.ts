@@ -3,7 +3,7 @@ import { handleJourneyDomainRequest } from "./journeyDomain";
 import { buildTableReadQuery } from "./tableRead";
 import { handleProjectWorkspaceRequest, isProjectWorkspaceOrganized, readWorkspaceOverview } from "./projectWorkspace";
 import { handleStageLibraryRequest } from "./stageLibrary";
-import { applyProjectStatusTransition, readProjectStatus } from "./projectCompletion";
+import { applyProjectStatusTransition, closeOpenStepsOfConcludedProjects, readProjectStatus } from "./projectCompletion";
 import { handleDeliveriesRequest } from "./deliveries";
 
 type Env = {
@@ -82,6 +82,10 @@ export default {
           workspaces,
           clientContextCounts: (clientContexts.results ?? []).map((row) => ({ clientId: row.client_id, count: row.total })),
         } });
+      }
+
+      if (url.pathname === "/api/maintenance/close-concluded-project-steps" && request.method === "POST") {
+        return json({ data: await closeOpenStepsOfConcludedProjects(env.DB) });
       }
 
       const deliveriesResponse = await handleDeliveriesRequest(request, env, parts, url);
