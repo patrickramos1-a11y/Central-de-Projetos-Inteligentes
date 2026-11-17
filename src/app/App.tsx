@@ -2943,7 +2943,7 @@ async function applyProjectSummary(summaryId: string): Promise<boolean> {    try
           prompts={tables.prompts}
           onClose={() => setIsSearchOpen(false)}
           onOpenProject={(id) => { setIsSearchOpen(false); openProjectFromSearch(id); }}
-          onOpenClient={() => { setIsSearchOpen(false); navigateFromTemplate("clients"); }}
+          onOpenClient={(id) => { setIsSearchOpen(false); setSelectedClientId(id); setView("clientPage"); }}
           onOpenTemplate={() => { setIsSearchOpen(false); navigateFromTemplate("projectTemplates"); }}
           onOpenPrompt={() => { setIsSearchOpen(false); navigateFromTemplate("settings"); setActiveConfig("prompts" as ConfigModuleKey); }}
         />

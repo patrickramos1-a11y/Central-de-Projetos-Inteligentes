@@ -9539,6 +9539,9 @@ body {
 .client-expansion-toolbar .secondary-button.is-active { color: #244eaa; border-color: #91ade8; background: #eef3ff; }
 .client-detail-row.context { grid-template-columns: 24px minmax(310px, 1.25fr) minmax(270px, 1fr) minmax(148px, .52fr) auto; gap: 12px; }
 .client-detail-row.context.is-selecting { grid-template-columns: 24px 26px minmax(280px, 1.25fr) minmax(240px, 1fr) minmax(142px, .52fr) auto; }
+.client-detail-row.journey { grid-template-columns: 24px minmax(220px, 1.3fr) minmax(130px, .6fr) auto; border-left-color: #4169d8; background: #f6f8ff; }
+.client-journey-status { color: #3c5f9f; font-size: 11px; font-weight: 750; }
+.client-detail-row.journey .secondary-button { min-height: 30px; padding: 4px 8px; font-size: 11px; }
 .client-context-select { display: grid; place-items: center; width: 24px; height: 28px; cursor: pointer; }
 .client-context-select input { width: 17px; height: 17px; accent-color: #4169d8; cursor: pointer; }
 .client-context-title,
@@ -9581,6 +9584,9 @@ body {
   .client-detail-actions { grid-column: 3; grid-row: 1; }
   .client-detail-row.context { grid-template-columns: 24px minmax(0, 1fr) auto; gap: 7px; }
   .client-detail-row.context.is-selecting { grid-template-columns: 24px 24px minmax(0, 1fr) auto; }
+  .client-detail-row.journey { grid-template-columns: 24px minmax(0, 1fr) auto; }
+  .client-detail-row.journey .client-journey-status { grid-column: 2 / -1; }
+  .client-detail-row.journey .secondary-button { grid-column: -2; grid-row: 1; }
   .client-detail-row.context .client-context-summary,
   .client-detail-row.context .client-context-meta { grid-column: 2 / -1; padding-left: 0; }
   .client-detail-row.context.is-selecting .client-context-summary,

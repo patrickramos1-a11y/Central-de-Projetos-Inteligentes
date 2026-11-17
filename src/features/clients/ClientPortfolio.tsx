@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpDown, CheckSquare, ChevronDown, ChevronRight, Copy, ExternalLink, Filter, FolderOpen, Layers3, Loader2, Pencil, Search, UserRound } from "lucide-react";
+import { ArrowUpDown, CheckSquare, ChevronDown, ChevronRight, Copy, ExternalLink, Filter, FolderKanban, FolderOpen, Layers3, Loader2, Pencil, Search, UserRound } from "lucide-react";
 import { copyText } from "../../components/ui/clipboard";
 import type { WorkspaceOverview, WorkspaceReference } from "../workspace/workspaceModel";
 import { browserAccessibleUrl, displayDirectoryPath, workspaceProvider, type ProjectWorkspace } from "../workspace/workspaceModel";
@@ -81,6 +81,18 @@ function ReferenceTable({ title, items, empty, onOpenProject }: {
   </section>;
 }
 
+function JourneyTable({ items, onOpenProject }: { items: ClientWorkspace[]; onOpenProject: (id: string) => void }) {
+  return <section className="client-detail-section journeys">
+    <header><strong>Jornadas abertas</strong><span>{items.length}</span></header>
+    <div className="client-detail-table">{items.map(({ project, workspace }) => <div className="client-detail-row journey" key={project.id}>
+      <FolderKanban size={16} />
+      <span><strong>{project.name}</strong><small>{project.status.replace(/_/g, " ")}</small></span>
+      <span className="client-journey-status">{workspace.status === "organizado" ? "Local organizado" : workspace.status === "parcial" ? "Local parcial" : "Local pendente"}</span>
+      <button className="secondary-button compact" type="button" onClick={() => onOpenProject(project.id)}>Abrir jornada</button>
+    </div>)}</div>
+  </section>;
+}
+
 function ClientExpansion({ client, details, loading, onOpenClient, onOpenProject, onOpenContexts, onOpenWorkspaces }: {
   client: PortfolioClient; details?: LoadedDetails; loading: boolean; onOpenClient: (id: string) => void;
   onOpenProject: (id: string) => void; onOpenContexts: (id: string) => void; onOpenWorkspaces: (id: string) => void;
@@ -91,6 +103,7 @@ function ClientExpansion({ client, details, loading, onOpenClient, onOpenProject
   const flattened = (details?.workspaces ?? []).flatMap((item) => item.workspace.references.map((reference) => ({ id: `${item.project.id}:${reference.id}`, projectId: item.project.id, projectName: item.project.name, reference })));
   const directories = flattened.filter((item) => item.reference.kind === "directory");
   const links = flattened.filter((item) => item.reference.kind !== "directory");
+  const openJourneys = (details?.workspaces ?? []).filter(({ project }) => project.status !== "concluido" && project.status !== "arquivado");
   const contexts = [...(details?.contexts ?? [])].sort((left, right) => {
     const leftDate = Date.parse(left.created_at || left.updated_at);
     const rightDate = Date.parse(right.created_at || right.updated_at);
@@ -119,14 +132,15 @@ function ClientExpansion({ client, details, loading, onOpenClient, onOpenProject
   return <div className="client-portfolio-expansion">
     <div className="client-expansion-toolbar">
       <span>Informacoes consolidadas de {client.name}</span>
-      <div><button className="secondary-button" type="button" onClick={() => onOpenContexts(client.id)}><Layers3 size={15} /> Gerenciar contextos</button>{contexts.length > 0 && <><button className={`secondary-button ${isSelectingContexts ? "is-active" : ""}`} type="button" aria-pressed={isSelectingContexts} onClick={toggleSelectionMode}><CheckSquare size={15} /> {isSelectingContexts ? "Cancelar seleção" : "Selecionar contextos"}</button>{isSelectingContexts && <button className="secondary-button" type="button" disabled={selectedContexts.length === 0} onClick={copySelectedContexts}><Copy size={15} /> Copiar selecionados ({selectedContexts.length})</button>}</>}<button className="secondary-button" type="button" onClick={() => onOpenWorkspaces(client.id)}><FolderOpen size={15} /> Ver locais completos</button><button className="secondary-button" type="button" onClick={() => onOpenClient(client.id)}><UserRound size={15} /> Abrir cliente</button></div>
+      <div>{contexts.length > 0 && <><button className="secondary-button" type="button" onClick={() => onOpenContexts(client.id)}><Layers3 size={15} /> Gerenciar contextos</button><button className={`secondary-button ${isSelectingContexts ? "is-active" : ""}`} type="button" aria-pressed={isSelectingContexts} onClick={toggleSelectionMode}><CheckSquare size={15} /> {isSelectingContexts ? "Cancelar seleção" : "Selecionar contextos"}</button>{isSelectingContexts && <button className="secondary-button" type="button" disabled={selectedContexts.length === 0} onClick={copySelectedContexts}><Copy size={15} /> Copiar selecionados ({selectedContexts.length})</button>}</>}{(directories.length > 0 || links.length > 0) && <button className="secondary-button" type="button" onClick={() => onOpenWorkspaces(client.id)}><FolderOpen size={15} /> Ver locais completos</button>}<button className="secondary-button" type="button" onClick={() => onOpenClient(client.id)}><UserRound size={15} /> Abrir cliente</button></div>
     </div>
     {loading && <p className="client-detail-loading" role="status"><Loader2 className="spin" size={17} /> Carregando detalhes...</p>}
     {details && <div className="client-expansion-grid">
-      <section className="client-detail-section contexts">
+      {openJourneys.length > 0 && <JourneyTable items={openJourneys} onOpenProject={onOpenProject} />}
+      {details.contextError && <p className="client-detail-error" role="alert">{details.contextError}</p>}
+      {contexts.length > 0 && <section className="client-detail-section contexts">
         <header><strong>Contextos</strong><span>{details.contexts.length}</span></header>
-        {details.contextError && <p className="client-detail-error" role="alert">{details.contextError}</p>}
-        {contexts.length ? <div className="client-detail-table">{contexts.map((context) => {
+        <div className="client-detail-table">{contexts.map((context) => {
           const projectName = context.origin_project_id ? projects.get(context.origin_project_id) : null;
           return <div className={`client-detail-row context ${isSelectingContexts ? "is-selecting" : ""}`} key={context.id}>
           <Layers3 size={16} />
@@ -136,11 +150,11 @@ function ClientExpansion({ client, details, loading, onOpenClient, onOpenProject
           <span className="client-context-meta"><small>Criado em {contextCreatedAt(context.created_at)}</small><small>{projectName ? `Projeto: ${projectName}` : context.origin_type === "project" ? "Projeto de origem indisponível" : "Biblioteca do cliente"}</small></span>
           <DetailActions target={context.content} projectId={context.origin_project_id && projects.has(context.origin_project_id) ? context.origin_project_id : null} onOpenProject={onOpenProject} />
         </div>;
-        })}</div> : !details.contextError && <p>Nenhum contexto ativo vinculado.</p>}
-      </section>
+        })}</div>
+      </section>}
       {details.workspaceError && <p className="client-detail-error" role="alert">{details.workspaceError}</p>}
-      <ReferenceTable title="Diretórios e locais" items={directories} empty="Nenhum diretorio de servidor cadastrado." onOpenProject={onOpenProject} />
-      <ReferenceTable title="Links vinculados" items={links} empty="Nenhum link de conversa ou apoio cadastrado." onOpenProject={onOpenProject} />
+      {directories.length > 0 && <ReferenceTable title="Diretórios e locais" items={directories} empty="" onOpenProject={onOpenProject} />}
+      {links.length > 0 && <ReferenceTable title="Links vinculados" items={links} empty="" onOpenProject={onOpenProject} />}
     </div>}
   </div>;
 }
