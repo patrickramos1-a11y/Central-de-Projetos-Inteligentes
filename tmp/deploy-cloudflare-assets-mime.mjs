@@ -167,7 +167,7 @@ async function main() {
     compatibility_date: "2026-06-17",
     assets: {
       jwt: completionJwt,
-      config: { not_found_handling: "single-page-application", run_worker_first: ["/api/*", "/jornada/*"] },
+      config: { not_found_handling: "single-page-application", run_worker_first: ["/api/*", "/jornada/*", "/"] },
     },
     bindings: [
       { type: "assets", name: "ASSETS" },
