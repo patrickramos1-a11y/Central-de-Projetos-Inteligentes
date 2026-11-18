@@ -1,4 +1,5 @@
-import { Bot, FileText, FolderTree, Layers3, Link, ListChecks, MessageSquareText, Plus, Trash2 } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, FileText, FolderTree, Layers3, Link, ListChecks, MessageSquareText, Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { MaterialsConfigEditor } from "../journey/MaterialsBlock";
 import { readSlots, slotKindLabels } from "../../../shared/materialsSlots";
 import { WorkspaceProviderBadge } from "../workspace/WorkspaceProviderBadge";
@@ -126,14 +127,18 @@ export function BlockConfigEditor({ block, prompts, onChange }: { block: Templat
 export function BlockPreview({ block }: { block: TemplateBlock }) {
   const meta = blockMeta(block.type);
   const Icon = meta.Icon;
+  const [isCollapsed, setIsCollapsed] = useState(Boolean(block.collapsedByDefault));
   const items = list(block.config.items);
   const contexts = list(block.config.contexts);
   const slots = block.type === "materials" ? readSlots(block.config) : [];
   const fixed = list(block.config.links).filter((link) => String(link.url ?? "").trim());
   const content = String(block.config.content ?? block.config.contentSnapshot ?? "").trim();
   return (
-    <article className={`rj-preview-block type-${block.type}`}>
-      <header><Icon size={17} /><strong>{block.title || meta.label}</strong><small>{meta.label}{block.required ? " · obrigatório" : ""}</small></header>
+    <article className={`rj-preview-block type-${block.type} ${isCollapsed ? "is-collapsed" : ""}`}>
+      <button className="rj-preview-block-head" type="button" aria-expanded={!isCollapsed} onClick={() => setIsCollapsed((current) => !current)}>
+        <Icon size={17} /><strong>{block.title || meta.label}</strong><small>{meta.label}{block.required ? " · obrigatório" : ""}</small>{isCollapsed ? <ChevronRight size={17} /> : <ChevronDown size={17} />}
+      </button>
+      {!isCollapsed && <>
       {content && <p className="rj-preview-text">{content.length > 420 ? `${content.slice(0, 420)}…` : content}</p>}
       {block.type === "prompt" && <div className="rj-preview-actions"><span className="rj-fake-button is-primary">Copiar prompt</span><span className="rj-fake-button">Confirmar aplicação</span></div>}
       {block.type === "checklist" && (items.length ? <ul className="rj-preview-checks">{items.map((item) => <li key={String(item.id)}><span className="rj-fake-check" />{String(item.label || "Item sem nome")}</li>)}</ul> : <p className="rj-muted">Checklist sem itens.</p>)}
@@ -146,6 +151,7 @@ export function BlockPreview({ block }: { block: TemplateBlock }) {
         </div>
       )}
       {block.type === "file_upload" && <p className="rj-muted">{block.config.fileMode === "resource_pack" ? "Arquivos-modelo disponíveis para baixar." : `Espaço para anexar ${Number(block.config.minFiles ?? 1)} arquivo(s).`}</p>}
+      </>}
     </article>
   );
 }

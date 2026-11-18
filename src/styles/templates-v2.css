@@ -79,9 +79,10 @@
 .rj-fake-button { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: var(--border-subtle); border-radius: var(--radius-sm); background: #fff; color: var(--color-primary); font-size: 13px; font-weight: 700; }
 .rj-fake-button.is-primary { background: var(--color-primary); color: #fff; border-color: transparent; }
 .rj-preview-block { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: var(--border-subtle); border-radius: var(--radius-sm); background: #fff; }
-.rj-preview-block header { display: flex; align-items: center; gap: 8px; color: var(--color-primary); }
-.rj-preview-block header strong { color: var(--color-heading); font-size: 15px; }
-.rj-preview-block header small { margin-left: auto; color: var(--color-muted); font-size: 12px; }
+.rj-preview-block.is-collapsed { padding-block: 10px; border-left: 3px solid var(--color-border); }
+.rj-preview-block-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: 0; background: transparent; color: var(--color-primary); text-align: left; cursor: pointer; }
+.rj-preview-block-head strong { color: var(--color-heading); font-size: 15px; }
+.rj-preview-block-head small { margin-left: auto; color: var(--color-muted); font-size: 12px; }
 .rj-preview-text { margin: 0; white-space: pre-wrap; color: var(--color-ink); font-size: 13.5px; line-height: 1.5; }
 .rj-preview-actions { display: flex; gap: 8px; }
 .rj-preview-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
