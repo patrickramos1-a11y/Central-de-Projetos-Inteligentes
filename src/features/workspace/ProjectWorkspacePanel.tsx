@@ -31,7 +31,7 @@ function workspaceReferenceUpdateParts(reference: WorkspaceReference): { date: s
   };
 }
 
-export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, currentUser, onChanged, onOpenStep, stepCount, templateName, onApplyTemplate }: { baseUrl: string; projectId: string; contextPrompts: ContextPrompt[]; currentUser: WorkspaceActor | null; onChanged: (overview: WorkspaceOverview) => void; onOpenStep: (stepId: string) => void; stepCount?: number; templateName?: string | null; onApplyTemplate?: () => void }) {
+export function ProjectWorkspacePanel({ baseUrl, projectId, projectName, companyName, contextPrompts, currentUser, onChanged, onOpenStep, stepCount, templateName, onApplyTemplate }: { baseUrl: string; projectId: string; projectName: string; companyName?: string | null; contextPrompts: ContextPrompt[]; currentUser: WorkspaceActor | null; onChanged: (overview: WorkspaceOverview) => void; onOpenStep: (stepId: string) => void; stepCount?: number; templateName?: string | null; onApplyTemplate?: () => void }) {
   const [workspace, setWorkspace] = useState<ProjectWorkspace | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -188,7 +188,7 @@ export function ProjectWorkspacePanel({ baseUrl, projectId, contextPrompts, curr
   return <section className="workspace-stage-body" aria-label="Local de trabalho do projeto">
     <div className="workspace-stage-intro">
       <div><h2>Local de trabalho</h2><p>Registre onde estao os materiais e as conversas deste projeto.</p>{workspace.guidance && <p className="workspace-template-guidance">{workspace.guidance}</p>}</div>
-      <div className="workspace-stage-actions">{onApplyTemplate && <button className="secondary-button" type="button" onClick={onApplyTemplate} title={templateName ? `Template atual: ${templateName}` : "Aplicar um template a este projeto"}><Layers3 size={15} /> Aplicar template</button>}<button className="secondary-button" type="button" onClick={() => void copyText(buildJourneyLink(projectId), "Link da jornada")}><Link2 size={15} /> Compartilhar</button><span className={`workspace-state ${workspace.status}`}>{workspaceStatusLabel(workspace.status)}</span></div>
+      <div className="workspace-stage-actions">{onApplyTemplate && <button className="secondary-button" type="button" onClick={onApplyTemplate} title={templateName ? `Template atual: ${templateName}` : "Aplicar um template a este projeto"}><Layers3 size={15} /> Aplicar template</button>}<button className="secondary-button" type="button" onClick={() => void copyText(buildJourneyLink(projectId, undefined, window.location.href, { company: companyName, project: projectName }), "Link da jornada")}><Link2 size={15} /> Compartilhar</button><span className={`workspace-state ${workspace.status}`}>{workspaceStatusLabel(workspace.status)}</span></div>
     </div>
     {onApplyTemplate && stepCount === 0 && <div className="rj-apply-template-hint"><Layers3 size={20} /><div><strong>Este projeto tem só o Local de trabalho.</strong><span>Quando decidir seguir com o projeto, aplique um template para criar as etapas de uma vez.</span></div><button className="primary-button" type="button" onClick={onApplyTemplate}>Aplicar template</button></div>}
     {missing.length > 0 && <p className="workspace-missing">Falta {missing.join(" e ")}.</p>}

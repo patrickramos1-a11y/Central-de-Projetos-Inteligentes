@@ -119,7 +119,11 @@ export default {
       }
 
       if (env.ASSETS) {
-        return env.ASSETS.fetch(request);
+        const assetResponse = await env.ASSETS.fetch(request);
+        if (request.method === "GET" && assetResponse.headers.get("content-type")?.includes("text/html") && url.searchParams.get("project")) {
+          return withJourneyPreview(assetResponse, env.DB, url);
+        }
+        return assetResponse;
       }
 
       return jsonError("Rota nao encontrada.", 404);
@@ -128,6 +132,30 @@ export default {
     }
   },
 };
+
+async function withJourneyPreview(response: Response, db: D1Database, url: URL) {
+  const projectId = url.searchParams.get("project")?.trim();
+  if (!projectId) return response;
+  const project = await db.prepare("select p.name, p.company, c.name as client_name from projects p left join clients c on c.id = p.client_id where p.id = ? limit 1").bind(projectId).first<{ name: string; company: string | null; client_name: string | null }>();
+  if (!project) return response;
+  const company = project.client_name || project.company || "Ramos Engenharia";
+  const title = `${project.name} | ${company} | Ramos Jornadas`;
+  const description = `Jornada de ${project.name} para ${company}. Acesse as etapas, materiais, contextos e entregas deste projeto.`;
+  let html = await response.text();
+  const escapeHtml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;");
+  const safeTitle = escapeHtml(title);
+  const safeDescription = escapeHtml(description);
+  html = html.replace(/<title>[^<]*<\/title>/i, `<title>${safeTitle}</title>`)
+    .replace(/<meta name="description" content="[^"]*"\s*\/>/i, `<meta name="description" content="${safeDescription}" />`)
+    .replace(/<meta property="og:title" content="[^"]*"\s*\/>/i, `<meta property="og:title" content="${safeTitle}" />`)
+    .replace(/<meta property="og:description" content="[^"]*"\s*\/>/i, `<meta property="og:description" content="${safeDescription}" />`)
+    .replace(/<meta name="twitter:title" content="[^"]*"\s*\/>/i, `<meta name="twitter:title" content="${safeTitle}" />`)
+    .replace(/<meta name="twitter:description" content="[^"]*"\s*\/>/i, `<meta name="twitter:description" content="${safeDescription}" />`);
+  const headers = new Headers(response.headers);
+  headers.set("content-type", "text/html; charset=UTF-8");
+  headers.set("cache-control", "no-store");
+  return new Response(html, { status: response.status, headers });
+}
 
 async function handleTableRequest(request: Request, env: Env, tableName = "", id = "", url: URL) {
   const columns = tableColumns[tableName];

@@ -2,8 +2,16 @@ import { WORKSPACE_STEP_ID } from "../workspace/workspaceModel";
 
 export type JourneyLinkTarget = { projectId: string; stepId: string };
 
-export function buildJourneyLink(projectId: string, stepId = WORKSPACE_STEP_ID, source = window.location.href) {
+export type JourneyLinkLabels = { company?: string | null; project?: string | null };
+
+function slugPart(value: string | null | undefined) {
+  return (value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70);
+}
+
+export function buildJourneyLink(projectId: string, stepId = WORKSPACE_STEP_ID, source = window.location.href, labels?: JourneyLinkLabels) {
   const url = new URL(source);
+  const slug = [slugPart(labels?.company), slugPart(labels?.project)].filter(Boolean).join("-");
+  if (slug) url.pathname = `/jornada/${slug}`;
   url.searchParams.set("project", projectId);
   url.searchParams.set("step", stepId);
   return url.toString();
