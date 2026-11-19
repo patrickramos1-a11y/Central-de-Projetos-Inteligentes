@@ -760,6 +760,7 @@ useEffect(() => {    if (view === currentViewRef.current) return;    previousVie
   }, [view, selectedProjectId, selectedStepId]);
 
   const selectedProject = tables.projects.find((project) => project.id === selectedProjectId) ?? null;
+  const selectedProjectClient = selectedProject?.client_id ? tables.clients.find((client) => client.id === selectedProject.client_id) ?? null : null;
   const projectSteps = useMemo(
     () => tables.project_steps.filter((step) => step.project_id === selectedProjectId).sort(byOrder),
     [tables.project_steps, selectedProjectId],
@@ -3023,7 +3024,7 @@ async function applyProjectSummary(summaryId: string): Promise<boolean> {    try
         {clientPageEditing && (() => { const client = tables.clients.find((item) => item.id === clientPageEditing); return client ? <ClientProfileDialog key={client.id} client={client} users={tables.app_users} onClose={() => setClientPageEditing(null)} onSave={saveClientIdentity} /> : null; })()}
 
         {view === "journey" && selectedStepId === WORKSPACE_STEP_ID && selectedProject && <>
-          <section className="journey-hero journey-context-bar"><button className="ghost-button" type="button" onClick={() => setView("projects")}><PanelLeft size={17} /> Projetos</button><div className="journey-context-copy"><span className="eyebrow">Ramos Jornadas</span><h1>{selectedProject.name}</h1><p>{selectedProject.company || "Projeto sem empresa definida"}</p></div></section>
+          <section className="journey-hero journey-context-bar"><button className="ghost-button" type="button" onClick={() => setView("projects")}><PanelLeft size={17} /> Projetos</button><div className="journey-client-identity">{selectedProjectClient && <ClientLogo client={selectedProjectClient} large />}<div className="journey-context-copy"><span className="eyebrow">Cliente</span><h1>{selectedProjectClient?.name || selectedProject.company || "Cliente não definido"}</h1><p className="journey-project-name">{selectedProject.name}</p></div></div></section>
           <section className="journey-layout block-journey-layout">
             <JourneyStepRail ownerType="project" ownerId={selectedProject.id} currentUser={currentUser} steps={[{ id: WORKSPACE_STEP_ID, name: "Local de trabalho", compact_label: "LOCAL TRAB.", step_order: 0, status: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "concluido" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "em_andamento" : "pendente", status_label: overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "organizado" ? "Organizado" : overview.workspaces.find((item) => item.projectId === selectedProject.id)?.status === "parcial" ? "Parcial" : "Não iniciado" }, ...projectSteps]} selectedStepId={WORKSPACE_STEP_ID} onSelectStep={setSelectedStepId} onAdd={() => setStagePickerProjectId(selectedProject.id)} />
             <section className="work-surface block-work-surface"><ProjectWorkspacePanel key={selectedProject.id} baseUrl={cloudflareApiUrl} projectId={selectedProject.id} projectName={selectedProject.name} companyName={selectedProject.company} contextPrompts={selectWorkspaceContextPrompts(tables.prompts)} currentUser={currentUser} onChanged={onWorkspaceChanged} onOpenStep={setSelectedStepId} stepCount={tables.project_steps.filter((step) => step.project_id === selectedProject.id).length} templateName={tables.journey_templates.find((template) => template.id === selectedProject.journey_template_id)?.name ?? null} onApplyTemplate={() => setApplyTemplateProjectId(selectedProject.id)} /></section>
@@ -3037,6 +3038,7 @@ async function applyProjectSummary(summaryId: string): Promise<boolean> {    try
         {view === "journey" && selectedStepId !== WORKSPACE_STEP_ID && currentSecondaryReady && selectedProjectId && loadedProjectDetails.has(selectedProjectId) && selectedProject && selectedStep && (
           <JourneyView
             project={selectedProject}
+            client={selectedProjectClient}
             livePanel={liveJourneyPanel}
             onLivePanelChange={setLiveJourneyPanel}
             workspace={overview.workspaces.find((item) => item.projectId === selectedProject.id)}
@@ -4764,6 +4766,7 @@ const blockCatalog: BlockCatalogItem[] = [
 
 function JourneyView({
   project,
+  client,
   livePanel,
   onLivePanelChange,
   workspace,
@@ -4812,6 +4815,7 @@ function JourneyView({
   onRefreshWorkspace,
 }: {
   project: Project;
+  client: Pick<Client, "name" | "logo_url" | "company"> | null;
   livePanel: JourneyMode;
   onLivePanelChange: (mode: JourneyMode) => void;
   workspace?: WorkspaceOverview;
@@ -5056,10 +5060,13 @@ function JourneyView({
         <button className="ghost-button" onClick={onBack}>
           <PanelLeft size={17} /> Projetos
         </button>
-        <div className="journey-context-copy">
-          <span className="eyebrow">Ramos Jornadas</span>
-          <h1>{project.name}</h1>
-          <p>{project.company || "Projeto sem empresa definida"}</p>
+        <div className="journey-client-identity">
+          {client && <ClientLogo client={client} large />}
+          <div className="journey-context-copy">
+            <span className="eyebrow">Cliente</span>
+            <h1>{client?.name || project.company || "Cliente não definido"}</h1>
+            <p className="journey-project-name">{project.name}</p>
+          </div>
         </div>
         <div className="journey-progress"><ProgressBar value={progress} label="Progresso" detail={`${progress}%`} /></div>
       </section>
